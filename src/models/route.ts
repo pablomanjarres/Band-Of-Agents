@@ -2,23 +2,25 @@ import type { ModelClient } from './client';
 import { AimlModelClient } from './aiml';
 import { BedrockModelClient } from './bedrock';
 import { GeminiModelClient } from './gemini';
+import { FeatherlessModelClient } from './featherless';
 
 export type AgentRole = 'coordinator' | 'us' | 'eu' | 'latam' | 'brand' | 'reconcile' | 'remediation';
 export type ModelMode = 'aiml' | 'dev';
 
 interface RouteEntry {
   aiml: string;
-  devProvider: 'bedrock' | 'gemini';
+  devProvider: 'bedrock' | 'gemini' | 'featherless';
   devModel: string;
 }
 
 // Each agent runs a different model (multi-model by design). AIML slugs are the
-// main path; dev models mirror what the sibling `noelle` project uses (no Opus 4.8).
+// main path; dev models mirror what the sibling `noelle` project uses (no Opus
+// 4.8), except LATAM which runs an open model via Featherless (partner prize).
 const ROUTES: Record<AgentRole, RouteEntry> = {
   coordinator: { aiml: 'google/gemini-2.5-flash', devProvider: 'gemini', devModel: 'gemini-2.5-flash' },
   us: { aiml: 'anthropic/claude-sonnet-4.5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-sonnet-4-6' },
   eu: { aiml: 'google/gemini-2.5-pro', devProvider: 'gemini', devModel: 'gemini-2.5-pro' },
-  latam: { aiml: 'anthropic/claude-sonnet-4.5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-sonnet-4-6' },
+  latam: { aiml: 'meta-llama/llama-3.1-8b-instruct', devProvider: 'featherless', devModel: 'meta-llama/Meta-Llama-3.1-8B-Instruct' },
   brand: { aiml: 'anthropic/claude-haiku-4.5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-haiku-4-5-20251001-v1:0' },
   reconcile: { aiml: 'anthropic/claude-opus-4-5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-opus-4-6-v1' },
   remediation: { aiml: 'anthropic/claude-sonnet-4.5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-sonnet-4-6' },
@@ -30,7 +32,7 @@ export function activeMode(): ModelMode {
   return process.env.MODEL_MODE === 'dev' ? 'dev' : 'aiml';
 }
 
-// AIML is the default/main path; 'dev' routes to Bedrock/Vertex to save AIML credit.
+// AIML is the default/main path; 'dev' routes to Bedrock/Vertex/Featherless to save AIML credit.
 export function modelFor(role: AgentRole, mode: ModelMode = activeMode()): ModelClient {
   const entry = ROUTES[role];
   if (mode === 'aiml') {
@@ -39,6 +41,11 @@ export function modelFor(role: AgentRole, mode: ModelMode = activeMode()): Model
     return new AimlModelClient({ apiKey, model: entry.aiml });
   }
   if (entry.devProvider === 'bedrock') return new BedrockModelClient({ model: entry.devModel });
+  if (entry.devProvider === 'featherless') {
+    const key = process.env.FEATHERLESS_API_KEY;
+    if (!key) throw new Error(`FEATHERLESS_API_KEY is not set but ${role} routes to Featherless in dev mode.`);
+    return new FeatherlessModelClient({ apiKey: key, model: process.env.FEATHERLESS_MODEL ?? entry.devModel });
+  }
   return new GeminiModelClient({ model: entry.devModel });
 }
 

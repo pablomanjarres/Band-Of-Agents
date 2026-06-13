@@ -16,5 +16,6 @@ describe('model routing', () => {
     expect(r.reconcile).toBe('bedrock:us.anthropic.claude-opus-4-6-v1');
     expect(r.brand).toBe('bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0');
     expect(r.eu).toBe('gemini:gemini-2.5-pro');
+    expect(r.latam).toBe('featherless:meta-llama/Meta-Llama-3.1-8B-Instruct');
   });
 });
