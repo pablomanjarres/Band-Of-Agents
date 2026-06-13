@@ -38,6 +38,12 @@ async function main(): Promise<void> {
     return img.url ? `url:${img.url}` : img.b64 ? `b64 image, ${img.b64.length} chars` : 'no image returned';
   });
 
+  await probe('featherless (LATAM open model)', async () => {
+    const m = modelFor('latam', 'dev');
+    const r = await m.complete({ system: 'Reply with exactly one word.', messages: [{ role: 'user', content: 'Say OK.' }], maxTokens: 16 });
+    return `[${m.model}] ${r.text}`;
+  });
+
   process.exit(0);
 }
 
