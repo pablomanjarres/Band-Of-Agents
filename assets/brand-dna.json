@@ -1,0 +1,6 @@
+{
+  "brand": "Lumavida",
+  "voice": ["confident", "warm", "evidence-forward", "energetic"],
+  "approvedVocabulary": ["supports", "contributes to", "everyday wellness", "feel your best"],
+  "forbiddenPhrases": ["cure", "treat disease", "prevent disease", "miracle", "guaranteed results"]
+}

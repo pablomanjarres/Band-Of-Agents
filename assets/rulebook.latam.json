@@ -1,0 +1,40 @@
+{
+  "region": "LATAM",
+  "label": "Latin America (illustrative; e.g. Brazil CONAR, Mexico PROFECO). Demo rules, not legal advice.",
+  "notLegalAdvice": true,
+  "rules": [
+    {
+      "id": "latam-localization",
+      "region": "LATAM",
+      "category": "localization",
+      "severity": "warn",
+      "check": "Copy and disclosures should be localized into the market language (Portuguese for Brazil, Spanish for most of LATAM).",
+      "requiredDisclosure": "Localized copy"
+    },
+    {
+      "id": "latam-health-substantiation",
+      "region": "LATAM",
+      "category": "health_claim",
+      "severity": "block",
+      "check": "Health and efficacy claims for supplements require substantiation and, in several markets, regulatory registration before promotion.",
+      "requiredDisclosure": "Local substantiation / registration"
+    },
+    {
+      "id": "latam-self-regulation",
+      "region": "LATAM",
+      "category": "comparative",
+      "severity": "warn",
+      "check": "Advertising self-regulation bodies (e.g. CONAR in Brazil) expect truthful, non-misleading, non-denigrating claims.",
+      "sourceUrl": "http://www.conar.org.br"
+    },
+    {
+      "id": "latam-consumer-protection",
+      "region": "LATAM",
+      "category": "free_offer",
+      "severity": "warn",
+      "check": "Consumer-protection rules (e.g. Mexico PROFECO) require clear terms for promotions and 'free' offers.",
+      "requiredDisclosure": "Promotion terms",
+      "sourceUrl": "https://www.gob.mx/profeco"
+    }
+  ]
+}
