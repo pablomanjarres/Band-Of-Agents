@@ -1,1 +1,1 @@
-# Band-Of-Agents
+# Band Of Agents
