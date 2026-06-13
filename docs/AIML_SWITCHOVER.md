@@ -27,5 +27,23 @@ switch, so we can test without burning AIML credit.
 
 ## Per-agent routing
 See `describeRoutes()` in `src/models/route.ts`. In `aiml` mode each role uses an
-AIML slug; in `dev` mode each maps to the equivalent Bedrock/Vertex model id.
+AIML slug; in `dev` mode each maps to the equivalent Bedrock/Vertex/Featherless model id.
 Image generation (remediation) is AIML-only and has no dev equivalent.
+
+## Keep the models different after the switch
+Multi-model by design is the point of this review board (and a judging criterion):
+even on full AIML, each agent should run a DIFFERENT model, not one shared model.
+AIML's single gateway hosts Claude, Gemini, GPT, and open-source models, so preserve
+the variety through it. The `aiml` column in `ROUTES` (`src/models/route.ts`) already
+assigns a distinct slug per role, for example:
+- Coordinator: `google/gemini-2.5-flash`
+- US reviewer: `anthropic/claude-sonnet-4.5`
+- EU reviewer: `google/gemini-2.5-pro`
+- LATAM reviewer: an open model (e.g. `meta-llama/llama-3.1-8b-instruct`, or a Qwen/Mistral slug)
+- Brand reviewer: `anthropic/claude-haiku-4.5`
+- Reconcile: a strong model (e.g. `anthropic/claude-opus-4-5`)
+- Remediation: `anthropic/claude-sonnet-4.5` for copy, `google/gemini-2.5-flash-image` for the image
+
+Do NOT collapse every agent onto one model. Verify each slug resolves via
+`GET https://api.aimlapi.com/models` before the demo (AIML's exact Claude 4.6 and
+open-model slugs vary).
