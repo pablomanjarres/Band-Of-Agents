@@ -15,4 +15,16 @@ Patterns captured after corrections, so the same mistake does not recur.
 - Rule: when a partner API is a prize target, make it the default route and the cost-savers an explicit, single-switch, documented override (not the other way around).
 
 ## 2026-06-13: Background jobs must isolate edits in a worktree
-- Observation: this background session cannot edit the shared checkout; it must EnterWorktree first. Working in `.claude/worktrees/band-review-board` (branch worktree-band-review-board). No commits, no remote, per the user's constraint. The user's `test` branch in the main checkout is untouched.
+- Observation: this background session cannot edit the shared checkout; it must EnterWorktree first. Working in `.claude/worktrees/band-review-board` (branch worktree-band-review-board). The user's `test` branch in the main checkout is untouched.
+
+## 2026-06-13: Commit policy changed mid-session
+- The initial instruction was no commits/remote; the user later asked to "make a ton of commits". Commit locally and granularly; still no push unless asked. Per CLAUDE.md, never add Co-Authored-By trailers.
+
+## 2026-06-13: band.ai (@band-ai/sdk) live-integration gotchas
+Found while getting the live multi-agent run working. Normalize at the transport (`src/band/real.ts`), not in each agent.
+- Participant/sender `type` is capitalized ('Agent'/'User'); lowercase before comparing to 'agent'/'user'.
+- `sendEvent` message_type must be one of: tool_call, tool_result, thought, error, task. Map custom labels (intake/review/verdict/...) to 'thought'.
+- Delivered message content is prefixed with `@[[uuid]]` mention markup; strip it before JSON.parse.
+- `getParticipants` exposes the participant NAME (e.g. 'Reconcile'), not the namespaced handle (`@user/reconcile`). Resolve targets by matching the handle's last segment against the name (`src/agents/handles.ts`).
+- A reconnected agent does NOT auto-rejoin an existing room (no `autoSubscribeExistingRooms` on `Agent.create`); after a restart, add the agents to a fresh room to trigger room_added.
+- Inbound delivery is by @mention only: a human reply must @mention the agent (a real mention chip, not plain text) to reach it.
