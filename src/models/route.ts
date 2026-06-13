@@ -13,17 +13,21 @@ interface RouteEntry {
   devModel: string;
 }
 
-// Each agent runs a different model (multi-model by design). AIML slugs are the
-// main path; dev models mirror what the sibling `noelle` project uses (no Opus
-// 4.8), except LATAM which runs an open model via Featherless (partner prize).
+// Each agent runs a different model (multi-model by design). On the AIML main
+// path, models are spread across families by task fit to use AI/ML API to its
+// fullest (GPT for claim reasoning, Gemini for strict rules, Llama for the open
+// reviewer, Claude for brand voice, DeepSeek for rewriting). Dev models mirror
+// what the sibling `noelle` project uses (no Opus 4.8), except LATAM which runs
+// an open model via Featherless (partner prize). Note: coordinator and reconcile
+// are orchestration/rule-based and do not call a model; their entries are nominal.
 const ROUTES: Record<AgentRole, RouteEntry> = {
   coordinator: { aiml: 'google/gemini-2.5-flash', devProvider: 'gemini', devModel: 'gemini-2.5-flash' },
-  us: { aiml: 'anthropic/claude-sonnet-4.5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-sonnet-4-6' },
+  us: { aiml: 'openai/gpt-5-2', devProvider: 'bedrock', devModel: 'us.anthropic.claude-sonnet-4-6' },
   eu: { aiml: 'google/gemini-2.5-pro', devProvider: 'gemini', devModel: 'gemini-2.5-pro' },
   latam: { aiml: 'meta-llama/llama-3.1-8b-instruct', devProvider: 'featherless', devModel: 'meta-llama/Meta-Llama-3.1-8B-Instruct' },
   brand: { aiml: 'anthropic/claude-haiku-4.5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-haiku-4-5-20251001-v1:0' },
   reconcile: { aiml: 'anthropic/claude-opus-4-5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-opus-4-6-v1' },
-  remediation: { aiml: 'anthropic/claude-sonnet-4.5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-sonnet-4-6' },
+  remediation: { aiml: 'deepseek/deepseek-chat', devProvider: 'bedrock', devModel: 'us.anthropic.claude-sonnet-4-6' },
 };
 
 const IMAGE_AIML_MODEL = 'google/gemini-2.5-flash-image';

@@ -2,12 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { describeRoutes } from '../src/models/route';
 
 describe('model routing', () => {
-  it('routes every role through AIML in aiml mode (the main path)', () => {
+  it('routes every role through AIML and spans diverse model families in aiml mode', () => {
     const r = describeRoutes('aiml');
-    expect(r.reconcile.startsWith('aiml:anthropic/')).toBe(true);
-    expect(r.us.startsWith('aiml:anthropic/')).toBe(true);
-    expect(r.eu.startsWith('aiml:google/')).toBe(true);
-    expect(r.coordinator.startsWith('aiml:google/')).toBe(true);
+    expect(Object.values(r).every((v) => v.startsWith('aiml:'))).toBe(true);
+    const families = new Set(Object.values(r).map((v) => v.replace('aiml:', '').split('/')[0] ?? ''));
+    expect(families.size).toBeGreaterThanOrEqual(4);
   });
 
   it('uses Noelle-aligned provider models in dev mode (no Opus 4.8)', () => {

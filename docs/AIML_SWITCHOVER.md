@@ -30,20 +30,20 @@ See `describeRoutes()` in `src/models/route.ts`. In `aiml` mode each role uses a
 AIML slug; in `dev` mode each maps to the equivalent Bedrock/Vertex/Featherless model id.
 Image generation (remediation) is AIML-only and has no dev equivalent.
 
-## Keep the models different after the switch
-Multi-model by design is the point of this review board (and a judging criterion):
-even on full AIML, each agent should run a DIFFERENT model, not one shared model.
-AIML's single gateway hosts Claude, Gemini, GPT, and open-source models, so preserve
-the variety through it. The `aiml` column in `ROUTES` (`src/models/route.ts`) already
-assigns a distinct slug per role, for example:
-- Coordinator: `google/gemini-2.5-flash`
-- US reviewer: `anthropic/claude-sonnet-4.5`
-- EU reviewer: `google/gemini-2.5-pro`
-- LATAM reviewer: an open model (e.g. `meta-llama/llama-3.1-8b-instruct`, or a Qwen/Mistral slug)
-- Brand reviewer: `anthropic/claude-haiku-4.5`
-- Reconcile: a strong model (e.g. `anthropic/claude-opus-4-5`)
-- Remediation: `anthropic/claude-sonnet-4.5` for copy, `google/gemini-2.5-flash-image` for the image
+## Use diverse, best-fit model families on AIML
+Multi-model by design is the point of this review board and a judging criterion, and
+AI/ML API is used to its fullest when each model-calling agent runs the model FAMILY
+best at its specific job, drawn from across AIML's catalog (Claude, Gemini, GPT,
+DeepSeek, Grok, Llama, Qwen, Mistral, ...), not just Claude and Gemini. Do NOT collapse
+every agent onto one provider. The `aiml` column in `ROUTES` (`src/models/route.ts`)
+spreads families by task fit:
+- US reviewer (claim substantiation, careful reasoning): `openai/gpt-5-2`
+- EU reviewer (strict rule-following): `google/gemini-2.5-pro`
+- LATAM reviewer (localization, open model): `meta-llama/llama-3.1-8b-instruct`
+- Brand reviewer (voice and tone nuance): `anthropic/claude-haiku-4.5`
+- Remediation (copy rewrite): `deepseek/deepseek-chat`; image (Nano Banana): `google/gemini-2.5-flash-image`
 
-Do NOT collapse every agent onto one model. Verify each slug resolves via
-`GET https://api.aimlapi.com/models` before the demo (AIML's exact Claude 4.6 and
-open-model slugs vary).
+Coordinator and Reconcile are orchestration/rule-based in this build and do not call a
+model; their ROUTES entries are nominal. Choose the family best at each task (reasoning,
+rule-following, multilingual, creative voice, code, ...), and verify each slug resolves
+via `GET https://api.aimlapi.com/models` before the demo (AIML's exact slugs vary).
