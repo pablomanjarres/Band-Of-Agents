@@ -43,8 +43,9 @@ export function modelFor(role: AgentRole, mode: ModelMode = activeMode()): Model
   if (entry.devProvider === 'bedrock') return new BedrockModelClient({ model: entry.devModel });
   if (entry.devProvider === 'featherless') {
     const key = process.env.FEATHERLESS_API_KEY;
-    if (!key) throw new Error(`FEATHERLESS_API_KEY is not set but ${role} routes to Featherless in dev mode.`);
-    return new FeatherlessModelClient({ apiKey: key, model: process.env.FEATHERLESS_MODEL ?? entry.devModel });
+    if (key) return new FeatherlessModelClient({ apiKey: key, model: process.env.FEATHERLESS_MODEL ?? entry.devModel });
+    console.warn(`[route] FEATHERLESS_API_KEY not set; ${role} falling back to Bedrock claude-sonnet-4-6.`);
+    return new BedrockModelClient({ model: 'us.anthropic.claude-sonnet-4-6' });
   }
   return new GeminiModelClient({ model: entry.devModel });
 }
