@@ -147,6 +147,7 @@ export class FakeBandTransport implements BandTransport {
       content,
       messageType,
       mentions,
+      metadata,
       seq,
     });
     if (kind !== 'message') return;
