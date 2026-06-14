@@ -72,6 +72,12 @@ export class BandBoard {
         board,
         remediationHandle: REMEDIATION_HANDLE,
         reconcileHandle: RECONCILE_HANDLE,
+        // Recruit only the reviewers the asset's markets target (Brand always joins).
+        regionHandles: {
+          US: '@pablomanjarres/us-reviewer',
+          EU: '@pablomanjarres/eu-reviewer',
+          LATAM: '@pablomanjarres/latam-reviewer',
+        },
         ...(this.opts.lookupCampaign ? { lookupCampaign: this.opts.lookupCampaign } : {}),
       }),
     });
@@ -118,6 +124,8 @@ export class BandBoard {
       onMessage: makeReconcile({
         board,
         expectedRegions: ['US', 'EU', 'LATAM', 'BRAND'],
+        // Wait only for the market-bound regions the asset targets; Brand is always expected.
+        marketRegions: ['US', 'EU', 'LATAM'],
         coordinatorHandle: COORDINATOR_HANDLE,
         remediationHandle: REMEDIATION_HANDLE,
         ...(this.opts.humanHandle ? { humanHandle: this.opts.humanHandle } : {}),
