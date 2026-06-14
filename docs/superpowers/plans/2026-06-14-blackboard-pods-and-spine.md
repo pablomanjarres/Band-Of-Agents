@@ -1609,3 +1609,120 @@ git commit -m "feat(run): wire the pods/board/spine cast on real Band (band.ai)"
 ```
 
 ---
+
+## Phase 6: Web live-board diagram (optional visual layer)
+
+The hackathon demo is the Band room itself, so this phase is optional for the MVP. The research confirmed the live board is derived: `boardState.ts` folds events into state, `pipeline.ts` derives nodes/edges, `PipelineDiagram.tsx` renders. SSE (`api.ts`) and the page reducer (`LiveBoardPage.tsx`) are topology-agnostic and need no change.
+
+### Task 6.1: Track pods, phase, and terminal in board state
+
+**Files:**
+- Modify: `web/src/boardState.ts` (add fields + reducer cases)
+- Modify: `web/src/types.ts` (add the new event variants, mirroring `src/board/events.ts`)
+- Test: `web/src/boardState.test.ts` (new, if the web has a test runner; otherwise assert via the diagram test in 6.2)
+
+- [ ] **Step 1: Add the new event types to `web/src/types.ts`** to match `src/board/events.ts` (`workitem`, `debate`, `pod-finding`, `mediation`, `adjudication`, `terminal`).
+
+- [ ] **Step 2: Extend `BoardState`** with:
+
+```typescript
+  pods: Record<string, { filed: boolean; conflicts: number }>; // 'claims' | 'regulatory' | 'brand'
+  phase: 'intake' | 'deliberating' | 'reconciling' | 'deciding' | 'terminal';
+  terminal?: 'published' | 'spiked' | 'escalated';
+```
+
+Initialize in `initialBoardState()`: `pods: {}`, `phase: 'intake'`.
+
+- [ ] **Step 3: Add reducer cases in `applyEvent`:**
+
+```typescript
+    case 'intake': return { ...prev, asset: event.asset, phase: 'deliberating', events: [...prev.events, event] };
+    case 'pod-finding': return { ...prev, pods: { ...prev.pods, [event.pod]: { filed: true, conflicts: event.conflicts } }, phase: 'reconciling', events: [...prev.events, event] };
+    case 'adjudication': return { ...prev, phase: 'deciding', events: [...prev.events, event] };
+    case 'terminal': return { ...prev, phase: 'terminal', terminal: event.decision, status: 'complete', events: [...prev.events, event] };
+    case 'workitem': case 'debate': case 'mediation': return { ...prev, events: [...prev.events, event] };
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add web/src/boardState.ts web/src/types.ts
+git commit -m "feat(web): fold pod findings, phase, and terminal state into the board model"
+```
+
+### Task 6.2: Derive pods + board + spine nodes/edges
+
+**Files:**
+- Modify: `web/src/pipeline.ts` (replace `NodeId`, `EdgeId`, and `buildPipelineModel`)
+
+- [ ] **Step 1: Replace the `NodeId` and `EdgeId` unions**
+
+```typescript
+export type NodeId =
+  | 'asset'
+  | 'pod:claims' | 'pod:regulatory' | 'pod:brand'
+  | 'board' | 'adjudicator'
+  | 'published' | 'spiked' | 'human';
+
+export type EdgeId =
+  | 'asset-claims' | 'asset-regulatory' | 'asset-brand'
+  | 'claims-board' | 'regulatory-board' | 'brand-board'
+  | 'board-adjudicator'
+  | 'adjudicator-published' | 'adjudicator-spiked' | 'adjudicator-human'
+  | 'adjudicator-asset'; // the recommit loop
+```
+
+- [ ] **Step 2: Replace `buildPipelineModel` to derive from `BoardState.pods`, `phase`, and `terminal`** (each pod node lit when `pods[pod].filed`; the board lit during `reconciling`/`deciding`; the adjudicator lit during `deciding`/`terminal`; the terminal node lit by `terminal`; the recommit edge lit if any `revised`/`adjudication{decision:'remediate'}` event is present). Keep the function pure (state in, model out) exactly as today so the existing `PipelineDiagram` contract holds.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add web/src/pipeline.ts
+git commit -m "feat(web): derive the pods/board/spine diagram model from board state"
+```
+
+### Task 6.3: Render pods, board, and the spine
+
+**Files:**
+- Modify: `web/src/components/PipelineDiagram.tsx`
+
+- [ ] **Step 1:** Lay out three pod containers (left), the board (center), the adjudicator and the terminals (right), and the recommit edge looping back to the asset, replacing the old `coordinator/reconcile/remediation/publish/compliance` node refs with the new `NodeId` set. Mirror the visual language in `orchestration-proposals.html` (pods as labelled groups, a decision spine, terminal nodes). Update the legend.
+
+- [ ] **Step 2:** Manually verify with `pnpm --dir web dev`, drive a review, and confirm the diagram shows pods filling, the board reconciling, and a terminal state.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add web/src/components/PipelineDiagram.tsx
+git commit -m "feat(web): render pods, board, and the decision spine on the live board"
+```
+
+---
+
+## Self-Review
+
+**Spec coverage (Proposal 4 -> tasks):**
+- Pods are local pipelines that debate, then file one finding -> Tasks 1.1, 1.3, 1.4, 2.1, 2.2 (pod-lead consolidation + the Regulatory rebuttal round).
+- The board reconciles cross-pod conflict (Mediator) -> Task 3.1, plus the Adjudicator's mediate step (4.2).
+- The decision spine ends in a terminal state (published / spiked / escalated) with one recommit loop -> Task 4.2 (adjudicator), 4.1 (conductor re-entry), proven in 5.4.
+- Conductor sequences, Risk Adjudicator alone summons the human -> Tasks 4.1, 4.2.
+- Multi-model + cross-framework (Featherless scout/latam) -> Task 5.1.
+- Band is the collaboration layer (directed @mentions, sendEvent reasoning) -> every agent task; real wiring 5.6.
+- The full cast -> 5.3 wires all 16 agents + the human.
+
+**Known MVP simplifications (called out, not hidden):**
+- Within the Claims and Brand pods, members run concurrently and the lead consolidates; genuine sequential intra-pod pipelines are a later enhancement. The genuine agent-to-agent debate is the Regulatory rebuttal round (Task 1.2, 1.4).
+- The Disclosure Drafter lives in the Claims pod (drafts required text as a finding) rather than as a separate board agent; the Mediator brokers without a separate Disclosure round. Splitting Disclosure out at the board is a later refinement.
+- `spike` is reached via the human ruling (reject), not an autonomous adjudicator kill; the enum, events, and diagram already carry it.
+
+**Type consistency:** `PodFinding`, `ConflictItem`, `MediationResult`, `AdjudicatorDecision` are defined once in `src/domain/board.ts` (Task 0.1) and imported everywhere. Member reply key is `region` (Regulatory, from `region-reviewer`) or `source` (knowledge-source members); the pod-lead reads `body.region ?? body.source` (Task 1.3). Handles are consistent across Tasks 5.3 and 5.6.
+
+**Placeholder scan:** none. Every code step shows complete code; every run step shows the command and expected outcome.
+
+---
+
+## Execution
+
+Plan complete and saved to `docs/superpowers/plans/2026-06-14-blackboard-pods-and-spine.md`. Phases 0 to 5 are the testable MVP (the full pods -> board -> spine flow on the fake transport, deterministic under `pnpm test`); Phase 5.6 is the real-Band demo wiring; Phase 6 is the optional web diagram.
+
+Recommended sequence: Phase 0 to 5.5 first (the walking skeleton, fully test-backed), then 5.6 once Band agents are registered, then Phase 6 if a visual is wanted for the video.

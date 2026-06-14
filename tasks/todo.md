@@ -4,6 +4,16 @@ Plan derived from `docs/superpowers/specs/2026-06-13-multi-region-review-board-d
 Walking skeleton: prove each rung end to end (run it, show output) before the next.
 Platform: band.ai. Stack: TypeScript, Node 22+, pnpm, ESM. No commits/remote (per user).
 
+## Orchestration redesign (active): Blackboard pods on a decision spine
+Full plan: `docs/superpowers/plans/2026-06-14-blackboard-pods-and-spine.md` (design: `docs/superpowers/specs/2026-06-14-orchestration-redesign-proposals.md`, Proposal 4). Replaces the scatter-gather (coordinator broadcast + deterministic reconcile) with pods that debate, a board that reconciles, and a spine that ends in a terminal state.
+- [ ] Phase 0: board domain schemas (work-items, pod findings, conflicts, adjudication).
+- [ ] Phase 1: knowledge-source shell, pod-lead, Regulatory debate (rebuttal round).
+- [ ] Phase 2: Claims and Brand pod members.
+- [ ] Phase 3: Mediator at the board.
+- [ ] Phase 4: Conductor + Risk Adjudicator (the decision spine).
+- [ ] Phase 5: routing, board events, full wiring, walking-skeleton integration, real Band.
+- [ ] Phase 6 (optional): web live-board diagram (pods + board + spine).
+
 ## Phase 0: Scaffolding -- DONE
 - [x] pnpm + TypeScript ESM project (package.json, tsconfig, vitest, MIT LICENSE, README).
 - [x] Domain types + zod schemas.
