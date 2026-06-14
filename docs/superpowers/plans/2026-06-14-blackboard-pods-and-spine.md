@@ -689,4 +689,312 @@ git add test/regulatory-pod.test.ts
 git commit -m "test(agents): regulatory pod produces a single conflict-bearing PodFinding through a debate"
 ```
 
+> **MVP note:** within the Claims and Brand pods, members run concurrently and the pod-lead consolidates (the pod boundary and consolidation are real; the genuine agent-to-agent exchange is the Regulatory rebuttal round). Sequential intra-pod pipelines (Scout seeds work-items, then peers consume them) are a later enhancement and are not required for the win condition.
+
+---
+
+## Phase 2: Claims and Brand pod members
+
+### Task 2.1: Pod member configs over the knowledge-source shell
+
+**Files:**
+- Create: `src/agents/pod-members.ts`
+- Test: `test/claims-pod.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+// test/claims-pod.test.ts
+import { describe, expect, it } from 'vitest';
+import { FakeBandTransport } from '../src/band/fake';
+import { makePodLead } from '../src/agents/pod-lead';
+import { makeScout, makeClaimEvidence, makePrecedent, makeDisclosure } from '../src/agents/pod-members';
+import { StubModelClient } from '../src/models/client';
+import { loadAsset } from '../src/domain/load';
+
+const ASSETS = new URL('../assets/', import.meta.url).pathname;
+
+describe('claims pod', () => {
+  it('files one claims PodFinding carrying the unsupported-claim finding', async () => {
+    const asset = loadAsset(`${ASSETS}sample-asset.json`);
+    const scout = new StubModelClient(() => ({ text: '', json: { workItems: [{ id: 'w1', kind: 'claim', text: asset.claim, surfaces: ['headline'] }] } }));
+    const ce = new StubModelClient(() => ({ text: '', json: { findings: [{ category: 'claim', severity: 'warn', claim: asset.claim, rationale: 'needs a source' }] } }));
+    const prec = new StubModelClient(() => ({ text: '', json: { findings: [] } }));
+    const disc = new StubModelClient(() => ({ text: '', json: { findings: [] } }));
+
+    const filed: string[] = [];
+    const room = new FakeBandTransport('r');
+    await room.connectAgent({ agentId: 'adj', name: 'Adjudicator', handle: '@adjudicator', onMessage: async (m) => { filed.push(m.content); } });
+    await room.connectAgent({ agentId: 'lead', name: 'Claims Lead', handle: '@claims-lead', onMessage: makePodLead({ pod: 'claims', members: ['@scout', '@claim-evidence', '@precedent', '@disclosure'], memberKeys: ['scout', 'claim-evidence', 'precedent', 'disclosure'], reportToHandle: '@adjudicator', debate: false }) });
+    await room.connectAgent({ agentId: 'scout', name: 'Scout', handle: '@scout', onMessage: makeScout(scout) });
+    await room.connectAgent({ agentId: 'ce', name: 'Claim & Evidence', handle: '@claim-evidence', onMessage: makeClaimEvidence(ce) });
+    await room.connectAgent({ agentId: 'prec', name: 'Precedent', handle: '@precedent', onMessage: makePrecedent(prec) });
+    await room.connectAgent({ agentId: 'disc', name: 'Disclosure', handle: '@disclosure', onMessage: makeDisclosure(disc) });
+
+    room.post('cond', JSON.stringify(asset), [{ id: 'lead' }]);
+    await room.drain();
+
+    expect(filed).toHaveLength(1);
+    const pf = JSON.parse(filed[0]);
+    expect(pf.pod).toBe('claims');
+    expect(pf.findings.some((f: { rationale: string }) => f.rationale.includes('source'))).toBe(true);
+    expect(pf.conflicts).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run test/claims-pod.test.ts`
+Expected: FAIL, cannot resolve `../src/agents/pod-members`.
+
+- [ ] **Step 3: Implement `src/agents/pod-members.ts`**
+
+```typescript
+// src/agents/pod-members.ts
+// Pod members and board specialists, all configs over the knowledge-source shell.
+import type { AgentHandler } from '../band/types';
+import type { ModelClient } from '../models/client';
+import { makeKnowledgeSource } from './knowledge-source';
+import { SCOUT_OUTPUT_JSON_SCHEMA } from '../domain/board';
+
+// Shared output schema for finding-producing members.
+export const FINDINGS_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          category: { type: 'string' },
+          severity: { type: 'string', enum: ['block', 'warn', 'info'] },
+          claim: { type: 'string' },
+          rationale: { type: 'string' },
+          ruleId: { type: 'string' },
+          requiredDisclosure: { type: ['string', 'null'] },
+        },
+        required: ['category', 'severity', 'claim', 'rationale'],
+      },
+    },
+  },
+  required: ['findings'],
+} as const;
+
+// Claims pod ------------------------------------------------------------
+export const makeScout = (model: ModelClient, reportToHandle = '@claims-lead'): AgentHandler =>
+  makeKnowledgeSource({
+    role: 'scout', reviewerName: 'Scout', model, reportToHandle, eventType: 'workitem',
+    jsonSchema: SCOUT_OUTPUT_JSON_SCHEMA,
+    system: 'You are the Scout. Read the marketing asset and extract the discrete risky surfaces (factual or efficacy claims, comparative claims, calls to action, the image) as work-items. Return JSON { workItems: [{ id, kind, text, surfaces }] }.',
+  });
+
+export const makeClaimEvidence = (model: ModelClient, reportToHandle = '@claims-lead'): AgentHandler =>
+  makeKnowledgeSource({
+    role: 'claim-evidence', reviewerName: 'Claim & Evidence', model, reportToHandle,
+    jsonSchema: FINDINGS_JSON_SCHEMA,
+    system: 'You are the Claim & Evidence reviewer. For each factual or efficacy claim, decide if it is substantiated by the asset\'s evidence. Flag unsupported claims as a finding with severity "warn" and rationale demanding a source. Return JSON { findings: [...] }. This is not legal advice.',
+  });
+
+export const makePrecedent = (model: ModelClient, reportToHandle = '@claims-lead'): AgentHandler =>
+  makeKnowledgeSource({
+    role: 'precedent', reviewerName: 'Precedent Librarian', model, reportToHandle,
+    jsonSchema: FINDINGS_JSON_SCHEMA,
+    system: 'You are the Precedent Librarian. Attach any relevant prior ruling to the claims as informational findings (category "precedent", severity "info"). Return JSON { findings: [...] }.',
+  });
+
+export const makeDisclosure = (model: ModelClient, reportToHandle = '@claims-lead'): AgentHandler =>
+  makeKnowledgeSource({
+    role: 'disclosure', reviewerName: 'Disclosure Drafter', model, reportToHandle,
+    jsonSchema: FINDINGS_JSON_SCHEMA,
+    system: 'You are the Disclosure Drafter. If a claim requires a mandatory disclosure (for example a typical-results statement or an EU Article 10(2) accompanying statement), produce a finding with severity "info", category "disclosure", and the exact required text in requiredDisclosure. Return JSON { findings: [...] }.',
+  });
+
+// Brand pod -------------------------------------------------------------
+export const makeBrandVoice = (model: ModelClient, reportToHandle = '@brand-lead'): AgentHandler =>
+  makeKnowledgeSource({
+    role: 'brand-voice', reviewerName: 'Brand Voice', model, reportToHandle,
+    jsonSchema: FINDINGS_JSON_SCHEMA,
+    system: 'You are the Brand Voice reviewer. Flag copy that is off-voice or uses forbidden phrasing as findings (severity "warn"). Keep the asset bold and on-brand. Return JSON { findings: [...] }.',
+  });
+
+export const makeChannel = (model: ModelClient, reportToHandle = '@brand-lead'): AgentHandler =>
+  makeKnowledgeSource({
+    role: 'channel', reviewerName: 'Channel Fit', model, reportToHandle,
+    jsonSchema: FINDINGS_JSON_SCHEMA,
+    system: 'You are the Channel Fit reviewer. Check hook, length, and format against the asset\'s channel norms. Flag misfits as findings (severity "warn"). Return JSON { findings: [...] }.',
+  });
+
+export const makeVisual = (model: ModelClient, reportToHandle = '@brand-lead'): AgentHandler =>
+  makeKnowledgeSource({
+    role: 'visual', reviewerName: 'Visual / Image', model, reportToHandle,
+    jsonSchema: FINDINGS_JSON_SCHEMA,
+    system: 'You are the Visual reviewer. Check the image (imagePrompt / imageUrl) for brand fit and visual compliance. Flag issues as findings. Return JSON { findings: [...] }.',
+  });
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pnpm vitest run test/claims-pod.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/agents/pod-members.ts test/claims-pod.test.ts
+git commit -m "feat(agents): pod members (scout, claim-evidence, precedent, disclosure, brand-voice, channel, visual)"
+```
+
+### Task 2.2: Brand pod integration test
+
+**Files:**
+- Test: `test/brand-pod.test.ts`
+
+- [ ] **Step 1: Write the test**
+
+```typescript
+// test/brand-pod.test.ts
+import { describe, expect, it } from 'vitest';
+import { FakeBandTransport } from '../src/band/fake';
+import { makePodLead } from '../src/agents/pod-lead';
+import { makeBrandVoice, makeChannel, makeVisual } from '../src/agents/pod-members';
+import { StubModelClient } from '../src/models/client';
+import { loadAsset } from '../src/domain/load';
+
+const ASSETS = new URL('../assets/', import.meta.url).pathname;
+
+describe('brand pod', () => {
+  it('files one brand PodFinding with no cross-region conflict', async () => {
+    const asset = loadAsset(`${ASSETS}sample-asset.json`);
+    const ok = new StubModelClient(() => ({ text: '', json: { findings: [] } }));
+    const offVoice = new StubModelClient(() => ({ text: '', json: { findings: [{ category: 'voice', severity: 'warn', claim: asset.copy, rationale: 'too clinical' }] } }));
+    const filed: string[] = [];
+    const room = new FakeBandTransport('r');
+    await room.connectAgent({ agentId: 'adj', name: 'Adjudicator', handle: '@adjudicator', onMessage: async (m) => { filed.push(m.content); } });
+    await room.connectAgent({ agentId: 'lead', name: 'Brand Lead', handle: '@brand-lead', onMessage: makePodLead({ pod: 'brand', members: ['@brand-voice', '@channel', '@visual'], memberKeys: ['brand-voice', 'channel', 'visual'], reportToHandle: '@adjudicator', debate: false }) });
+    await room.connectAgent({ agentId: 'bv', name: 'Brand Voice', handle: '@brand-voice', onMessage: makeBrandVoice(offVoice) });
+    await room.connectAgent({ agentId: 'ch', name: 'Channel Fit', handle: '@channel', onMessage: makeChannel(ok) });
+    await room.connectAgent({ agentId: 'vis', name: 'Visual', handle: '@visual', onMessage: makeVisual(ok) });
+
+    room.post('cond', JSON.stringify(asset), [{ id: 'lead' }]);
+    await room.drain();
+
+    expect(filed).toHaveLength(1);
+    const pf = JSON.parse(filed[0]);
+    expect(pf.pod).toBe('brand');
+    expect(pf.findings).toHaveLength(1);
+    expect(pf.conflicts).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 2: Run + commit**
+
+Run: `pnpm vitest run test/brand-pod.test.ts` (Expected: PASS)
+
+```bash
+git add test/brand-pod.test.ts
+git commit -m "test(agents): brand pod files a consolidated finding"
+```
+
+---
+
+## Phase 3: The board (Mediator)
+
+### Task 3.1: Mediator resolves a conflict at the board
+
+The Mediator wakes when the Adjudicator hands it the unresolved conflicts. It makes one model call and posts a `MediationResult` back. (Disclosure text lives in the Claims pod; the Mediator only brokers.)
+
+**Files:**
+- Create: `src/agents/mediator.ts`
+- Test: `test/mediator.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+// test/mediator.test.ts
+import { describe, expect, it } from 'vitest';
+import { FakeBandTransport } from '../src/band/fake';
+import { makeMediator } from '../src/agents/mediator';
+import { StubModelClient } from '../src/models/client';
+
+const mediate = JSON.stringify({
+  kind: 'mediate',
+  conflicts: [{ span: 'boost', blockedBy: ['EU'], passedBy: ['US'], rationale: 'Article 10(2)' }],
+});
+
+describe('mediator', () => {
+  it('posts a MediationResult addressed to the adjudicator', async () => {
+    const model = new StubModelClient(() => ({ text: '', json: { resolved: false, note: 'EU will not move without authorization', requiredDisclosure: null } }));
+    const got: string[] = [];
+    const room = new FakeBandTransport('r');
+    await room.connectAgent({ agentId: 'adj', name: 'Adjudicator', handle: '@adjudicator', onMessage: async (m) => { got.push(m.content); } });
+    await room.connectAgent({ agentId: 'med', name: 'Mediator', handle: '@mediator', onMessage: makeMediator({ model, reportToHandle: '@adjudicator' }) });
+    room.post('adj', mediate, [{ id: 'med' }]);
+    await room.drain();
+    const payload = JSON.parse(got[0]);
+    expect(payload.kind).toBe('mediation');
+    expect(payload.resolved).toBe(false);
+    expect(payload.note).toContain('authorization');
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run test/mediator.test.ts`
+Expected: FAIL, cannot resolve `../src/agents/mediator`.
+
+- [ ] **Step 3: Implement `src/agents/mediator.ts`**
+
+```typescript
+// src/agents/mediator.ts
+import type { AgentHandler } from '../band/types';
+import type { ModelClient } from '../models/client';
+import { matchParticipant } from './handles';
+import { MEDIATION_JSON_SCHEMA } from '../domain/board';
+
+export interface MediatorOptions {
+  model: ModelClient;
+  reportToHandle: string; // '@adjudicator'
+}
+
+export function makeMediator(opts: MediatorOptions): AgentHandler {
+  return async (message, tools) => {
+    let body: { kind?: string; conflicts?: unknown } | null = null;
+    try { body = JSON.parse(message.content); } catch { return; }
+    if (!body || body.kind !== 'mediate') return;
+
+    const res = await opts.model.complete({
+      system: 'You are the Mediator at a marketing compliance review board. Given the conflicts (a span some reviewers block and others pass), propose the smallest resolution that satisfies every mandate. If none exists, set resolved=false. If a disclosure unlocks it, put the exact text in requiredDisclosure. Return JSON. This is not legal advice.',
+      messages: [{ role: 'user', content: `Conflicts: ${JSON.stringify(body.conflicts ?? [])}` }],
+      jsonSchema: MEDIATION_JSON_SCHEMA,
+    });
+    const out = (res.json ?? {}) as { resolved?: boolean; note?: string; requiredDisclosure?: string | null };
+    const result = {
+      kind: 'mediation' as const,
+      resolved: out.resolved ?? false,
+      note: out.note ?? '',
+      requiredDisclosure: out.requiredDisclosure ?? null,
+    };
+    await tools.sendEvent(`Mediator: ${result.resolved ? 'resolved' : 'no movement'}`, 'mediation', { resolved: result.resolved });
+    const target = matchParticipant(await tools.getParticipants(), opts.reportToHandle, 'agent');
+    const mention = target ? [{ id: target.id, handle: target.handle }] : [{ id: message.senderId }];
+    await tools.sendMessage(JSON.stringify(result), mention);
+  };
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pnpm vitest run test/mediator.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/agents/mediator.ts test/mediator.test.ts
+git commit -m "feat(agents): mediator brokers board conflicts into a MediationResult"
+```
+
 ---
