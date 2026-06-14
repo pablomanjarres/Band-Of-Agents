@@ -13,6 +13,7 @@ import { makeRegionReviewer } from '../agents/region-reviewer';
 import { makeBrandReviewer } from '../agents/brand-reviewer';
 import { makeRemediation } from '../agents/remediation';
 import { makeReconcile, type Precedent } from '../agents/reconcile';
+import { buildCrossFrameworkAdapter, CROSS_FRAMEWORK_BRAND_PROMPT } from '../band/cross-framework';
 import type { BrandDna, ContentAsset, Rulebook } from '../domain/types';
 import { translateActivity, type BoardEvent } from './events';
 import { SharedBoard } from './shared';
@@ -132,6 +133,22 @@ export class BandBoard {
         ...(this.opts.logPrecedent ? { logPrecedent: this.opts.logPrecedent } : {}),
       }),
     });
+
+    // Cross-framework advisor (opt-in via XFRAMEWORK_AGENT_ID + AIML_API_KEY): one
+    // reviewer running on the SDK's OpenAI tool-calling framework instead of the
+    // GenericAdapter, so the room visibly spans frameworks, not just models. It
+    // coordinates via the room tools (narrates a thought, posts a brand-voice
+    // finding, @mentions reconcile); it does not file a structured board verdict.
+    if (process.env.XFRAMEWORK_AGENT_ID && process.env.AIML_API_KEY) {
+      await this.transport.connectFrameworkAgent({
+        name: 'Brand Voice (OpenAI framework)',
+        envPrefix: 'XFRAMEWORK',
+        adapter: buildCrossFrameworkAdapter({
+          apiKey: process.env.AIML_API_KEY,
+          systemPrompt: CROSS_FRAMEWORK_BRAND_PROMPT,
+        }),
+      });
+    }
   }
 
   /** Plain-English room chatter -> timeline log lines. Structured diagram state comes from the board. */

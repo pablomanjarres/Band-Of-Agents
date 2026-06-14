@@ -165,6 +165,47 @@ export class RealBandTransport implements BandTransport {
   }
 
   /**
+   * Connect an agent that runs on a DIFFERENT framework adapter than the
+   * GenericAdapter the other agents use (for example the SDK's OpenAI tool-calling
+   * adapter from buildCrossFrameworkAdapter). The caller builds the adapter; here
+   * we just create and run the Agent, so the room visibly spans frameworks. The
+   * adapter drives the room tools itself, so there is no onMessage handler.
+   */
+  async connectFrameworkAgent(opts: {
+    name: string;
+    adapter: Parameters<typeof Agent.create>[0]['adapter'];
+    envPrefix?: string;
+    apiKey?: string;
+    agentId?: string;
+  }): Promise<AgentConnection> {
+    const config = opts.envPrefix
+      ? loadAgentConfigFromEnv({ prefix: opts.envPrefix })
+      : opts.apiKey
+        ? { agentId: opts.agentId ?? '', apiKey: opts.apiKey }
+        : loadAgentConfigFromEnv();
+    const agent = Agent.create({ adapter: opts.adapter, config });
+    dbg(`${opts.name} (cross-framework) connecting (${config.agentId})`);
+    void agent.run({ signals: false });
+    const subscribeRooms = (): void => {
+      const link = (agent as { runtime?: { link?: { subscribeAgentRooms?: () => Promise<void> } } })?.runtime?.link;
+      try {
+        void link?.subscribeAgentRooms?.();
+      } catch (e) {
+        dbg(`${opts.name} subscribe error: ${(e as Error)?.message ?? String(e)}`);
+      }
+    };
+    const initial = setTimeout(subscribeRooms, 1500);
+    const interval = setInterval(subscribeRooms, 8000);
+    return {
+      stop: async () => {
+        clearTimeout(initial);
+        clearInterval(interval);
+        await agent.stop();
+      },
+    };
+  }
+
+  /**
    * Connect the intake/relay agent and return controls to drive a room
    * proactively. The campaign portal uses this to create a room, add the
    * reviewer agents, and post the campaign so band.ai (not the app) runs the
