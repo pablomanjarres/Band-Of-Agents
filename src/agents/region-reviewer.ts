@@ -15,6 +15,8 @@ export interface RegionReviewerOptions {
   reportToHandle?: string;
   /** band.ai room mode: ignore posts from this agent (the intake relay) so only the coordinator's forward triggers a review. */
   ignoreFromHandle?: string;
+  /** Read the current rulebook from the store per review, so UI edits apply to the next band.ai review. Falls back to `rulebook`. */
+  getRulebook?: () => Rulebook;
   /** Recent human-decision precedents (gray-area rulings) to weigh on borderline calls. Read per review. */
   precedents?: () => string[];
 }
@@ -77,7 +79,8 @@ function buildReviewPrompt(
   opts: RegionReviewerOptions,
   asset: ContentAsset,
 ): { system: string; user: string } {
-  const rules = opts.rulebook.rules
+  const rulebook = opts.getRulebook?.() ?? opts.rulebook;
+  const rules = rulebook.rules
     .map(
       (r) =>
         `- [${r.severity}] ${r.id} (${r.category}): ${r.check}` +
@@ -89,7 +92,7 @@ function buildReviewPrompt(
     ? `Precedent (past human rulings on gray areas); weigh these for borderline calls:\n${precedents.map((p) => `- ${p}`).join('\n')}`
     : '';
   const system = [
-    `You are the ${opts.region} marketing-compliance reviewer (${opts.rulebook.label}). This is a demo, NOT legal advice.`,
+    `You are the ${opts.region} marketing-compliance reviewer (${rulebook.label}). This is a demo, NOT legal advice.`,
     `Mandate: flag every claim in the asset that violates a ${opts.region} rule below. Quote the exact offending claim span.`,
     `Brand voice: ${opts.brand.voice.join(', ')}. Forbidden phrases: ${opts.brand.forbiddenPhrases.join(', ')}.`,
     `${opts.region} rulebook:\n${rules}`,

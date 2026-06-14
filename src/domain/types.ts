@@ -83,6 +83,8 @@ export type BrandDna = z.infer<typeof BrandDna>;
 /** The marketing asset under review. */
 export const ContentAsset = z.object({
   id: z.string(),
+  /** Human-friendly campaign name for referencing it from band.ai (e.g. "Lumavida-Q3"). */
+  name: z.string().optional(),
   channel: z.string(),
   markets: z.array(z.string()),
   copy: z.string(),

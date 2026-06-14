@@ -72,7 +72,8 @@ export function translateActivity(a: BoardActivity): BoardEvent | null {
   if (a.kind === 'message') {
     const json = parseJson(a.content);
     if (json !== undefined) {
-      if (ContentAssetSchema.safeParse(json).success) return null;
+      const assetParse = ContentAssetSchema.safeParse(json);
+      if (assetParse.success) return { type: 'intake', ...base, asset: assetParse.data };
       const rev = RevisedMsg.safeParse(json);
       if (rev.success) {
         return {

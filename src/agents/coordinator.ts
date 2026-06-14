@@ -1,4 +1,5 @@
 import type { AgentHandler } from '../band/types';
+import type { ContentAsset } from '../domain/types';
 import { toAsset, tryParseAsset } from '../domain/load';
 import { nameMatchesHandle } from './handles';
 
@@ -15,6 +16,13 @@ export interface CoordinatorOptions {
    * instead of being a one-shot output.
    */
   remediationHandle?: string;
+  /**
+   * Resolve a human's free-text reference to a saved campaign (e.g. "Coordinator,
+   * review campaign Lumavida-Q3") by fetching it from the store. This is the
+   * band.ai app flow: the human references a campaign stored in the UI and the
+   * coordinator pulls it. Returns undefined to fall back to an inline campaign.
+   */
+  lookupCampaign?: (query: string) => ContentAsset | undefined;
 }
 
 /** Pull the revised ContentAsset out of a remediation `{kind:'revised'}` message. */
@@ -46,9 +54,11 @@ export function makeCoordinator(opts: CoordinatorOptions = {}): AgentHandler {
     if (message.senderType === 'agent' && !fromIntake && !fromRemediation) return;
 
     // A revised asset from remediation is re-intaked (the re-review loop); any
-    // other accepted message carries the asset directly.
+    // other accepted message carries the asset directly, or references a saved
+    // campaign by name.
     const assetContent = fromRemediation ? revisedAssetJson(message.content) : message.content;
     if (assetContent === null) return;
+    const saved = fromRemediation ? undefined : opts.lookupCampaign?.(message.content);
 
     const participants = await tools.getParticipants();
     const reviewers = participants.filter(
@@ -59,7 +69,7 @@ export function makeCoordinator(opts: CoordinatorOptions = {}): AgentHandler {
     );
     if (reviewers.length === 0) return;
 
-    const asset = toAsset(assetContent);
+    const asset = saved ?? toAsset(assetContent);
     await tools.sendEvent(
       `${fromRemediation ? 'Re-review' : 'Intake'}: asset "${asset.id}" for ${asset.markets.join(', ')}. Recruiting ${reviewers.length} reviewer(s).`,
       'intake',
