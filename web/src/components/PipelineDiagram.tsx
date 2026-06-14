@@ -48,6 +48,22 @@ const LEGEND: { label: string; dot: string }[] = [
   { label: 'context / outcome', dot: 'bg-slate-400' },
 ];
 
+// Compare two measured-rect maps so measure() can bail out when nothing moved.
+// Without this, setRects/setSize always create new objects and the (deps-less)
+// layout effect re-fires forever (maximum update depth exceeded -> blank screen).
+function rectsEqual(a: RectMap, b: RectMap): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) {
+    const ra = a[key as NodeId];
+    const rb = b[key as NodeId];
+    if (!ra || !rb || ra.x !== rb.x || ra.y !== rb.y || ra.width !== rb.width || ra.height !== rb.height) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function PipelineDiagram({ state, onDecision }: PipelineDiagramProps) {
   const model = buildPipelineModel(state);
   const awaitingDecision = state.status === 'awaiting-decision';
@@ -83,8 +99,10 @@ export function PipelineDiagram({ state, onDecision }: PipelineDiagramProps) {
       };
       next[id] = rect;
     }
-    setRects(next);
-    setSize({ width: origin.width, height: origin.height });
+    setRects((prev) => (rectsEqual(prev, next) ? prev : next));
+    setSize((prev) =>
+      prev.width === origin.width && prev.height === origin.height ? prev : { width: origin.width, height: origin.height },
+    );
   }, []);
 
   // Measure after layout and whenever the model shape changes (new nodes light

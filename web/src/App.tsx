@@ -6,6 +6,7 @@ import { NewReviewPage } from './pages/NewReviewPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { ReplayBoardPage } from './pages/ReplayBoardPage';
 import { RulebooksPage } from './pages/RulebooksPage';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const NAV_ITEMS = [
   { to: '/', label: 'New Review', end: true },
@@ -52,6 +53,7 @@ export default function App() {
     <div className="min-h-full">
       <Nav />
       <main className="mx-auto max-w-5xl px-6 py-8">
+        <ErrorBoundary>
         <Routes>
           <Route path="/" element={<NewReviewPage />} />
           <Route path="/reviews/:id" element={<LiveBoardPage />} />
@@ -66,6 +68,7 @@ export default function App() {
             }
           />
         </Routes>
+        </ErrorBoundary>
       </main>
     </div>
   );
