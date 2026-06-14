@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { submitDecision, subscribeToEvents } from '../api';
+import { subscribeToEvents } from '../api';
 import type { EventSubscription } from '../api';
 import { applyEvent, initialBoardState } from '../boardState';
 import type { BoardState } from '../boardState';
@@ -47,11 +47,6 @@ export function LiveBoardPage() {
     }
   }, [state.status]);
 
-  async function handleDecision(decision: string) {
-    if (!id) return;
-    await submitDecision(id, decision);
-  }
-
   if (!id) {
     return <p className="text-sm text-red-600">Missing review id.</p>;
   }
@@ -66,7 +61,7 @@ export function LiveBoardPage() {
           to="/"
           className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
         >
-          + New review
+          + Compose campaign
         </Link>
       </div>
 
@@ -76,7 +71,7 @@ export function LiveBoardPage() {
         </div>
       ) : null}
 
-      <BoardView state={state} onDecision={handleDecision} />
+      <BoardView state={state} />
     </div>
   );
 }

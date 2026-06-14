@@ -22,6 +22,7 @@ export interface RegionVerdict {
 
 export interface ContentAsset {
   id: string;
+  name?: string;
   channel: string;
   markets: string[];
   copy: string;

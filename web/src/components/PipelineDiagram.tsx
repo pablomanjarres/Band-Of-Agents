@@ -9,7 +9,6 @@ import { EscalationDecision } from './EscalationDecision';
 
 interface PipelineDiagramProps {
   state: BoardState;
-  onDecision?: (decision: string) => Promise<void> | void;
 }
 
 // Pill badge used for counts / flags inside nodes.
@@ -64,9 +63,8 @@ function rectsEqual(a: RectMap, b: RectMap): boolean {
   return true;
 }
 
-export function PipelineDiagram({ state, onDecision }: PipelineDiagramProps) {
+export function PipelineDiagram({ state }: PipelineDiagramProps) {
   const model = buildPipelineModel(state);
-  const awaitingDecision = state.status === 'awaiting-decision';
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const nodeRefs = useRef<Map<NodeId, HTMLDivElement>>(new Map());
@@ -299,7 +297,6 @@ export function PipelineDiagram({ state, onDecision }: PipelineDiagramProps) {
                 <EscalationDecision
                   text={state.escalationText}
                   recordedDecision={state.decisionText}
-                  onSubmit={awaitingDecision ? onDecision : undefined}
                   variant="diagram"
                 />
               ) : (

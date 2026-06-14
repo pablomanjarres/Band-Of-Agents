@@ -32,7 +32,7 @@ export function LibraryPage() {
     };
   }, []);
 
-  function useInNewReview(asset: ContentAsset) {
+  function useInCompose(asset: ContentAsset) {
     navigate('/', { state: { prefill: assetToFormValues(asset) } });
   }
 
@@ -40,9 +40,10 @@ export function LibraryPage() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Asset library</h1>
+          <h1 className="text-xl font-bold text-slate-900">Campaign library</h1>
           <p className="mt-0.5 text-xs text-slate-400">
-            Reusable copy and claims. Save new assets from the New Review form.
+            Saved campaigns the band.ai agents review by name. Compose new ones from the Compose
+            tab.
           </p>
         </div>
       </div>
@@ -53,7 +54,7 @@ export function LibraryPage() {
         <p className="text-sm text-red-600">{load.message}</p>
       ) : load.assets.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
-          No saved assets yet. Use "Save to library" on the New Review form.
+          No saved campaigns yet. Use "Save campaign" on the Compose tab.
         </div>
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2">
@@ -62,7 +63,11 @@ export function LibraryPage() {
               key={asset.id}
               className="flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
             >
-              <div className="flex items-center gap-2">
+              {asset.name ? (
+                <h2 className="text-sm font-semibold text-slate-900">{asset.name}</h2>
+              ) : null}
+
+              <div className={`flex items-center gap-2 ${asset.name ? 'mt-2' : ''}`}>
                 <span className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-700">
                   {asset.channel}
                 </span>
@@ -84,10 +89,10 @@ export function LibraryPage() {
 
               <button
                 type="button"
-                onClick={() => useInNewReview(asset)}
+                onClick={() => useInCompose(asset)}
                 className="mt-4 inline-flex items-center self-start rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
               >
-                Use in new review
+                Edit in Compose
               </button>
             </li>
           ))}
