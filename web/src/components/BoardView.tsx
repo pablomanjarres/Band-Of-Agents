@@ -1,9 +1,7 @@
+import { useState } from 'react';
 import type { BoardState } from '../boardState';
-import { orderedRegions } from '../boardState';
 import { ConflictBanner } from './ConflictBanner';
-import { EscalationDecision } from './EscalationDecision';
-import { RegionCard } from './RegionCard';
-import { RemediationPanel } from './RemediationPanel';
+import { PipelineDiagram } from './PipelineDiagram';
 import { StatusBadge } from './StatusBadge';
 import { Timeline } from './Timeline';
 
@@ -14,12 +12,11 @@ interface BoardViewProps {
 }
 
 export function BoardView({ state, onDecision }: BoardViewProps) {
-  const regions = orderedRegions(state);
-  const showEscalation = Boolean(state.escalationText);
-  const awaitingDecision = state.status === 'awaiting-decision';
+  // Timeline is a secondary, collapsible panel under the diagram.
+  const [showTimeline, setShowTimeline] = useState(false);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Lumavida Compliance Board</h1>
@@ -32,26 +29,30 @@ export function BoardView({ state, onDecision }: BoardViewProps) {
         <StatusBadge status={state.status} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {regions.map((region) => (
-          <RegionCard key={region.region} region={region} />
-        ))}
-      </div>
-
       {state.conflict ? <ConflictBanner /> : null}
 
-      {state.remediation ? <RemediationPanel remediation={state.remediation} /> : null}
+      {/* Presentation centerpiece: the live multi-agent pipeline. */}
+      <PipelineDiagram state={state} onDecision={onDecision} />
 
-      {showEscalation ? (
-        <EscalationDecision
-          text={state.escalationText ?? ''}
-          recordedDecision={state.decisionText}
-          // Allow input only on a live board that is awaiting a decision.
-          onSubmit={awaitingDecision ? onDecision : undefined}
-        />
-      ) : null}
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowTimeline((open) => !open)}
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+        >
+          <span className={`transition-transform ${showTimeline ? 'rotate-90' : ''}`}>&rsaquo;</span>
+          {showTimeline ? 'Hide event timeline' : 'Show event timeline'}
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+            {state.events.length}
+          </span>
+        </button>
 
-      <Timeline events={state.events} />
+        {showTimeline ? (
+          <div className="mt-3">
+            <Timeline events={state.events} />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
