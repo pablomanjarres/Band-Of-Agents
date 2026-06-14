@@ -68,7 +68,37 @@ function currentRulebooks(): Record<RegionKey, Rulebook> {
   };
 }
 
-// In band mode the agents connect once and live in band.ai; each campaign gets a room.
+function normalizeName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Resolve a human's free-text reference ("review campaign Lumavida-Q3") to a saved campaign.
+function findCampaign(query: string): ContentAsset | undefined {
+  const q = normalizeName(query);
+  if (!q) return undefined;
+  return store.listAssets().find((a) => {
+    const name = a.name ? normalizeName(a.name) : '';
+    return name.length > 0 && q.includes(name);
+  });
+}
+
+// A review just started in a band.ai room: create its record and return the event sink.
+function registerDiscoveredReview(roomId: string): (event: BoardEvent) => void {
+  const record: ReviewRecord = {
+    id: roomId,
+    createdAt: Date.now(),
+    asset: { id: `room-${roomId.slice(0, 8)}`, channel: '', markets: [], copy: '', claim: '' },
+    events: [],
+    status: 'running',
+    conflict: false,
+    subscribers: new Set(),
+    submitDecision: async () => {},
+  };
+  reviews.set(roomId, record);
+  return makeOnEvent(record);
+}
+
+// band mode: connect the agents (you add them in app.band.ai) and OBSERVE. We never create rooms.
 const bandBoard =
   BOARD_MODE === 'band'
     ? new BandBoard({
@@ -76,9 +106,12 @@ const bandBoard =
         rulebooks: currentRulebooks(),
         models: realBoardModels(),
         ...(process.env.HUMAN_HANDLE ? { humanHandle: process.env.HUMAN_HANDLE } : {}),
-        onPrecedent: (p) => store.appendPrecedent(p),
         hostImage: (u) => store.hostImage(u) ?? u,
         getPrecedents: recentPrecedents,
+        getRulebook: (region) => store.getRulebookOverride(region) ?? defaultRulebooks[region.toLowerCase() as RegionKey] ?? defaultRulebooks.us,
+        lookupCampaign: findCampaign,
+        logPrecedent: (p) => store.appendPrecedent(p),
+        onReviewDiscovered: registerDiscoveredReview,
       })
     : undefined;
 
@@ -107,6 +140,7 @@ function makeOnEvent(record: ReviewRecord): (event: BoardEvent) => void {
     }
     e = { ...e, seq: record.events.length } as BoardEvent;
     record.events.push(e);
+    if (e.type === 'intake') record.asset = e.asset;
     if (e.type === 'verdict' && e.conflict) record.conflict = true;
     if (e.type === 'status') {
       record.status = e.status;
@@ -128,6 +162,12 @@ const app = new Hono();
 app.use('/api/*', cors());
 
 app.post('/api/reviews', async (c) => {
+  if (BOARD_MODE === 'band') {
+    return c.json(
+      { error: 'In band mode, start reviews from band.ai: post "Coordinator, review campaign <name>" in your room. Compose/save campaigns via POST /api/assets.' },
+      400,
+    );
+  }
   const body: unknown = await c.req.json().catch(() => ({}));
   const parsed = CreateReview.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
@@ -153,19 +193,6 @@ app.post('/api/reviews', async (c) => {
     submitDecision: async () => {},
   };
   const onEvent = makeOnEvent(record);
-
-  if (BOARD_MODE === 'band') {
-    if (!bandBoard) return c.json({ error: 'band board unavailable' }, 503);
-    try {
-      const roomId = await bandBoard.createReview(asset, onEvent);
-      record.id = roomId;
-      record.submitDecision = (text) => bandBoard.submitDecision(roomId, text);
-      reviews.set(roomId, record);
-      return c.json({ id: roomId });
-    } catch (err) {
-      return c.json({ error: `Failed to start band review: ${(err as Error)?.message ?? String(err)}` }, 500);
-    }
-  }
 
   const id = randomUUID();
   record.id = id;
