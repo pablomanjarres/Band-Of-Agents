@@ -1,7 +1,7 @@
 import type { AgentHandler, Mention, Participant, RoomMessage, RoomTools } from '../band/types';
 import type { RegionVerdict, ReviewResult } from '../domain/types';
 import { ReviewResult as ReviewResultSchema } from '../domain/types';
-import { matchParticipant } from './handles';
+import { matchParticipant, nameMatchesHandle } from './handles';
 
 export interface Precedent {
   roomId: string;
@@ -20,6 +20,8 @@ export interface ReconcileOptions {
   remediationHandle?: string;
   /** Called when a human rules on an escalation; the decision becomes precedent. */
   logPrecedent?: (precedent: Precedent) => void;
+  /** band.ai room mode: accept the human ruling relayed by this intake/proxy agent. */
+  humanProxyHandle?: string;
 }
 
 // The reconcile agent: collects each region reviewer's findings; once all
@@ -31,7 +33,11 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
   const pendingByRoom = new Map<string, string[]>();
 
   return async (message, tools) => {
-    if (message.senderType === 'user') {
+    const fromHumanProxy =
+      opts.humanProxyHandle !== undefined &&
+      message.senderType === 'agent' &&
+      nameMatchesHandle(message.senderName, opts.humanProxyHandle);
+    if (message.senderType === 'user' || fromHumanProxy) {
       const regions = pendingByRoom.get(message.roomId);
       if (!regions) return;
       pendingByRoom.delete(message.roomId);

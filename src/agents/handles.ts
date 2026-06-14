@@ -23,3 +23,15 @@ export function matchParticipant(
   if (hit) return hit;
   return type ? pool[0] : undefined;
 }
+
+/**
+ * True when a sender's name or handle matches a configured handle's last segment
+ * (e.g. sender 'Intake' matches '@pablomanjarres/intake'). Used in band.ai room
+ * mode to recognize the intake/proxy agent, since the SDK posts only as an agent.
+ */
+export function nameMatchesHandle(name: string | null | undefined, target: string): boolean {
+  const segment = target.replace(/^@/, '').split('/').pop() ?? target;
+  const key = norm(segment);
+  if (key.length === 0) return false;
+  return norm(name ?? '').includes(key);
+}
