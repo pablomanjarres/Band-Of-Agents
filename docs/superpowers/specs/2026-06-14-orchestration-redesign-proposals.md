@@ -79,3 +79,31 @@ Mostly role and phase sequencing over existing agents. The reviewers become Advo
 
 ### Tradeoffs
 Best presentation value: a judge can follow it without narration, and the deadlock-to-appeal moment is dramatic. Risk: the theater can feel scripted if the rebuttals are shallow, so the cross-examination prompts must let a Challenger genuinely change its position.
+
+---
+
+## Proposal 3: The Escalation Ladder
+
+Metaphor: a real org's sign-off chain. Cheap fast checks at the bottom, only genuine conflict climbs, the human is the top rung and is reached rarely.
+
+### Shape
+Vertical, not a fan. Conflict is the gate that promotes work upward.
+- Rung 0, Triage (a small open-source model via Featherless): scans the whole asset and marks candidate-risky spans. Clean assets exit here, cheaply.
+- Rung 1, Specialists: examine only the flagged spans, not the whole asset and not all at once. If the specialists agree (all clear, or one shared fix), the item resolves with no negotiation.
+- Rung 2, Negotiation: fires only on inter-specialist conflict. The contested span enters a bounded negotiation (the Table from Proposal 1, scoped to that one span).
+- Rung 3, Human: reached only on a stable deadlock. The ruling folds back into the rulebook as precedent, so that span does not climb again.
+
+### Why it is not scatter-gather
+There is no broadcast. Each rung is summoned only when the rung below could not resolve, so conflict drives the topology upward rather than every agent firing on every asset.
+
+### Band primitives it leans on
+`lookupPeers` plus `addParticipant` summon the next rung on demand, so agents literally appear as conflict escalates (agents discovering each other and dividing work, a judging line). `sendEvent` shows each promotion decision; directed @mention hands the contested span to the summoned tier.
+
+### Multi-model fit
+The cleanest routing story of the set: Featherless small model at the bottom (targets the Featherless prize), Haiku or Gemini Flash for specialists, Sonnet or Opus for negotiation, the human at the top. Cost scales with difficulty.
+
+### Build delta (medium to high)
+Add a Triage agent and a span-gating step; turn the coordinator from a broadcaster into a promoter that summons tiers via `addParticipant` on conflict; reuse the existing reviewers as the specialist rung and the Table as the negotiation rung. This is a real change to the fan-out at `coordinator.ts:77`.
+
+### Tradeoffs
+Best business-value story (most content never touches the expensive board) and the most idiomatic multi-model routing. Risk: on the single hand-picked demo asset the cheap rungs add steps before the money-shot conflict, so the demo script must start near the top or use an asset that climbs fast.
