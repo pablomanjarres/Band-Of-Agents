@@ -113,15 +113,24 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
     if (escalateRegions.length > 0 && opts.humanHandle) {
       const human = await findParticipant(tools, opts.humanHandle, 'user');
       if (human) {
-        const reasons = verdicts
-          .filter((v) => escalateRegions.includes(v.region))
-          .map((v) => `${v.region}: ${v.rationale}`)
-          .join(' ');
+        const brief = escalateRegions
+          .map((region) => {
+            const blocks = (collected.get(region)?.findings ?? []).filter((f) => f.severity === 'block');
+            const issues = blocks.length
+              ? blocks.map((f) => f.rationale).join(' ')
+              : verdicts.find((v) => v.region === region)?.rationale ?? 'Unresolved compliance issue.';
+            return `In ${region}: ${issues}`;
+          })
+          .join('\n');
+        const passing = verdicts.filter((v) => v.decision === 'publish').map((v) => v.region);
+        const escalationMsg =
+          `I need your call on this campaign before it can publish.\n\n${brief}\n\n` +
+          (passing.length > 0 ? `It is clear to publish in ${passing.join(', ')}. ` : '') +
+          `Automated remediation could not resolve ${escalateRegions.join('/')}. ` +
+          `Your options: approve (publish as-is and accept the ${escalateRegions.join('/')} risk), ` +
+          `reject (hold ${escalateRegions.join('/')}), or request changes (send it back to the team). What is your call?`;
         await tools.sendEvent(`Escalating ${escalateRegions.join('/')} to ${human.handle} for a human decision.`, 'escalation');
-        await tools.sendMessage(
-          `Escalation for ${escalateRegions.join('/')}. ${reasons} Please rule: approve, reject, or request changes.`,
-          [{ id: human.id, handle: human.handle }],
-        );
+        await tools.sendMessage(escalationMsg, [{ id: human.id, handle: human.handle }]);
         pendingByRoom.set(message.roomId, escalateRegions);
       } else {
         await tools.sendEvent(`Need to escalate ${escalateRegions.join('/')} but ${opts.humanHandle} is not in the room.`, 'escalation');

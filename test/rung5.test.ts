@@ -66,7 +66,9 @@ describe('Rung 5 (MVP): deadlock escalates to the human and the decision is reco
       (t) => t.fromId === 'rec' && t.kind === 'message' && t.mentions.some((m) => m.id === 'lead'),
     );
     expect(escalation).toBeDefined();
-    expect(escalation!.content).toContain('Escalation for EU');
+    // The escalation reads as a brief for the human: the region, the issue, and the options.
+    expect(escalation!.content).toContain('EU');
+    expect(escalation!.content.toLowerCase()).toContain('request changes');
 
     // Human rules on the escalation.
     room.post('lead', 'Reject: require an EU-compliant rewrite with authorised wording and Article 10(2) disclosures.', [{ id: 'rec' }]);
