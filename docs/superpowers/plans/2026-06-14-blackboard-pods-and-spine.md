@@ -998,3 +998,297 @@ git commit -m "feat(agents): mediator brokers board conflicts into a MediationRe
 ```
 
 ---
+
+## Phase 4: The decision spine (Conductor + Risk Adjudicator)
+
+### Task 4.1: Conductor (intake fan-out and recommit re-entry)
+
+**Files:**
+- Create: `src/agents/conductor.ts`
+- Test: `test/conductor.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+// test/conductor.test.ts
+import { describe, expect, it } from 'vitest';
+import { FakeBandTransport } from '../src/band/fake';
+import { makeConductor } from '../src/agents/conductor';
+import { loadAsset } from '../src/domain/load';
+
+const ASSETS = new URL('../assets/', import.meta.url).pathname;
+
+describe('conductor', () => {
+  it('dispatches a fresh asset to every pod lead, and re-dispatches a revised asset', async () => {
+    const asset = loadAsset(`${ASSETS}sample-asset.json`);
+    const got: Record<string, number> = {};
+    const room = new FakeBandTransport('r');
+    for (const [id, handle] of [['cl', '@claims-lead'], ['rg', '@reg-lead'], ['br', '@brand-lead']] as const) {
+      await room.connectAgent({ agentId: id, name: handle, handle, onMessage: async () => { got[handle] = (got[handle] ?? 0) + 1; } });
+    }
+    await room.connectAgent({ agentId: 'cond', name: 'Conductor', handle: '@conductor', onMessage: makeConductor({ podLeadHandles: ['@claims-lead', '@reg-lead', '@brand-lead'] }) });
+
+    room.post('lead', JSON.stringify(asset), [{ id: 'cond' }]);
+    await room.drain();
+    expect(got['@claims-lead']).toBe(1);
+    expect(got['@reg-lead']).toBe(1);
+    expect(got['@brand-lead']).toBe(1);
+
+    room.post('rem', JSON.stringify({ kind: 'revised', region: 'EU', revised: asset }), [{ id: 'cond' }]);
+    await room.drain();
+    expect(got['@reg-lead']).toBe(2);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run test/conductor.test.ts`
+Expected: FAIL, cannot resolve `../src/agents/conductor`.
+
+- [ ] **Step 3: Implement `src/agents/conductor.ts`**
+
+```typescript
+// src/agents/conductor.ts
+import type { AgentHandler } from '../band/types';
+import type { ContentAsset } from '../domain/types';
+import { matchParticipant } from './handles';
+import { tryParseAsset } from '../domain/load';
+
+export interface ConductorOptions {
+  podLeadHandles: string[];   // ['@claims-lead', '@reg-lead', '@brand-lead']
+  primeHandles?: string[];    // e.g. ['@remediation'] so it caches the asset for later rewrites
+}
+
+export function makeConductor(opts: ConductorOptions): AgentHandler {
+  return async (message, tools) => {
+    // A fresh asset, or a 'revised' asset coming back from remediation (the one loop).
+    let asset: ContentAsset | null = tryParseAsset(message.content);
+    if (!asset) {
+      try {
+        const b = JSON.parse(message.content) as { kind?: string; revised?: ContentAsset };
+        if (b?.kind === 'revised' && b.revised) asset = b.revised;
+      } catch { /* not JSON */ }
+    }
+    if (!asset) return;
+
+    await tools.sendEvent(`Intake: dispatching ${asset.id} to ${opts.podLeadHandles.length} pods`, 'intake', { asset: asset.id });
+    const participants = await tools.getParticipants();
+    for (const handle of [...opts.podLeadHandles, ...(opts.primeHandles ?? [])]) {
+      const t = matchParticipant(participants, handle, 'agent');
+      if (t) await tools.sendMessage(JSON.stringify(asset), [{ id: t.id, handle: t.handle }]);
+    }
+  };
+}
+```
+
+- [ ] **Step 4: Run + commit**
+
+Run: `pnpm vitest run test/conductor.test.ts` (Expected: PASS)
+
+```bash
+git add src/agents/conductor.ts test/conductor.test.ts
+git commit -m "feat(agents): conductor fans the asset to pods and re-dispatches revised assets"
+```
+
+### Task 4.2: Risk Adjudicator (score, mediate, remediate, escalate, terminal)
+
+**Files:**
+- Create: `src/agents/risk-adjudicator.ts`
+- Test: `test/risk-adjudicator.test.ts`
+
+- [ ] **Step 1: Write the failing test (two paths: publish, and conflict to escalate to human)**
+
+```typescript
+// test/risk-adjudicator.test.ts
+import { describe, expect, it } from 'vitest';
+import { FakeBandTransport } from '../src/band/fake';
+import { makeRiskAdjudicator } from '../src/agents/risk-adjudicator';
+
+const pf = (pod: string, conflicts: unknown[] = []) =>
+  JSON.stringify({ kind: 'pod-finding', pod, summary: '', findings: [], conflicts });
+const conflict = { span: 'boost', blockedBy: ['EU'], passedBy: ['US'], rationale: 'Art 10(2)' };
+
+const adj = (room: FakeBandTransport) => makeRiskAdjudicator({
+  expectedPods: ['claims', 'regulatory', 'brand'],
+  mediatorHandle: '@mediator', remediationHandle: '@remediation', humanHandle: '@compliance-lead', maxRecommits: 1,
+});
+
+describe('risk adjudicator', () => {
+  it('publishes when no pod reports a conflict', async () => {
+    const events: Array<{ type: string; meta: Record<string, unknown> }> = [];
+    const room = new FakeBandTransport('r', { onActivity: (a) => { if (a.kind === 'event') events.push({ type: a.messageType ?? '', meta: a.metadata ?? {} }); } });
+    await room.connectAgent({ agentId: 'adj', name: 'Adjudicator', handle: '@adjudicator', onMessage: adj(room) });
+    room.post('cl', pf('claims'), [{ id: 'adj' }]);
+    room.post('rg', pf('regulatory'), [{ id: 'adj' }]);
+    room.post('br', pf('brand'), [{ id: 'adj' }]);
+    await room.drain();
+    expect(events.some((e) => e.type === 'terminal' && e.meta.decision === 'published')).toBe(true);
+  });
+
+  it('mediates a conflict, remediates once, then escalates to the human, who can spike', async () => {
+    const toMediator: string[] = [];
+    const toRemediation: string[] = [];
+    const toHuman: string[] = [];
+    const events: string[] = [];
+    const room = new FakeBandTransport('r', { onActivity: (a) => { if (a.kind === 'event') events.push(a.messageType ?? ''); } });
+    room.addUser('lead', 'Compliance Lead', '@compliance-lead');
+    await room.connectAgent({ agentId: 'med', name: 'Mediator', handle: '@mediator', onMessage: async (m) => { toMediator.push(m.content); } });
+    await room.connectAgent({ agentId: 'rem', name: 'Remediation', handle: '@remediation', onMessage: async (m) => { toRemediation.push(m.content); } });
+    await room.connectAgent({ agentId: 'adj', name: 'Adjudicator', handle: '@adjudicator', onMessage: adj(room) });
+
+    // Round 1: regulatory reports a conflict.
+    room.post('cl', pf('claims'), [{ id: 'adj' }]);
+    room.post('rg', pf('regulatory', [conflict]), [{ id: 'adj' }]);
+    room.post('br', pf('brand'), [{ id: 'adj' }]);
+    await room.drain();
+    expect(toMediator).toHaveLength(1); // mediator was woken
+
+    // Mediator: no movement -> adjudicator remediates (attempt 1) and clears for recommit.
+    room.post('med', JSON.stringify({ kind: 'mediation', resolved: false, note: 'no movement', requiredDisclosure: null }), [{ id: 'adj' }]);
+    await room.drain();
+    expect(toRemediation).toHaveLength(1);
+
+    // Recommit: pods re-report, still conflicting -> mediate again -> no movement -> cap hit -> escalate.
+    room.post('cl', pf('claims'), [{ id: 'adj' }]);
+    room.post('rg', pf('regulatory', [conflict]), [{ id: 'adj' }]);
+    room.post('br', pf('brand'), [{ id: 'adj' }]);
+    await room.drain();
+    room.post('med', JSON.stringify({ kind: 'mediation', resolved: false, note: 'still stuck', requiredDisclosure: null }), [{ id: 'adj' }]);
+    await room.drain();
+    expect(toHuman).toBeDefined();
+    expect(events).toContain('escalation');
+
+    // Human rules: reject -> spiked terminal.
+    room.post('lead', 'Reject for EU, cannot publish without authorization', [{ id: 'adj' }]);
+    await room.drain();
+    expect(events).toContain('decision');
+    expect(events.filter((e) => e === 'terminal').length).toBeGreaterThanOrEqual(1);
+  });
+});
+```
+
+(The human mention is captured by the adjudicator addressing `@compliance-lead`; assert via the `escalation`/`decision`/`terminal` events, which is robust to the transport's user-delivery details.)
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run test/risk-adjudicator.test.ts`
+Expected: FAIL, cannot resolve `../src/agents/risk-adjudicator`.
+
+- [ ] **Step 3: Implement `src/agents/risk-adjudicator.ts`**
+
+```typescript
+// src/agents/risk-adjudicator.ts
+import type { AgentHandler, RoomTools } from '../band/types';
+import type { PodFinding, ConflictItem, MediationResult } from '../domain/board';
+import { matchParticipant } from './handles';
+
+export interface RiskAdjudicatorOptions {
+  expectedPods: Array<'claims' | 'regulatory' | 'brand'>;
+  mediatorHandle: string;     // '@mediator'
+  remediationHandle: string;  // '@remediation'
+  humanHandle: string;        // '@compliance-lead'
+  maxRecommits?: number;      // default 1
+  logPrecedent?: (p: { claim: string; decision: string; note: string }) => void;
+}
+
+interface RoomState {
+  pods: Map<string, PodFinding>;
+  mediation?: MediationResult;
+  recommits: number;
+  mediateRequested: boolean;
+}
+
+export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler {
+  const max = opts.maxRecommits ?? 1;
+  const rooms = new Map<string, RoomState>();
+  const stateFor = (id: string): RoomState => {
+    let s = rooms.get(id);
+    if (!s) { s = { pods: new Map(), recommits: 0, mediateRequested: false }; rooms.set(id, s); }
+    return s;
+  };
+  const conflictsOf = (s: RoomState): ConflictItem[] => [...s.pods.values()].flatMap((p) => p.conflicts ?? []);
+
+  const decide = async (roomId: string, tools: RoomTools): Promise<void> => {
+    const s = stateFor(roomId);
+    const conflicts = conflictsOf(s);
+
+    if (conflicts.length > 0 && !s.mediateRequested) {
+      s.mediateRequested = true;
+      const t = matchParticipant(await tools.getParticipants(), opts.mediatorHandle, 'agent');
+      await tools.sendEvent(`Adjudicator: ${conflicts.length} conflict(s), consulting mediator`, 'adjudication', { decision: 'mediate' });
+      if (t) await tools.sendMessage(JSON.stringify({ kind: 'mediate', conflicts }), [{ id: t.id, handle: t.handle }]);
+      return;
+    }
+
+    const resolved = conflicts.length === 0 || (s.mediation?.resolved ?? false);
+    if (resolved) {
+      await tools.sendEvent('Adjudicator: publishable', 'adjudication', { decision: 'publish', score: 1 });
+      await tools.sendEvent('PUBLISHED', 'terminal', { decision: 'published' });
+      await tools.sendEvent('done', 'status', { status: 'complete' });
+      rooms.delete(roomId);
+      return;
+    }
+
+    if (s.recommits < max) {
+      s.recommits += 1;
+      const c = conflicts[0];
+      await tools.sendEvent(`Adjudicator: remediate (attempt ${s.recommits})`, 'adjudication', { decision: 'remediate', score: 0.5 });
+      const t = matchParticipant(await tools.getParticipants(), opts.remediationHandle, 'agent');
+      if (t) await tools.sendMessage(JSON.stringify({ kind: 'remediation', region: c.blockedBy[0] ?? 'EU', findings: [{ category: 'claim', severity: 'block', claim: c.span, rationale: c.rationale }] }), [{ id: t.id, handle: t.handle }]);
+      s.pods.clear(); s.mediation = undefined; s.mediateRequested = false;
+      return;
+    }
+
+    // Cap reached -> escalate to the human.
+    await tools.sendEvent('Adjudicator: deadlock, escalating', 'adjudication', { decision: 'escalate', score: 0.1 });
+    await tools.sendEvent(`Escalation: unresolved conflict on "${conflicts[0].span}"`, 'escalation', {});
+    await tools.sendEvent('awaiting human', 'status', { status: 'awaiting-decision' });
+    const t = matchParticipant(await tools.getParticipants(), opts.humanHandle, 'user');
+    if (t) await tools.sendMessage(`@compliance-lead deadlock on "${conflicts[0].span}". Publish with disclosure, or reject?`, [{ id: t.id, handle: t.handle }]);
+  };
+
+  return async (message, tools) => {
+    const roomId = message.roomId;
+    const s = stateFor(roomId);
+    let body: Record<string, unknown> | null = null;
+    try { body = JSON.parse(message.content); } catch { body = null; }
+
+    // Human ruling: plain text from the compliance lead.
+    if (message.senderType === 'user' && !body) {
+      const reject = /reject|spike|kill|do not|cannot/i.test(message.content);
+      const decision = reject ? 'spiked' : 'published';
+      opts.logPrecedent?.({ claim: conflictsOf(s)[0]?.span ?? '', decision, note: message.content });
+      await tools.sendEvent(`Human ruling: ${decision}`, 'decision', { decision });
+      await tools.sendEvent(decision === 'spiked' ? 'SPIKED' : 'PUBLISHED', 'terminal', { decision });
+      await tools.sendEvent('done', 'status', { status: 'complete' });
+      rooms.delete(roomId);
+      return;
+    }
+
+    if (body?.kind === 'pod-finding') {
+      s.pods.set(String(body.pod), body as unknown as PodFinding);
+      if (opts.expectedPods.every((p) => s.pods.has(p))) await decide(roomId, tools);
+      return;
+    }
+    if (body?.kind === 'mediation') {
+      s.mediation = body as unknown as MediationResult;
+      await decide(roomId, tools);
+    }
+  };
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pnpm vitest run test/risk-adjudicator.test.ts`
+Expected: PASS (both cases).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/agents/risk-adjudicator.ts test/risk-adjudicator.test.ts
+git commit -m "feat(agents): risk adjudicator drives the spine (mediate, remediate once, escalate, terminal)"
+```
+
+---
