@@ -7,6 +7,7 @@
 // for that, it only makes the reasoning/negotiation logic fast to build and test.
 
 import type {
+  ActivityCallback,
   AgentConnection,
   AgentContext,
   AgentHandler,
@@ -53,8 +54,11 @@ export class FakeBandTransport implements BandTransport {
   private running = false;
   private seq = 0;
 
-  constructor(roomId = 'room-local') {
+  private readonly onActivity?: ActivityCallback;
+
+  constructor(roomId = 'room-local', opts: { onActivity?: ActivityCallback } = {}) {
     this.roomId = roomId;
+    this.onActivity = opts.onActivity;
   }
 
   /** Seed a non-agent participant (e.g. the marketing lead, or a test poster). */
@@ -133,6 +137,16 @@ export class FakeBandTransport implements BandTransport {
       messageType,
       mentions,
       metadata,
+      seq,
+    });
+    this.onActivity?.({
+      kind,
+      roomId: this.roomId,
+      fromId,
+      fromName: from?.name ?? fromId,
+      content,
+      messageType,
+      mentions,
       seq,
     });
     if (kind !== 'message') return;

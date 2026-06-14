@@ -21,6 +21,24 @@ export interface Participant {
 
 export type Peer = Participant;
 
+/**
+ * A raw unit of room activity (a message or a visible event) as emitted by a
+ * transport for observation. The server translates these into UI-facing
+ * BoardEvents and streams them to the console over SSE.
+ */
+export interface BoardActivity {
+  kind: 'message' | 'event';
+  roomId: string;
+  fromId: string;
+  fromName: string;
+  content: string;
+  messageType: string;
+  mentions: Mention[];
+  seq: number;
+}
+
+export type ActivityCallback = (activity: BoardActivity) => void;
+
 /** A message as an agent receives it (normalized PlatformMessage). */
 export interface RoomMessage {
   id: string;
