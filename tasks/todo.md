@@ -75,9 +75,21 @@ send/recv/event -> BoardActivity -> BoardEvent -> SSE per review.
 - [x] Rulebook viewer/editor (per-review reload so edits are live)
 - [x] Saved asset library
 - [x] band.ai room mode, part 1: opt-in Coordinator/Reconcile intake/proxy acceptance (tested)
-- [ ] band.ai room mode, part 2: Intake agent (REST createChat/addChatParticipant/createChatMessage)
-      + BandBoardSession + server BOARD_MODE=band. NEEDS an 8th "Intake" band.ai agent's creds
-      (INTAKE_AGENT_ID / INTAKE_API_KEY) for live wiring + verification.
+- [x] band.ai room mode, part 2: Intake agent (REST createChat/addChatParticipant/createChatMessage)
+      + BandBoard + server BOARD_MODE=band. LIVE-VERIFIED end to end in a real band.ai room.
+- [x] close the adapt -> remediation -> re-review loop (capped); live-verified: EU adapt -> remediate
+      -> re-review -> EU publish, all through band.ai.
+
+## Diagram fix: status
+- [x] band.ai is the integration layer (BOARD_MODE=band): the app creates a room via the Intake
+      agent, the reviewer agents collaborate in band.ai, the app only observes + streams.
+- [x] Remediation -> re-review loop closed (was one-shot).
+- [ ] precedent -> shared context loop (precedent logged but not yet fed back into reviews).
+- [ ] render the live board AS the diagram (Coordinator/Reconcile/Remediation/Compliance-lead nodes).
+
+## Submission (rubric) backlog
+- [ ] README section making AIML multi-model routing visible (AIML prize).
+- [ ] Public MIT repo, hosted demo URL, slides, video.
 
 ## Review (UI)
 - 2026-06-13: Full-scope compliance console working in LOCAL mode (in-process transport, real
