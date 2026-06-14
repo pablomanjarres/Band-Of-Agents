@@ -1,11 +1,13 @@
 import type { AgentHandler, Mention, RoomMessage, RoomTools } from '../band/types';
 import type { CompleteResult, ModelClient } from '../models/client';
-import type { BrandDna, ContentAsset, ReviewResult, Rulebook } from '../domain/types';
+import type { BrandDna, ContentAsset, Finding, ReviewResult, Rulebook } from '../domain/types';
 import { ReviewOutput } from '../domain/types';
-import { tryParseAsset } from '../domain/load';
+import type { SharedBoard } from '../board/shared';
 import { matchParticipant, nameMatchesHandle } from './handles';
 
 export interface RegionReviewerOptions {
+  /** In-process data hub. The campaign is read from here; the finding is written here. */
+  board: SharedBoard;
   region: string;
   reviewerName: string;
   rulebook: Rulebook;
@@ -47,15 +49,17 @@ const REVIEW_OUTPUT_JSON_SCHEMA = {
   },
 } as const;
 
-// A region-compliance reviewer: when the coordinator hands it the asset, it
-// reviews against its own rulebook, posts a visible summary, and reports the
-// structured findings to the reconcile agent (or back to the requester).
+// A region-compliance reviewer. When another agent's message signals a (re-)review
+// is open on the board, it reads the campaign off the board, reviews against its
+// own rulebook, files the structured findings on the board, and reports to the
+// reconcile agent in plain English. The findings live on the board, never in chat.
 export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
-  return async (message, tools) => {
+  return async (message, tools, ctx) => {
     if (message.senderType !== 'agent') return;
     if (opts.ignoreFromHandle && nameMatchesHandle(message.senderName, opts.ignoreFromHandle)) return;
-    const asset = tryParseAsset(message.content);
+    const asset = opts.board.campaign(ctx.roomId);
     if (!asset) return;
+    if (opts.board.reviewFor(ctx.roomId, opts.region)) return; // already reviewed this round
 
     const { system, user } = buildReviewPrompt(opts, asset);
     const res = await opts.model.complete({
@@ -64,15 +68,30 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
       jsonSchema: REVIEW_OUTPUT_JSON_SCHEMA,
     });
     const review = toReviewResult(res, opts);
+    opts.board.addReview(ctx.roomId, review);
 
     const blocking = review.findings.filter((f) => f.severity === 'block').length;
-    await tools.sendEvent(
-      `${opts.region} review of "${asset.id}": ${review.findings.length} finding(s), ${blocking} blocking.`,
-      'review',
-    );
+    await tools.sendEvent(`${opts.region} review: ${review.findings.length} finding(s), ${blocking} blocking.`, 'review');
     const target = await resolveReportTarget(tools, opts.reportToHandle, message);
-    await tools.sendMessage(JSON.stringify(review), [target]);
+    await tools.sendMessage(reviewMessage(opts.region, review.findings), [target]);
   };
+}
+
+/** Compose a plain-English report to Reconcile from the structured findings. */
+function reviewMessage(region: string, findings: Finding[]): string {
+  const first = findings[0];
+  if (!first) {
+    return `${region} review: this one is clear. No blocking issues from my rules.`;
+  }
+  const firstBlock = findings.find((f) => f.severity === 'block');
+  if (firstBlock) {
+    const fix =
+      typeof firstBlock.requiredDisclosure === 'string' && firstBlock.requiredDisclosure.length > 0
+        ? 'It is fixable by adding the required disclosure.'
+        : 'This is not fixable by a simple disclosure.';
+    return `${region} review: I have to flag this. ${firstBlock.rationale} ${fix}`;
+  }
+  return `${region} review: it can run, but note: ${first.rationale}`;
 }
 
 function buildReviewPrompt(
