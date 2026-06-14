@@ -84,8 +84,8 @@ send/recv/event -> BoardActivity -> BoardEvent -> SSE per review.
 - [x] band.ai is the integration layer (BOARD_MODE=band): the app creates a room via the Intake
       agent, the reviewer agents collaborate in band.ai, the app only observes + streams.
 - [x] Remediation -> re-review loop closed (was one-shot).
-- [ ] precedent -> shared context loop (precedent logged but not yet fed back into reviews).
-- [ ] render the live board AS the diagram (Coordinator/Reconcile/Remediation/Compliance-lead nodes).
+- [x] precedent -> shared context loop: recent human rulings fed into the region reviewers' prompts.
+- [~] render the live board AS the diagram (Coordinator/Reconcile/Remediation/Compliance-lead nodes). In progress.
 
 ## Submission (rubric) backlog
 - [ ] README section making AIML multi-model routing visible (AIML prize).

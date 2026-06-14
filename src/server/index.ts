@@ -49,6 +49,10 @@ interface ReviewRecord {
 const reviews = new Map<string, ReviewRecord>();
 const store = new Store(DATA_DIR);
 
+// Feed recent human-decision precedents back into the reviewers' shared context.
+const recentPrecedents = (): string[] =>
+  store.listPrecedents().slice(-6).map((p) => `${p.regions.join('/')}: ${p.decision}`);
+
 const brand = loadBrandDna(`${ASSETS}brand-dna.json`);
 const defaultRulebooks: Record<RegionKey, Rulebook> = {
   us: loadRulebook(`${ASSETS}rulebook.us.json`),
@@ -74,6 +78,7 @@ const bandBoard =
         ...(process.env.HUMAN_HANDLE ? { humanHandle: process.env.HUMAN_HANDLE } : {}),
         onPrecedent: (p) => store.appendPrecedent(p),
         hostImage: (u) => store.hostImage(u) ?? u,
+        getPrecedents: recentPrecedents,
       })
     : undefined;
 
@@ -167,6 +172,7 @@ app.post('/api/reviews', async (c) => {
     onEvent,
     onPrecedent: (p) => store.appendPrecedent(p),
     hostImage: (u) => store.hostImage(u) ?? u,
+    getPrecedents: recentPrecedents,
   });
   record.submitDecision = (text) => session.submitDecision(text);
   reviews.set(id, record);

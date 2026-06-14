@@ -15,6 +15,8 @@ export interface RegionReviewerOptions {
   reportToHandle?: string;
   /** band.ai room mode: ignore posts from this agent (the intake relay) so only the coordinator's forward triggers a review. */
   ignoreFromHandle?: string;
+  /** Recent human-decision precedents (gray-area rulings) to weigh on borderline calls. Read per review. */
+  precedents?: () => string[];
 }
 
 // JSON Schema handed to the model for structured output. Mirrors ReviewOutput.
@@ -82,13 +84,20 @@ function buildReviewPrompt(
         (r.requiredDisclosure ? ` Required disclosure: ${r.requiredDisclosure}.` : ''),
     )
     .join('\n');
+  const precedents = opts.precedents?.() ?? [];
+  const precedentBlock = precedents.length
+    ? `Precedent (past human rulings on gray areas); weigh these for borderline calls:\n${precedents.map((p) => `- ${p}`).join('\n')}`
+    : '';
   const system = [
     `You are the ${opts.region} marketing-compliance reviewer (${opts.rulebook.label}). This is a demo, NOT legal advice.`,
     `Mandate: flag every claim in the asset that violates a ${opts.region} rule below. Quote the exact offending claim span.`,
     `Brand voice: ${opts.brand.voice.join(', ')}. Forbidden phrases: ${opts.brand.forbiddenPhrases.join(', ')}.`,
     `${opts.region} rulebook:\n${rules}`,
+    precedentBlock,
     `Return JSON {"findings":[{"category","severity":"block"|"warn"|"info","claim","rationale","ruleId"?,"requiredDisclosure"?,"confidence"?}]}. If fully compliant, return {"findings":[]}.`,
-  ].join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
   const user = `Asset under review (JSON):\n${JSON.stringify(asset, null, 2)}`;
   return { system, user };
 }

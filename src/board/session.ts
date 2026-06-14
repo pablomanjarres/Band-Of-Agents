@@ -50,6 +50,8 @@ export interface BoardSessionOptions {
   onPrecedent?: (precedent: Precedent) => void;
   /** Host generated images (base64 -> short URL) so messages stay small. */
   hostImage?: (url: string) => string;
+  /** Recent precedent lines fed into the region reviewers' shared context. */
+  getPrecedents?: () => string[];
 }
 
 export class BoardSession {
@@ -88,19 +90,19 @@ export class BoardSession {
       agentId: 'us',
       name: 'US Reviewer',
       handle: '@us-reviewer',
-      onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: rulebooks.us, brand, model: models.us, reportToHandle: '@reconcile' }),
+      onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: rulebooks.us, brand, model: models.us, reportToHandle: '@reconcile', precedents: this.opts.getPrecedents }),
     });
     await room.connectAgent({
       agentId: 'eu',
       name: 'EU Reviewer',
       handle: '@eu-reviewer',
-      onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: rulebooks.eu, brand, model: models.eu, reportToHandle: '@reconcile' }),
+      onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: rulebooks.eu, brand, model: models.eu, reportToHandle: '@reconcile', precedents: this.opts.getPrecedents }),
     });
     await room.connectAgent({
       agentId: 'latam',
       name: 'LATAM Reviewer',
       handle: '@latam-reviewer',
-      onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: rulebooks.latam, brand, model: models.latam, reportToHandle: '@reconcile' }),
+      onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: rulebooks.latam, brand, model: models.latam, reportToHandle: '@reconcile', precedents: this.opts.getPrecedents }),
     });
     await room.connectAgent({
       agentId: 'brand',

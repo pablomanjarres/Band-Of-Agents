@@ -30,6 +30,8 @@ export interface BandBoardOptions {
   onPrecedent?: (precedent: Precedent) => void;
   /** Host generated images (base64 -> short URL) so band.ai messages stay small. */
   hostImage?: (url: string) => string;
+  /** Recent precedent lines fed into the region reviewers' shared context. */
+  getPrecedents?: () => string[];
   /** Delay after adding agents before posting, so they subscribe to the new room. */
   joinDelayMs?: number;
 }
@@ -90,21 +92,21 @@ export class BandBoard {
       name: 'US Reviewer',
       handle: '@pablomanjarres/us-reviewer',
       envPrefix: 'US',
-      onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: rulebooks.us, brand, model: models.us, reportToHandle: RECONCILE_HANDLE, ignoreFromHandle: INTAKE_HANDLE }),
+      onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: rulebooks.us, brand, model: models.us, reportToHandle: RECONCILE_HANDLE, ignoreFromHandle: INTAKE_HANDLE, precedents: this.opts.getPrecedents }),
     });
     await this.transport.connectAgent({
       agentId: ids.eu,
       name: 'EU Reviewer',
       handle: '@pablomanjarres/eu-reviewer',
       envPrefix: 'EU',
-      onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: rulebooks.eu, brand, model: models.eu, reportToHandle: RECONCILE_HANDLE, ignoreFromHandle: INTAKE_HANDLE }),
+      onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: rulebooks.eu, brand, model: models.eu, reportToHandle: RECONCILE_HANDLE, ignoreFromHandle: INTAKE_HANDLE, precedents: this.opts.getPrecedents }),
     });
     await this.transport.connectAgent({
       agentId: ids.latam,
       name: 'LATAM Reviewer',
       handle: '@pablomanjarres/latam-reviewer',
       envPrefix: 'LATAM',
-      onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: rulebooks.latam, brand, model: models.latam, reportToHandle: RECONCILE_HANDLE, ignoreFromHandle: INTAKE_HANDLE }),
+      onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: rulebooks.latam, brand, model: models.latam, reportToHandle: RECONCILE_HANDLE, ignoreFromHandle: INTAKE_HANDLE, precedents: this.opts.getPrecedents }),
     });
     await this.transport.connectAgent({
       agentId: ids.brand,
