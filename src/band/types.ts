@@ -97,3 +97,22 @@ export interface AgentConnection {
 export interface BandTransport {
   connectAgent(opts: ConnectOptions): Promise<AgentConnection>;
 }
+
+/** A mention reference for a band.ai message (the participant UUID, plus hints). */
+export interface MentionRef {
+  id: string;
+  handle?: string;
+  name?: string;
+}
+
+/**
+ * Controls for driving a band.ai room proactively as the intake/relay agent:
+ * create the room, add the reviewer agents, and post the campaign so band.ai
+ * runs the review. Returned by RealBandTransport.connectIntake().
+ */
+export interface IntakeControl {
+  createRoom(): Promise<string>;
+  addParticipant(roomId: string, agentId: string, role?: string): Promise<void>;
+  postMessage(roomId: string, content: string, mentions: MentionRef[]): Promise<void>;
+  stop(): Promise<void>;
+}

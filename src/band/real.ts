@@ -1,15 +1,22 @@
 // Real band.ai transport: wraps @band-ai/sdk. Each connectAgent() creates a
 // GenericAdapter-backed Agent, adapts Band's message/tools shape to our seam,
-// and runs it (non-blocking) so several agents can run in one process. Set
-// BAND_DEBUG=1 to trace inbound/outbound activity to stderr.
+// and runs it (non-blocking) so several agents can run in one process. An
+// optional onActivity hook surfaces every outbound message/event for the console
+// to observe the real room. connectIntake() returns a control object that drives
+// a room proactively (create, add participants, post) via the agent's REST
+// facade, which is how the campaign portal injects a campaign into band.ai.
+// Set BAND_DEBUG=1 to trace activity to stderr.
 
 import { Agent, GenericAdapter, loadAgentConfigFromEnv } from '@band-ai/sdk';
 import type {
+  ActivityCallback,
   AgentConnection,
   BandTransport,
   ConnectOptions,
+  IntakeControl,
   Mention,
   MentionInput,
+  MentionRef,
   Participant,
   Peer,
   RoomMessage,
@@ -47,7 +54,30 @@ interface BandAdapterArgs {
   agentName?: string;
 }
 
+// The REST facade reached via agent.runtime.link.rest (verified by intake-probe).
+interface IntakeRest {
+  createChat?: (taskId?: string) => Promise<{ id: string }>;
+  addChatParticipant?: (chatId: string, p: { participantId: string; role: string }) => Promise<unknown>;
+  createChatMessage?: (
+    chatId: string,
+    m: { content: string; messageType?: string; mentions?: MentionRef[] },
+  ) => Promise<unknown>;
+}
+
+type EmitActivity = (kind: 'message' | 'event', content: string, messageType: string) => void;
+
 export class RealBandTransport implements BandTransport {
+  private readonly onActivity?: ActivityCallback;
+  private seq = 0;
+
+  constructor(opts: { onActivity?: ActivityCallback } = {}) {
+    this.onActivity = opts.onActivity;
+  }
+
+  private emit(kind: 'message' | 'event', roomId: string, fromId: string, fromName: string, content: string, messageType: string): void {
+    this.onActivity?.({ kind, roomId, fromId, fromName, content, messageType, mentions: [], seq: this.seq++ });
+  }
+
   async connectAgent(opts: ConnectOptions): Promise<AgentConnection> {
     const config = opts.envPrefix
       ? loadAgentConfigFromEnv({ prefix: opts.envPrefix })
@@ -59,7 +89,9 @@ export class RealBandTransport implements BandTransport {
       const args = raw as BandAdapterArgs;
       const message = toRoomMessage(args.message);
       dbg(`${opts.name} <- ${message.senderName ?? message.senderType}: ${message.content.slice(0, 100)}`);
-      const tools = wrapTools(args.tools, opts.name);
+      const emit: EmitActivity = (kind, content, messageType) =>
+        this.emit(kind, args.message.roomId, config.agentId, opts.name, content, messageType);
+      const tools = wrapTools(args.tools, opts.name, emit);
       try {
         await opts.onMessage(message, tools, {
           roomId: args.message.roomId,
@@ -75,6 +107,43 @@ export class RealBandTransport implements BandTransport {
     dbg(`${opts.name} connecting (${config.agentId})`);
     void agent.run({ signals: false });
     return {
+      stop: async () => {
+        await agent.stop();
+      },
+    };
+  }
+
+  /**
+   * Connect the intake/relay agent and return controls to drive a room
+   * proactively. The campaign portal uses this to create a room, add the
+   * reviewer agents, and post the campaign so band.ai (not the app) runs the
+   * review.
+   */
+  async connectIntake(opts: { envPrefix?: string; name?: string } = {}): Promise<IntakeControl> {
+    const config = opts.envPrefix ? loadAgentConfigFromEnv({ prefix: opts.envPrefix }) : loadAgentConfigFromEnv();
+    const agent = Agent.create({ adapter: new GenericAdapter(async () => {}), config });
+    dbg(`${opts.name ?? 'Intake'} connecting (${config.agentId})`);
+    void agent.run({ signals: false });
+
+    let rest: IntakeRest | undefined;
+    for (let i = 0; i < 20; i += 1) {
+      rest = (agent as { runtime?: { link?: { rest?: IntakeRest } } })?.runtime?.link?.rest;
+      if (rest?.createChat && rest.addChatParticipant && rest.createChatMessage) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!rest?.createChat || !rest.addChatParticipant || !rest.createChatMessage) {
+      throw new Error('Intake REST facade unavailable (agent.runtime.link.rest)');
+    }
+    // Call methods on the facade (not extracted) so `this` stays bound to it.
+    const api = rest;
+    return {
+      createRoom: async () => (await api.createChat!()).id,
+      addParticipant: async (roomId, agentId, role = 'member') => {
+        await api.addChatParticipant!(roomId, { participantId: agentId, role });
+      },
+      postMessage: async (roomId, content, mentions) => {
+        await api.createChatMessage!(roomId, { content, mentions });
+      },
       stop: async () => {
         await agent.stop();
       },
@@ -116,11 +185,12 @@ function stripMentionMarkup(content: string): string {
   return content.replace(/@\[\[[^\]]*\]\]/g, '').replace(/^\s+/, '');
 }
 
-function wrapTools(t: BandToolsLike, agentName: string): RoomTools {
+function wrapTools(t: BandToolsLike, agentName: string, emit: EmitActivity): RoomTools {
   return {
     capabilities: t.capabilities ?? { peers: false, contacts: false, memory: false },
     sendMessage: async (content: string, mentions?: MentionInput) => {
       dbg(`${agentName} -> message: ${content.slice(0, 100)}`);
+      emit('message', content, 'chat');
       await t.sendMessage(content, mentions);
     },
     sendEvent: async (content: string, messageType: string, metadata?: Record<string, unknown>) => {
@@ -128,6 +198,7 @@ function wrapTools(t: BandToolsLike, agentName: string): RoomTools {
       const allowed = new Set(['tool_call', 'tool_result', 'thought', 'error', 'task']);
       const type = allowed.has(messageType) ? messageType : 'thought';
       dbg(`${agentName} -> event(${messageType}): ${content.slice(0, 100)}`);
+      emit('event', content, messageType);
       await t.sendEvent(content, type, metadata);
     },
     getParticipants: async (): Promise<Participant[]> => {
