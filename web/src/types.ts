@@ -96,3 +96,49 @@ export interface ReviewReplayResponse {
   events: BoardEvent[];
   status: BoardStatus;
 }
+
+// Rulebooks ----------------------------------------------------------------
+export interface Rule {
+  id: string;
+  region: string;
+  category: string;
+  severity: Severity;
+  check: string;
+  requiredDisclosure: string | null;
+  sourceUrl?: string;
+}
+
+export interface Rulebook {
+  region: string;
+  label: string;
+  notLegalAdvice: true;
+  rules: Rule[];
+}
+
+export interface RulebookListResponse {
+  rulebooks: Rulebook[];
+}
+
+export interface RulebookResponse {
+  rulebook: Rulebook;
+}
+
+// Asset library ------------------------------------------------------------
+export interface AssetListResponse {
+  assets: ContentAsset[];
+}
+
+export interface AssetResponse {
+  asset: ContentAsset;
+}
+
+// Precedent log ------------------------------------------------------------
+export interface Precedent {
+  roomId: string;
+  regions: string[];
+  decision: string;
+}
+
+export interface PrecedentListResponse {
+  precedents: Precedent[];
+}

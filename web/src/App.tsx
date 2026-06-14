@@ -1,9 +1,11 @@
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { HistoryPage } from './pages/HistoryPage';
+import { LibraryPage } from './pages/LibraryPage';
 import { LiveBoardPage } from './pages/LiveBoardPage';
 import { NewReviewPage } from './pages/NewReviewPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { ReplayBoardPage } from './pages/ReplayBoardPage';
+import { RulebooksPage } from './pages/RulebooksPage';
 
 const NAV_ITEMS = [
   { to: '/', label: 'New Review', end: true },
@@ -55,24 +57,8 @@ export default function App() {
           <Route path="/reviews/:id" element={<LiveBoardPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/history/:id" element={<ReplayBoardPage />} />
-          <Route
-            path="/rulebooks"
-            element={
-              <PlaceholderPage
-                title="Rulebooks"
-                description="Regional compliance rulebooks will live here. The backend routes are not wired up yet."
-              />
-            }
-          />
-          <Route
-            path="/library"
-            element={
-              <PlaceholderPage
-                title="Library"
-                description="A library of approved assets and reusable claims will live here."
-              />
-            }
-          />
+          <Route path="/rulebooks" element={<RulebooksPage />} />
+          <Route path="/library" element={<LibraryPage />} />
           <Route
             path="*"
             element={

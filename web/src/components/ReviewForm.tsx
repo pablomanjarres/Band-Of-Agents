@@ -14,19 +14,37 @@ const SAMPLE: CreateReviewRequest = {
     'Uses the EFSA-authorised health-claim wording for vitamin C and the normal function of the immune system; 80 mg per serving (100% NRV).',
 };
 
-interface ReviewFormProps {
-  onSubmit: (body: CreateReviewRequest) => Promise<void>;
+export interface ReviewFormValues {
+  copy: string;
+  claim: string;
+  channel: string;
+  markets: string[];
+  imagePrompt: string;
+  substantiation: string;
 }
 
-export function ReviewForm({ onSubmit }: ReviewFormProps) {
-  const [copy, setCopy] = useState('');
-  const [claim, setClaim] = useState('');
-  const [channel, setChannel] = useState('instagram');
-  const [markets, setMarkets] = useState<Market[]>([]);
-  const [imagePrompt, setImagePrompt] = useState('');
-  const [substantiation, setSubstantiation] = useState('');
+interface ReviewFormProps {
+  onSubmit: (body: CreateReviewRequest) => Promise<void>;
+  initial?: Partial<ReviewFormValues>;
+  onSaveToLibrary?: (values: ReviewFormValues) => Promise<void>;
+}
+
+function normalizeMarkets(markets: readonly string[] | undefined): Market[] {
+  if (!markets) return [];
+  return MARKET_OPTIONS.filter((option) => markets.includes(option));
+}
+
+export function ReviewForm({ onSubmit, initial, onSaveToLibrary }: ReviewFormProps) {
+  const [copy, setCopy] = useState(initial?.copy ?? '');
+  const [claim, setClaim] = useState(initial?.claim ?? '');
+  const [channel, setChannel] = useState(initial?.channel ?? 'instagram');
+  const [markets, setMarkets] = useState<Market[]>(normalizeMarkets(initial?.markets));
+  const [imagePrompt, setImagePrompt] = useState(initial?.imagePrompt ?? '');
+  const [substantiation, setSubstantiation] = useState(initial?.substantiation ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   function toggleMarket(market: Market) {
     setMarkets((prev) =>
@@ -42,6 +60,18 @@ export function ReviewForm({ onSubmit }: ReviewFormProps) {
     setImagePrompt(SAMPLE.imagePrompt ?? '');
     setSubstantiation(SAMPLE.substantiation ?? '');
     setError(null);
+    setSaveMessage(null);
+  }
+
+  function currentValues(): ReviewFormValues {
+    return {
+      copy: copy.trim(),
+      claim: claim.trim(),
+      channel: channel.trim() || 'instagram',
+      markets: [...markets],
+      imagePrompt: imagePrompt.trim(),
+      substantiation: substantiation.trim(),
+    };
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -69,6 +99,26 @@ export function ReviewForm({ onSubmit }: ReviewFormProps) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit review.');
       setSubmitting(false);
+    }
+  }
+
+  async function handleSaveToLibrary() {
+    if (!onSaveToLibrary) return;
+    if (!copy.trim() || !claim.trim()) {
+      setSaveMessage(null);
+      setError('Copy and claim are required to save to the library.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setSaveMessage(null);
+    try {
+      await onSaveToLibrary(currentValues());
+      setSaveMessage('Saved to library.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save to library.');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -181,14 +231,27 @@ export function ReviewForm({ onSubmit }: ReviewFormProps) {
       </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {saveMessage ? <p className="text-sm text-emerald-600">{saveMessage}</p> : null}
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="inline-flex items-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {submitting ? 'Submitting.' : 'Submit for review'}
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="submit"
+          disabled={submitting}
+          className="inline-flex items-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {submitting ? 'Submitting.' : 'Submit for review'}
+        </button>
+        {onSaveToLibrary ? (
+          <button
+            type="button"
+            onClick={handleSaveToLibrary}
+            disabled={saving}
+            className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? 'Saving.' : 'Save to library'}
+          </button>
+        ) : null}
+      </div>
     </form>
   );
 }

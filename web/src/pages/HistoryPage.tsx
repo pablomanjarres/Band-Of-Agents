@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listReviews } from '../api';
-import type { BoardStatus, ReviewSummary } from '../types';
+import { listPrecedents, listReviews } from '../api';
+import type { BoardStatus, Precedent, ReviewSummary } from '../types';
 
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; reviews: ReviewSummary[] };
+
+type PrecedentState =
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready'; precedents: Precedent[] };
 
 const STATUS_STYLES: Record<BoardStatus, string> = {
   running: 'bg-indigo-100 text-indigo-700',
@@ -22,6 +27,7 @@ function formatDate(ms: number): string {
 
 export function HistoryPage() {
   const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
+  const [precedents, setPrecedents] = useState<PrecedentState>({ kind: 'loading' });
 
   useEffect(() => {
     let active = true;
@@ -34,6 +40,25 @@ export function HistoryPage() {
           setLoad({
             kind: 'error',
             message: err instanceof Error ? err.message : 'Failed to load history.',
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    listPrecedents()
+      .then((res) => {
+        if (active) setPrecedents({ kind: 'ready', precedents: res.precedents });
+      })
+      .catch((err: unknown) => {
+        if (active) {
+          setPrecedents({
+            kind: 'error',
+            message: err instanceof Error ? err.message : 'Failed to load precedents.',
           });
         }
       });
@@ -93,6 +118,30 @@ export function HistoryPage() {
           ))}
         </ul>
       )}
+
+      <section className="space-y-3 pt-2">
+        <h2 className="text-lg font-bold text-slate-900">Precedent log</h2>
+        {precedents.kind === 'loading' ? (
+          <p className="text-sm text-slate-500">Loading precedents.</p>
+        ) : precedents.kind === 'error' ? (
+          <p className="text-sm text-red-600">{precedents.message}</p>
+        ) : precedents.precedents.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
+            No precedents recorded yet.
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            {precedents.precedents.map((precedent) => (
+              <li key={precedent.roomId} className="flex items-start gap-3 px-5 py-3">
+                <span className="mt-0.5 shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                  {precedent.regions.join(', ') || 'no regions'}
+                </span>
+                <p className="text-sm text-slate-700">{precedent.decision}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

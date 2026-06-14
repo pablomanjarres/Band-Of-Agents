@@ -1,10 +1,17 @@
 import type {
+  AssetListResponse,
+  AssetResponse,
   BoardEvent,
+  ContentAsset,
   CreateReviewRequest,
   CreateReviewResponse,
   DecisionResponse,
+  PrecedentListResponse,
   ReviewListResponse,
   ReviewReplayResponse,
+  Rulebook,
+  RulebookListResponse,
+  RulebookResponse,
 } from './types';
 
 async function asJson<T>(res: Response): Promise<T> {
@@ -41,6 +48,52 @@ export async function listReviews(): Promise<ReviewListResponse> {
 export async function getReview(id: string): Promise<ReviewReplayResponse> {
   const res = await fetch(`/api/reviews/${encodeURIComponent(id)}`);
   return asJson<ReviewReplayResponse>(res);
+}
+
+// Rulebooks ----------------------------------------------------------------
+export async function listRulebooks(): Promise<RulebookListResponse> {
+  const res = await fetch('/api/rulebooks');
+  return asJson<RulebookListResponse>(res);
+}
+
+export async function getRulebook(region: string): Promise<RulebookResponse> {
+  const res = await fetch(`/api/rulebooks/${encodeURIComponent(region)}`);
+  return asJson<RulebookResponse>(res);
+}
+
+export async function saveRulebook(
+  region: string,
+  rulebook: Rulebook,
+): Promise<RulebookResponse> {
+  const res = await fetch(`/api/rulebooks/${encodeURIComponent(region)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(rulebook),
+  });
+  return asJson<RulebookResponse>(res);
+}
+
+// Asset library ------------------------------------------------------------
+export async function listAssets(): Promise<AssetListResponse> {
+  const res = await fetch('/api/assets');
+  return asJson<AssetListResponse>(res);
+}
+
+export type NewContentAsset = Omit<ContentAsset, 'id'> & { id?: string };
+
+export async function createAsset(asset: NewContentAsset): Promise<AssetResponse> {
+  const res = await fetch('/api/assets', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(asset),
+  });
+  return asJson<AssetResponse>(res);
+}
+
+// Precedent log ------------------------------------------------------------
+export async function listPrecedents(): Promise<PrecedentListResponse> {
+  const res = await fetch('/api/precedents');
+  return asJson<PrecedentListResponse>(res);
 }
 
 export interface EventSubscription {
