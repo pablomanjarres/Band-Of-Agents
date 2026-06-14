@@ -110,11 +110,23 @@ Best business-value story (most content never touches the expensive board) and t
 
 ---
 
-## Proposal 4: The Blackboard (expanded: the full knowledge-source cast)
+## Proposal 4: The Blackboard, federated into pods on a decision spine
 
-Metaphor: a war room of specialists around a shared board. The board holds the asset plus every annotation and open work-item. Each agent is a knowledge source: it watches the board and acts only when the board hits its trigger condition. Order emerges from the content on the board, not from a fixed graph. (Classic blackboard AI architecture; the Band room is the board.)
+Metaphor: an editorial floor. Specialists do not each shout at one board. They work in small pods (local pipelines) that deliberate among themselves, then file one consolidated finding to a shared board. A decision spine then moves the asset from intake to a terminal verdict. This keeps the blackboard's strength (a shared context many agents reason over) but adds local structure, real agent-to-agent debate, clear movement, and a definite end. (Blackboard AI architecture, but federated into pods on a spine.)
 
-This is the pattern with the most room for a large, legible cast, because adding an agent is just adding one more knowledge source with a trigger and a model. The roster below is what makes the board feel alive, and it is the part the first draft was missing.
+A flat board where every agent posts straight to the center has no movement, no real flow, and no clear final state. Pods fix that: they create local discussion before anything reaches the board, and the spine gives the whole run a direction and a terminus.
+
+### Structure: pods, then the board, then a decision spine
+- Pods (local pipelines, where the discussions happen). Each pod is a small cluster that passes work agent to agent and debates before emitting one consolidated finding.
+  - Claims pod: Scout, Claim & Evidence, Precedent Librarian. Extracts claims, tests substantiation, attaches prior rulings, then files a claim dossier.
+  - Regulatory pod (the debate): US, EU, and LATAM argue the dossier against their rulebooks and against each other, then file their verdicts plus the specific cross-region conflict.
+  - Brand pod: Brand Voice, Channel Fit, Visual settle on-voice and hook constraints, then file a brand-fit note.
+- The board (reconciliation). Pods post here; this is where cross-pod conflict becomes visible (Regulatory says cut, Brand says the claim is the hook). The Mediator, Disclosure Drafter, and Remediation operate at the board to resolve it.
+- The decision spine (movement and a final state). The asset travels intake, to pods, to board, to the Risk Adjudicator, which drives a terminal verdict: published, spiked, or escalated to the human then ruled. One explicit loop (remediate and recommit) sends a revised asset back through the pods. There is no ambiguous, never-ending board.
+
+The Conductor sequences which pod or agent acts next; the Risk Adjudicator owns the decision and is the only path to the human.
+
+The roster below is the cast that fills these pods. Adding an agent is just adding a trigger and a model to a pod, so the cast is cheap to grow.
 
 ### The cast (knowledge sources)
 
@@ -160,7 +172,7 @@ No single agent reviews the content; coordination is a property of the board sta
 Conflict is the engine of the whole cascade: the clash is what pulls the mediator, precedent, disclosure, and remediation agents in.
 
 ### Why it is not scatter-gather
-There is no broadcast and no single aggregator. Agents wake on board state, act, and post back; the same agent can wake several times across a run; and the order is different for every asset. The board is a shared artifact, not an orchestrator.
+Two reasons. Inside a pod, agents debate each other before anything reaches the board, so there is local pipeline structure and genuine agent-to-agent discussion, not blind parallel posting. Across the system, the decision spine carries the asset from intake to a terminal verdict, so there is clear direction and a defined end, not a flat hub. The board is a shared reconciliation surface, not an orchestrator.
 
 ### Band primitives it leans on
 The room is the board; `getChatContext` rehydrates board state for any waking agent. `sendEvent` posts an annotation or a work-item (visible reasoning). A waking agent is brought in via `addParticipant` and a directed @mention; `lookupPeers` lets the Conductor see who can be woken. LATAM Regulatory is added with `addParticipant` only when a LATAM target is in scope (dynamic recruitment on camera).
