@@ -1,9 +1,10 @@
 // band.ai room mode: band.ai's app is the entry point. You create a room in
 // app.band.ai, add the agents, and post "Coordinator, review campaign <name>".
-// The agents collaborate in that room, reading/writing our store (rulebooks,
+// The agents collaborate in that room in PLAIN ENGLISH, sharing the structured
+// data in-process via a SharedBoard, and reading/writing our store (rulebooks,
 // saved campaigns, verdicts, precedents). This backend only connects the agents
-// and OBSERVES: it never creates rooms. Every review you start in band.ai is
-// auto-discovered from the room's activity and streamed to the dashboard.
+// and OBSERVES: it never creates rooms. The dashboard is fed by the SharedBoard
+// (structured) plus the room's plain-English chatter (timeline).
 
 import { RealBandTransport } from '../band/real';
 import type { BoardActivity } from '../band/types';
@@ -14,6 +15,7 @@ import { makeRemediation } from '../agents/remediation';
 import { makeReconcile, type Precedent } from '../agents/reconcile';
 import type { BrandDna, ContentAsset, Rulebook } from '../domain/types';
 import { translateActivity, type BoardEvent } from './events';
+import { SharedBoard } from './shared';
 import type { BoardModels } from './session';
 
 const COORDINATOR_HANDLE = '@pablomanjarres/coordinator';
@@ -39,17 +41,17 @@ export interface BandBoardOptions {
 
 interface RoomBinding {
   onEvent: (event: BoardEvent) => void;
-  escalated: boolean;
-  decided: boolean;
 }
 
 export class BandBoard {
   private readonly transport: RealBandTransport;
+  private readonly board: SharedBoard;
   private started = false;
   private readonly rooms = new Map<string, RoomBinding>();
 
   constructor(private readonly opts: BandBoardOptions) {
     this.transport = new RealBandTransport({ onActivity: (a) => this.dispatch(a) });
+    this.board = new SharedBoard((roomId, event) => this.routeEvent(roomId, event));
   }
 
   /** Connect the agents so you can add them to a room in app.band.ai. We never create rooms. */
@@ -57,6 +59,7 @@ export class BandBoard {
     if (this.started) return;
     this.started = true;
     const { brand, rulebooks, models } = this.opts;
+    const board = this.board;
     const rulebookFor = (region: 'us' | 'eu' | 'latam'): (() => Rulebook) => () =>
       this.opts.getRulebook?.(region.toUpperCase()) ?? rulebooks[region];
 
@@ -66,7 +69,9 @@ export class BandBoard {
       handle: COORDINATOR_HANDLE,
       envPrefix: 'COORDINATOR',
       onMessage: makeCoordinator({
+        board,
         remediationHandle: REMEDIATION_HANDLE,
+        reconcileHandle: RECONCILE_HANDLE,
         ...(this.opts.lookupCampaign ? { lookupCampaign: this.opts.lookupCampaign } : {}),
       }),
     });
@@ -75,35 +80,35 @@ export class BandBoard {
       name: 'US Reviewer',
       handle: '@pablomanjarres/us-reviewer',
       envPrefix: 'US',
-      onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: rulebooks.us, brand, model: models.us, reportToHandle: RECONCILE_HANDLE, getRulebook: rulebookFor('us'), precedents: this.opts.getPrecedents }),
+      onMessage: makeRegionReviewer({ board, region: 'US', reviewerName: 'US Reviewer', rulebook: rulebooks.us, brand, model: models.us, reportToHandle: RECONCILE_HANDLE, getRulebook: rulebookFor('us'), precedents: this.opts.getPrecedents }),
     });
     await this.transport.connectAgent({
       agentId: requireEnv('EU_AGENT_ID'),
       name: 'EU Reviewer',
       handle: '@pablomanjarres/eu-reviewer',
       envPrefix: 'EU',
-      onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: rulebooks.eu, brand, model: models.eu, reportToHandle: RECONCILE_HANDLE, getRulebook: rulebookFor('eu'), precedents: this.opts.getPrecedents }),
+      onMessage: makeRegionReviewer({ board, region: 'EU', reviewerName: 'EU Reviewer', rulebook: rulebooks.eu, brand, model: models.eu, reportToHandle: RECONCILE_HANDLE, getRulebook: rulebookFor('eu'), precedents: this.opts.getPrecedents }),
     });
     await this.transport.connectAgent({
       agentId: requireEnv('LATAM_AGENT_ID'),
       name: 'LATAM Reviewer',
       handle: '@pablomanjarres/latam-reviewer',
       envPrefix: 'LATAM',
-      onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: rulebooks.latam, brand, model: models.latam, reportToHandle: RECONCILE_HANDLE, getRulebook: rulebookFor('latam'), precedents: this.opts.getPrecedents }),
+      onMessage: makeRegionReviewer({ board, region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: rulebooks.latam, brand, model: models.latam, reportToHandle: RECONCILE_HANDLE, getRulebook: rulebookFor('latam'), precedents: this.opts.getPrecedents }),
     });
     await this.transport.connectAgent({
       agentId: requireEnv('BRAND_AGENT_ID'),
       name: 'Brand Reviewer',
       handle: '@pablomanjarres/brand-reviewer',
       envPrefix: 'BRAND',
-      onMessage: makeBrandReviewer({ brand, model: models.brand, reportToHandle: RECONCILE_HANDLE }),
+      onMessage: makeBrandReviewer({ board, brand, model: models.brand, reportToHandle: RECONCILE_HANDLE }),
     });
     await this.transport.connectAgent({
       agentId: requireEnv('REMEDIATION_AGENT_ID'),
       name: 'Remediation',
       handle: REMEDIATION_HANDLE,
       envPrefix: 'REMEDIATION',
-      onMessage: makeRemediation({ brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: COORDINATOR_HANDLE, ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}) }),
+      onMessage: makeRemediation({ board, brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: COORDINATOR_HANDLE, ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}) }),
     });
     await this.transport.connectAgent({
       agentId: requireEnv('RECONCILE_AGENT_ID'),
@@ -111,6 +116,7 @@ export class BandBoard {
       handle: RECONCILE_HANDLE,
       envPrefix: 'RECONCILE',
       onMessage: makeReconcile({
+        board,
         expectedRegions: ['US', 'EU', 'LATAM', 'BRAND'],
         coordinatorHandle: COORDINATOR_HANDLE,
         remediationHandle: REMEDIATION_HANDLE,
@@ -120,36 +126,20 @@ export class BandBoard {
     });
   }
 
+  /** Plain-English room chatter -> timeline log lines. Structured diagram state comes from the board. */
   private dispatch(activity: BoardActivity): void {
-    let binding = this.rooms.get(activity.roomId);
-    if (!binding) {
-      // A review just started in a band.ai room: register and stream it.
-      binding = { onEvent: this.opts.onReviewDiscovered(activity.roomId), escalated: false, decided: false };
-      this.rooms.set(activity.roomId, binding);
-      binding.onEvent({ type: 'status', seq: 0, fromName: 'system', status: 'running' });
-    }
-
     const event = translateActivity(activity);
-    if (!event) return;
-    if (event.type === 'escalation') binding.escalated = true;
-    if (event.type === 'decision') binding.decided = true;
-    binding.onEvent(event);
+    if (event) this.routeEvent(activity.roomId, event);
+  }
 
-    // band.ai has no local drain, so derive terminal status from the verdict:
-    // adapt is mid-flight (remediation + re-review follow), escalate awaits the
-    // human (who rules in band.ai), all-publish is complete.
-    if (event.type === 'verdict') {
-      const decisions = event.verdicts.map((v) => v.decision);
-      const status = decisions.includes('adapt')
-        ? 'running'
-        : decisions.includes('escalate')
-          ? 'awaiting-decision'
-          : 'complete';
-      binding.onEvent({ type: 'status', seq: 0, fromName: 'system', status });
+  /** Route a board/chatter event to the dashboard, auto-discovering the review on first activity. */
+  private routeEvent(roomId: string, event: BoardEvent): void {
+    let binding = this.rooms.get(roomId);
+    if (!binding) {
+      binding = { onEvent: this.opts.onReviewDiscovered(roomId) };
+      this.rooms.set(roomId, binding);
     }
-    if (event.type === 'decision') {
-      binding.onEvent({ type: 'status', seq: 0, fromName: 'system', status: 'complete' });
-    }
+    binding.onEvent(event);
   }
 }
 
