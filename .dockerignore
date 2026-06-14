@@ -1,0 +1,17 @@
+# Keep the Cloud Run build context small: only the backend ships.
+node_modules
+.git
+.gitignore
+data
+web
+docs
+tasks
+test
+.private
+.claude
+.env
+.env.*
+*.log
+Dockerfile
+.dockerignore
+vercel.json
