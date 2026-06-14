@@ -68,10 +68,21 @@ send/recv/event -> BoardActivity -> BoardEvent -> SSE per review.
 - [x] BoardActivity hook on the transport seam (types + FakeBandTransport), additive
 - [x] BoardEvent model + activity->event translator (src/board/events.ts)
 - [x] Board session orchestrator (src/board/session.ts) over the seam, real or stub models
-- [ ] Hono server: POST /api/reviews, GET /api/reviews/:id/events (SSE), POST decision, history
-- [ ] web/ scaffold: New Review form + Live Board (region cards, timeline, remediation, escalation)
-- [ ] Verify vertical slice end to end (local mode, real models), typecheck + tests green
-- [ ] File-backed store + history/precedent
-- [ ] Rulebook viewer/editor (per-review reload so edits are live)
-- [ ] Saved asset library
-- [ ] band.ai room mode: Intake agent + minimal opt-in Coordinator/Reconcile tweaks
+- [x] Hono server: POST /api/reviews, GET /api/reviews/:id/events (SSE), POST decision, history
+- [x] web/ scaffold: New Review form + Live Board (region cards, timeline, remediation, escalation)
+- [x] Verify vertical slice end to end (local mode, real models): real review + real Nano Banana image over SSE
+- [x] File-backed store + history/precedent (+ image hosting so events stay small)
+- [x] Rulebook viewer/editor (per-review reload so edits are live)
+- [x] Saved asset library
+- [x] band.ai room mode, part 1: opt-in Coordinator/Reconcile intake/proxy acceptance (tested)
+- [ ] band.ai room mode, part 2: Intake agent (REST createChat/addChatParticipant/createChatMessage)
+      + BandBoardSession + server BOARD_MODE=band. NEEDS an 8th "Intake" band.ai agent's creds
+      (INTAKE_AGENT_ID / INTAKE_API_KEY) for live wiring + verification.
+
+## Review (UI)
+- 2026-06-13: Full-scope compliance console working in LOCAL mode (in-process transport, real
+  multi-model agents). Verified end to end over SSE: real US/EU/LATAM/BRAND review, EU adapt ->
+  remediation -> real Nano Banana image (hosted), conflict + escalation, history/precedent/rulebook
+  editor/asset library, persistence across restart. 16 vitest tests pass, tsc clean. The board uses
+  the exact same agents as band.ai; only the message transport differs. Live-room mode (band.ai)
+  is the remaining piece and needs one more agent created in app.band.ai.
