@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://REPLACE_WITH_CLOUD_RUN_URL/api/:path*" },
+    { "source": "/api/:path*", "destination": "https://band-backend-1068570846548.us-east1.run.app/api/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
