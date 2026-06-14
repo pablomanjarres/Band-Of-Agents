@@ -16,6 +16,7 @@ import { makeReconcile, type Precedent } from '../agents/reconcile';
 import type { ModelClient } from '../models/client';
 import { imageClientFor, modelFor } from '../models/route';
 import type { BrandDna, ContentAsset, Rulebook } from '../domain/types';
+import type { NewArtifact } from '../domain/artifact';
 import { translateActivity, type BoardEvent } from './events';
 import { SharedBoard } from './shared';
 
@@ -51,6 +52,8 @@ export interface BoardSessionOptions {
   onPrecedent?: (precedent: Precedent) => void;
   /** Host generated images (base64 -> short URL) so messages stay small. */
   hostImage?: (url: string) => string;
+  /** Register an artifact and get a dashboard viewer URL agents paste into the room. */
+  publishArtifact?: (input: NewArtifact) => { id: string; url: string };
   /** Recent precedent lines fed into the region reviewers' shared context. */
   getPrecedents?: () => string[];
 }
@@ -117,7 +120,7 @@ export class BoardSession {
       agentId: 'rem',
       name: 'Remediation',
       handle: '@remediation',
-      onMessage: makeRemediation({ board, brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: '@coordinator', ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}) }),
+      onMessage: makeRemediation({ board, brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: '@coordinator', ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}), ...(this.opts.publishArtifact ? { publishArtifact: this.opts.publishArtifact } : {}) }),
     });
     await room.connectAgent({
       agentId: 'rec',
@@ -130,6 +133,7 @@ export class BoardSession {
         remediationHandle: '@remediation',
         humanHandle: '@compliance-lead',
         ...(this.opts.onPrecedent ? { logPrecedent: this.opts.onPrecedent } : {}),
+        ...(this.opts.publishArtifact ? { publishArtifact: this.opts.publishArtifact } : {}),
       }),
     });
 

@@ -1,4 +1,5 @@
 import { NavLink, Route, Routes } from 'react-router-dom';
+import { ArtifactViewerPage } from './pages/ArtifactViewerPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { LiveBoardPage } from './pages/LiveBoardPage';
@@ -56,6 +57,7 @@ export default function App() {
         <ErrorBoundary>
         <Routes>
           <Route path="/" element={<NewReviewPage />} />
+          <Route path="/a/:id" element={<ArtifactViewerPage />} />
           <Route path="/reviews/:id" element={<LiveBoardPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/history/:id" element={<ReplayBoardPage />} />
