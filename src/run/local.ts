@@ -1,24 +1,24 @@
-// Local end-to-end demo of the full review board on the in-process fake
-// transport. Runs the whole debate with stub models (no API keys), exercising
-// all three outcome paths from the architecture: publish, adapt -> remediation
-// (rewrite + regenerated image), and escalate -> human. Swap in the real Band
-// transport and real model clients (pnpm agents) once credentials are wired.
+// Local end-to-end demo of the pods -> board -> spine topology on the in-process
+// fake transport. Runs the whole deliberation with stub models (no API keys):
+// the Conductor fans the asset to three pods, the Regulatory pod debates (US
+// passes, EU blocks and holds on rebuttal), each pod files one PodFinding, the
+// Risk Adjudicator consults the Mediator, runs one remediation cycle that still
+// fails, escalates to the human, and the human reject yields a terminal spiked.
+// Swap in the real Band transport and real model clients (pnpm agents) once
+// credentials are wired.
 //
 //   pnpm local
 
 import { FakeBandTransport } from '../band/fake';
-import { makeCoordinator } from '../agents/coordinator';
-import { makeRegionReviewer } from '../agents/region-reviewer';
-import { makeBrandReviewer } from '../agents/brand-reviewer';
-import { makeRemediation } from '../agents/remediation';
-import { makeReconcile } from '../agents/reconcile';
+import { connectPodBoardAgents, type PodBoardModels } from '../board/pod-board';
+import { translateActivity } from '../board/events';
 import { StubModelClient, type ModelClient } from '../models/client';
 import { loadAsset, loadBrandDna, loadRulebook } from '../domain/load';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
 
-function findings(...items: unknown[]): { text: string; json: { findings: unknown[] } } {
-  return { text: '', json: { findings: items } };
+function findings(severity: 'block' | 'warn' | 'info', claim: string): { text: string; json: { findings: unknown[] } } {
+  return { text: '', json: { findings: [{ category: 'claim', severity, claim, rationale: 'r' }] } };
 }
 
 async function main(): Promise<void> {
@@ -27,66 +27,51 @@ async function main(): Promise<void> {
   const euRules = loadRulebook(`${ASSETS}rulebook.eu.json`);
   const latamRules = loadRulebook(`${ASSETS}rulebook.latam.json`);
   const asset = loadAsset(`${ASSETS}sample-asset.json`);
+  const claim = asset.claim;
 
   // Stub models so the full debate runs with no keys. Real runs route through
-  // AIML (main) or Bedrock/Vertex (dev) via the ModelClient seam.
-  const usModel = new StubModelClient(() =>
-    findings({ category: 'endorsement', severity: 'warn', claim: '9 out of 10 users felt healthier', rationale: 'Add a typical-results disclosure; substantiation is on file.', ruleId: 'us-testimonial' }),
-  );
-  const euModel = new StubModelClient(() =>
-    findings(
-      { category: 'health_claim', severity: 'block', claim: 'clinically proven to boost your immune system', rationale: 'Unauthorised health claim; not on the EU Register.', ruleId: 'eu-health-preauth' },
-      { category: 'disclosure', severity: 'block', claim: 'whole asset', rationale: 'Missing Article 10(2) statements.', ruleId: 'eu-mandatory-disclosure', requiredDisclosure: 'Article 10(2) accompanying statements' },
-    ),
-  );
-  const latamModel = new StubModelClient(() =>
-    findings({ category: 'localization', severity: 'block', claim: 'whole asset', rationale: 'Copy is not localized to Portuguese/Spanish.', ruleId: 'latam-localization', requiredDisclosure: 'Localized copy' }),
-  );
-  const brandModel = new StubModelClient(() => findings());
-  const copyModel = new StubModelClient(() => ({
-    text: 'Lumavida Immune+ apoia o seu bem-estar diario como parte de uma dieta variada e equilibrada e de um estilo de vida saudavel.',
-  }));
-  const imageModel: ModelClient = {
-    model: 'stub-image',
-    complete: async () => ({ text: '' }),
-    generateImage: async () => ({ url: 'https://cdn.aimlapi.com/lumavida-latam.png' }),
+  // AIML (main) or Bedrock/Vertex/Featherless (dev) via the ModelClient seam.
+  const pass: ModelClient = new StubModelClient(() => findings('info', claim));
+  const empty: ModelClient = new StubModelClient(() => ({ text: '', json: { findings: [] } }));
+  // EU blocks on review, then holds on rebuttal: a two-phase model keyed on call count.
+  let euCall = 0;
+  const euModel: ModelClient = new StubModelClient(() => (euCall++ % 2 === 0
+    ? findings('block', claim)
+    : { text: '', json: { stance: 'hold', rationale: 'unlawful' } }));
+  const mediator: ModelClient = new StubModelClient(() => ({ text: '', json: { resolved: false, note: 'no movement', requiredDisclosure: null } }));
+  const revised: ModelClient = new StubModelClient(() => ({ text: JSON.stringify({ ...asset, copy: 'softened' }) }));
+  const image: ModelClient = { model: 'stub-image', complete: async () => ({ text: '' }), generateImage: async () => ({ url: 'https://cdn.aimlapi.com/lumavida.png' }) };
+
+  const models: PodBoardModels = {
+    scout: empty, claim: empty, precedent: empty, disclosure: empty,
+    us: pass, eu: euModel, latam: pass,
+    brand: empty, channel: empty, visual: empty,
+    mediator, remediationCopy: revised, image,
   };
 
-  const room = new FakeBandTransport('demo-room');
-  room.addUser('lead', 'Compliance Lead', '@compliance-lead');
-  await room.connectAgent({ agentId: 'coord', name: 'Coordinator', handle: '@coordinator', onMessage: makeCoordinator() });
-  await room.connectAgent({ agentId: 'us', name: 'US Reviewer', handle: '@us-reviewer', onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: usRules, brand, model: usModel, reportToHandle: '@reconcile' }) });
-  await room.connectAgent({ agentId: 'eu', name: 'EU Reviewer', handle: '@eu-reviewer', onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: euRules, brand, model: euModel, reportToHandle: '@reconcile' }) });
-  await room.connectAgent({ agentId: 'latam', name: 'LATAM Reviewer', handle: '@latam-reviewer', onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: latamRules, brand, model: latamModel, reportToHandle: '@reconcile' }) });
-  await room.connectAgent({ agentId: 'brand', name: 'Brand Reviewer', handle: '@brand-reviewer', onMessage: makeBrandReviewer({ brand, model: brandModel, reportToHandle: '@reconcile' }) });
-  await room.connectAgent({ agentId: 'rem', name: 'Remediation', handle: '@remediation', onMessage: makeRemediation({ brand, copyModel, imageModel, reportToHandle: '@coordinator' }) });
-  await room.connectAgent({
-    agentId: 'rec',
-    name: 'Reconcile',
-    handle: '@reconcile',
-    onMessage: makeReconcile({
-      expectedRegions: ['US', 'EU', 'LATAM', 'BRAND'],
-      coordinatorHandle: '@coordinator',
-      remediationHandle: '@remediation',
-      humanHandle: '@compliance-lead',
-      logPrecedent: (p) => console.log(`  [precedent] ${JSON.stringify(p)}`),
-    }),
+  const room = new FakeBandTransport('demo-room', {
+    onActivity: (a) => {
+      const e = translateActivity(a);
+      if (e) console.log(`  [event] ${e.type} (${a.fromName}): ${a.content}`);
+    },
   });
+  room.addUser('lead', 'Compliance Lead', '@compliance-lead');
+  await connectPodBoardAgents(room, { brand, rulebooks: { us: usRules, eu: euRules, latam: latamRules }, models });
 
-  console.log(`\n# Multi-region review board (local fake-Band demo, NOT legal advice)`);
+  console.log(`\n# Pods -> board -> spine review (local fake-Band demo, NOT legal advice)`);
   console.log(`# Asset: ${asset.id}; markets US/EU/LATAM + brand consistency\n`);
 
-  room.post('lead', JSON.stringify(asset), [{ id: 'coord' }]);
+  room.post('lead', JSON.stringify(asset), [{ id: 'cond' }]);
   await room.drain();
 
-  room.post('lead', 'Reject for EU: require authorised wording and Article 10(2) disclosures. US may publish with the typical-results disclosure.', [{ id: 'rec' }]);
+  room.post('lead', 'Reject: cannot publish in EU without authorization. US may publish with the typical-results disclosure.', [{ id: 'adj' }]);
   await room.drain();
 
   printTranscript(room);
 }
 
 function printTranscript(room: FakeBandTransport): void {
-  console.log('--- room transcript ---');
+  console.log('\n--- room transcript ---');
   for (const t of room.transcript) {
     if (t.kind === 'event') {
       console.log(`  · ${t.fromName} (${t.messageType}): ${t.content}`);
