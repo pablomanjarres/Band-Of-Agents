@@ -48,3 +48,30 @@ Platform: band.ai. Stack: TypeScript, Node 22+, pnpm, ESM. No commits/remote (pe
   Bedrock/Vertex dev, one MODEL_MODE switch) and RealBandTransport both written and typechecked
   against the real SDKs. 10 vitest tests pass, `tsc --noEmit` clean. Blocked only on the full
   band.ai agent API keys for the live run.
+
+---
+
+# Review Board UI (compliance console)
+
+Goal: a React + Tailwind console so a user submits an asset via a form (not JSON) and watches the
+multi-region review stream live, including remediated copy + the Nano Banana image.
+
+Approved: real band.ai room integration (built over the transport seam so it also runs in-process);
+Full scope (form + live board + history/precedent + rulebook editor + asset library); clean console.
+
+Architecture: Hono backend reuses src/ and runs a board "session" over the BandTransport seam.
+BOARD_MODE=local (FakeBandTransport + real models, no extra creds) for an immediate demo;
+BOARD_MODE=band (RealBandTransport + an Intake agent) for the live room. Activity bus: each agent
+send/recv/event -> BoardActivity -> BoardEvent -> SSE per review.
+
+## Tasks
+- [x] BoardActivity hook on the transport seam (types + FakeBandTransport), additive
+- [x] BoardEvent model + activity->event translator (src/board/events.ts)
+- [x] Board session orchestrator (src/board/session.ts) over the seam, real or stub models
+- [ ] Hono server: POST /api/reviews, GET /api/reviews/:id/events (SSE), POST decision, history
+- [ ] web/ scaffold: New Review form + Live Board (region cards, timeline, remediation, escalation)
+- [ ] Verify vertical slice end to end (local mode, real models), typecheck + tests green
+- [ ] File-backed store + history/precedent
+- [ ] Rulebook viewer/editor (per-review reload so edits are live)
+- [ ] Saved asset library
+- [ ] band.ai room mode: Intake agent + minimal opt-in Coordinator/Reconcile tweaks
