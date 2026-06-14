@@ -144,3 +144,6 @@ vite.config.ts.timestamp-*
 
 # Local compliance-console store (reviews, precedents, images, rulebook overrides)
 /data/
+
+# Private local context (briefs, rubric); never committed, never pushed
+/.private/
