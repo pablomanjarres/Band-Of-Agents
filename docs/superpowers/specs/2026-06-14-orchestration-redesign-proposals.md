@@ -107,3 +107,59 @@ Add a Triage agent and a span-gating step; turn the coordinator from a broadcast
 
 ### Tradeoffs
 Best business-value story (most content never touches the expensive board) and the most idiomatic multi-model routing. Risk: on the single hand-picked demo asset the cheap rungs add steps before the money-shot conflict, so the demo script must start near the top or use an asset that climbs fast.
+
+---
+
+## Proposal 4: The Blackboard
+
+Metaphor: experts around a shared whiteboard. Whoever has something relevant to the current state of the board speaks next. Order emerges from content, not from a fixed graph. (This is the classic blackboard AI architecture, and the Band room is the blackboard.)
+
+### Shape
+No fan-out. A lightweight Controller inspects the board (the asset plus accumulated annotations) and, each step, wakes the single agent whose trigger condition best matches the current state:
+- Board has a raw asset, so wake the specialist who owns the highest-risk surface.
+- Board now carries "EU: disease-claim flag on span X," so wake the disclosure specialist for span X.
+- Board now shows brand and EU annotations conflicting on span X, so wake the mediator.
+- Board reaches a stable disagreement, so wake the human.
+
+### Why it is not scatter-gather
+Conflict is a board state that triggers the mediator, so the system reacts to disagreement as it emerges rather than running a fixed pass. It is the most "agents discover the work" of any pattern here.
+
+### Band primitives it leans on
+The room is the blackboard; `getChatContext` rehydrates board state for any waking agent. `sendEvent` is the act of posting an annotation. The Controller uses `addParticipant` and a directed @mention to wake the chosen agent.
+
+### Multi-model fit
+Controller on a cheap fast router model (Gemini Flash) making the "who acts next" call, specialists on assorted models, mediator on Opus.
+
+### Build delta (high)
+The biggest rework: replace the parallel fan-out with a Controller scheduler loop that selects the next agent from board state, and make agents reactive (each gets a trigger predicate). New controller logic in place of `makeCoordinator`'s broadcast.
+
+### Tradeoffs
+Most architecturally novel and the strongest "emergent coordination" story. Risk: emergent order is the least predictable on video and the hardest to keep demo-stable in a 2 to 3 minute run, and the Controller can become a hidden single point of orchestration if it is too prescriptive.
+
+---
+
+## Proposal 5: Shuttle Diplomacy
+
+Metaphor: Camp David. The two camps in deepest tension (US "ship if substantiated" and EU "pre-authorize plus disclose") never speak directly; a Mediator carries concrete proposals back and forth until convergence or a declared impasse.
+
+### Shape
+A pendulum, not a fan.
+1. Both camps state positions to the Mediator, not to each other.
+2. The Mediator forms one concrete proposal (change wording to X, add disclosure Y, keep the hook in the caption) and shuttles it to camp A.
+3. A accepts or counters; the Mediator carries the delta to camp B; B accepts or counters; back to A. Each shuttle narrows the gap.
+4. Convergence publishes the brokered draft. Repeated non-movement is declared an impasse and goes to the human with the full shuttle record showing exactly which clause neither side would move. Brand sits as a constraint the Mediator must respect (the hook cannot die).
+
+### Why it is not scatter-gather
+The whole structure exists to resolve one genuine bilateral conflict through directed, alternating exchange. There is no broadcast and no aggregation step.
+
+### Band primitives it leans on
+Directed @mentions are the shuttle (Mediator to A, Mediator to B). `sendEvent` shows the current proposal and the narrowing gap. `addParticipant` brings in the human on impasse.
+
+### Multi-model fit
+Mediator on Opus (the hard reasoning), camps on Gemini Pro and Sonnet, the brand constraint on Haiku.
+
+### Build delta (medium)
+Reconcile becomes a shuttle loop (alternating directed messages plus a convergence-or-impasse detector) instead of a one-shot flag-merge. Reuses the existing reviewers as the two camps.
+
+### Tradeoffs
+The cleanest single-conflict story and very legible visually (a pendulum closing a gap). Risk: it models one bilateral conflict well but is awkward when three or more mandates clash at once, so it scales worse than the Table.
