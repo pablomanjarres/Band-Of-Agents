@@ -58,7 +58,13 @@ export type BoardEvent =
   | { type: 'escalation'; seq: number; fromName: string; text: string }
   | { type: 'decision'; seq: number; fromName: string; text: string }
   | { type: 'log'; seq: number; fromName: string; messageType: string; text: string }
-  | { type: 'status'; seq: number; fromName: string; status: BoardStatus };
+  | { type: 'status'; seq: number; fromName: string; status: BoardStatus }
+  | { type: 'workitem'; seq: number; fromName: string; text: string }
+  | { type: 'debate'; seq: number; fromName: string; text: string }
+  | { type: 'pod-finding'; seq: number; fromName: string; pod: string; conflicts: number; text: string }
+  | { type: 'mediation'; seq: number; fromName: string; resolved: boolean; text: string }
+  | { type: 'adjudication'; seq: number; fromName: string; decision: string; text: string }
+  | { type: 'terminal'; seq: number; fromName: string; decision: 'published' | 'spiked' | 'escalated' };
 
 // Request / response shapes for the REST endpoints.
 export interface CreateReviewRequest {
