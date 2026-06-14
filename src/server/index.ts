@@ -1,13 +1,14 @@
-// HTTP + SSE backend for the compliance console. Reuses the domain, agents, and
-// model routing in src/. A POST starts a BoardSession (in-process, real models);
-// the console subscribes over SSE and watches the review stream in live. A small
-// file-backed Store persists reviews, the precedent log, the asset library, and
-// per-region rulebook overrides edited in the UI.
+// HTTP + SSE backend for the campaign portal. Reuses the domain, agents, and
+// model routing in src/. A POST submits a campaign; the console subscribes over
+// SSE and watches the review stream in live.
 //
-//   pnpm serve            (BOARD_MODE=local: FakeBandTransport + real models)
+//   pnpm serve                       (BOARD_MODE=band, the product: a real band.ai room)
+//   BOARD_MODE=local pnpm serve      (in-process transport; dev/offline fallback)
 //
-// Build the web app first (cd web && pnpm install && pnpm build) to serve the UI
-// from this process, or run `cd web && pnpm dev` and let Vite proxy /api here.
+// In band mode the Intake agent creates a real band.ai room, adds the reviewer
+// agents, and posts the campaign; the agents collaborate in band.ai and the
+// server only observes. A small file-backed Store persists reviews, the
+// precedent log, the asset library, and per-region rulebook overrides.
 
 import 'dotenv/config';
 import { serve } from '@hono/node-server';
@@ -22,6 +23,7 @@ import { loadBrandDna, loadRulebook } from '../domain/load';
 import { ContentAsset as ContentAssetSchema, Rulebook as RulebookSchema } from '../domain/types';
 import type { ContentAsset, Rulebook } from '../domain/types';
 import { BoardSession, realBoardModels } from '../board/session';
+import { BandBoard } from '../board/band-session';
 import type { BoardEvent, BoardStatus } from '../board/events';
 import { Store } from '../store/store';
 
@@ -29,6 +31,7 @@ const ASSETS = new URL('../../assets/', import.meta.url).pathname;
 const WEB_DIST = new URL('../../web/dist/', import.meta.url).pathname;
 const DATA_DIR = new URL('../../data/', import.meta.url).pathname;
 const PORT = Number(process.env.PORT ?? 8787);
+const BOARD_MODE = process.env.BOARD_MODE === 'local' ? 'local' : 'band';
 const REGIONS = ['us', 'eu', 'latam'] as const;
 type RegionKey = (typeof REGIONS)[number];
 
@@ -40,7 +43,7 @@ interface ReviewRecord {
   status: BoardStatus;
   conflict: boolean;
   subscribers: Set<(event: BoardEvent) => void>;
-  session: BoardSession;
+  submitDecision: (text: string) => Promise<void>;
 }
 
 const reviews = new Map<string, ReviewRecord>();
@@ -53,7 +56,6 @@ const defaultRulebooks: Record<RegionKey, Rulebook> = {
   latam: loadRulebook(`${ASSETS}rulebook.latam.json`),
 };
 
-/** Current rulebooks, applying any UI edits saved as overrides (live per review). */
 function currentRulebooks(): Record<RegionKey, Rulebook> {
   return {
     us: store.getRulebookOverride('US') ?? defaultRulebooks.us,
@@ -61,6 +63,19 @@ function currentRulebooks(): Record<RegionKey, Rulebook> {
     latam: store.getRulebookOverride('LATAM') ?? defaultRulebooks.latam,
   };
 }
+
+// In band mode the agents connect once and live in band.ai; each campaign gets a room.
+const bandBoard =
+  BOARD_MODE === 'band'
+    ? new BandBoard({
+        brand,
+        rulebooks: currentRulebooks(),
+        models: realBoardModels(),
+        ...(process.env.HUMAN_HANDLE ? { humanHandle: process.env.HUMAN_HANDLE } : {}),
+        onPrecedent: (p) => store.appendPrecedent(p),
+        hostImage: (u) => store.hostImage(u) ?? u,
+      })
+    : undefined;
 
 const CreateReview = z.object({
   copy: z.string().min(1),
@@ -77,6 +92,27 @@ function imageContentType(name: string): string {
   return 'application/octet-stream';
 }
 
+function makeOnEvent(record: ReviewRecord): (event: BoardEvent) => void {
+  return (event) => {
+    let e = event;
+    // Host generated images out of the event stream so stored/streamed payloads stay small.
+    if (e.type === 'revised' && e.imageUrl) {
+      const hosted = store.hostImage(e.imageUrl);
+      if (hosted) e = { ...e, imageUrl: hosted };
+    }
+    e = { ...e, seq: record.events.length } as BoardEvent;
+    record.events.push(e);
+    if (e.type === 'verdict' && e.conflict) record.conflict = true;
+    if (e.type === 'status') {
+      record.status = e.status;
+      if (e.status !== 'running') {
+        store.saveReview({ id: record.id, createdAt: record.createdAt, asset: record.asset, events: record.events, status: record.status, conflict: record.conflict });
+      }
+    }
+    for (const sub of record.subscribers) sub(e);
+  };
+}
+
 const app = new Hono();
 app.use('/api/*', cors());
 
@@ -85,9 +121,8 @@ app.post('/api/reviews', async (c) => {
   const parsed = CreateReview.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
   const d = parsed.data;
-  const id = randomUUID();
   const asset: ContentAsset = {
-    id: `asset-${id.slice(0, 8)}`,
+    id: `asset-${randomUUID().slice(0, 8)}`,
     channel: d.channel,
     markets: d.markets,
     copy: d.copy,
@@ -97,37 +132,33 @@ app.post('/api/reviews', async (c) => {
   };
 
   const record: ReviewRecord = {
-    id,
+    id: '',
     createdAt: Date.now(),
     asset,
     events: [],
     status: 'running',
     conflict: false,
     subscribers: new Set(),
-    session: undefined as unknown as BoardSession,
+    submitDecision: async () => {},
   };
+  const onEvent = makeOnEvent(record);
 
-  const persist = (): void => {
-    store.saveReview({ id, createdAt: record.createdAt, asset, events: record.events, status: record.status, conflict: record.conflict });
-  };
-
-  const onEvent = (event: BoardEvent): void => {
-    // Host generated images out of the event stream so stored/streamed payloads stay small.
-    let e = event;
-    if (e.type === 'revised' && e.imageUrl) {
-      const hosted = store.hostImage(e.imageUrl);
-      if (hosted) e = { ...e, imageUrl: hosted };
+  if (BOARD_MODE === 'band') {
+    if (!bandBoard) return c.json({ error: 'band board unavailable' }, 503);
+    try {
+      const roomId = await bandBoard.createReview(asset, onEvent);
+      record.id = roomId;
+      record.submitDecision = (text) => bandBoard.submitDecision(roomId, text);
+      reviews.set(roomId, record);
+      return c.json({ id: roomId });
+    } catch (err) {
+      return c.json({ error: `Failed to start band review: ${(err as Error)?.message ?? String(err)}` }, 500);
     }
-    record.events.push(e);
-    if (e.type === 'verdict' && e.conflict) record.conflict = true;
-    if (e.type === 'status') {
-      record.status = e.status;
-      if (e.status !== 'running') persist();
-    }
-    for (const sub of record.subscribers) sub(e);
-  };
+  }
 
-  record.session = new BoardSession({
+  const id = randomUUID();
+  record.id = id;
+  const session = new BoardSession({
     roomId: `review-${id}`,
     asset,
     brand,
@@ -135,14 +166,14 @@ app.post('/api/reviews', async (c) => {
     models: realBoardModels(),
     onEvent,
     onPrecedent: (p) => store.appendPrecedent(p),
+    hostImage: (u) => store.hostImage(u) ?? u,
   });
+  record.submitDecision = (text) => session.submitDecision(text);
   reviews.set(id, record);
-
-  void record.session.run().catch((err: unknown) => {
+  void session.run().catch((err: unknown) => {
     onEvent({ type: 'log', seq: 0, fromName: 'system', messageType: 'error', text: `Review failed: ${(err as Error)?.message ?? String(err)}` });
     onEvent({ type: 'status', seq: 0, fromName: 'system', status: 'error' });
   });
-
   return c.json({ id });
 });
 
@@ -155,7 +186,7 @@ app.get('/api/reviews', (c) => {
     byId.set(r.id, { id: r.id, createdAt: r.createdAt, assetId: r.asset.id, copy: r.asset.copy, markets: r.asset.markets, status: r.status, conflict: r.conflict });
   }
   const list = [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
-  return c.json({ reviews: list });
+  return c.json({ reviews: list, mode: BOARD_MODE });
 });
 
 app.get('/api/reviews/:id', (c) => {
@@ -211,7 +242,7 @@ app.post('/api/reviews/:id/decision', async (c) => {
   const body: unknown = await c.req.json().catch(() => ({}));
   const decision = typeof (body as { decision?: unknown })?.decision === 'string' ? (body as { decision: string }).decision : '';
   if (!decision) return c.json({ error: 'decision required' }, 400);
-  void record.session.submitDecision(decision).catch(() => {});
+  void record.submitDecision(decision).catch(() => {});
   return c.json({ ok: true });
 });
 
@@ -260,9 +291,21 @@ if (existsSync(WEB_DIST)) {
   app.get('*', serveStatic({ path: './web/dist/index.html' }));
 } else {
   app.get('/', (c) =>
-    c.text('Compliance console backend is running. Build the UI: cd web && pnpm install && pnpm build, or run cd web && pnpm dev. API is under /api.'),
+    c.text('Campaign portal backend is running. Build the UI: cd web && pnpm install && pnpm build, or run cd web && pnpm dev. API is under /api.'),
   );
 }
 
-serve({ fetch: app.fetch, port: PORT });
-console.log(`Compliance console backend listening on http://localhost:${PORT} (BOARD_MODE=local, MODEL_MODE=${process.env.MODEL_MODE ?? 'aiml'})`);
+async function main(): Promise<void> {
+  if (bandBoard) {
+    console.log('Connecting band.ai agents (BOARD_MODE=band). This is the real coordination layer...');
+    await bandBoard.start();
+    console.log('band.ai agents connected and waiting for campaigns.');
+  }
+  serve({ fetch: app.fetch, port: PORT });
+  console.log(`Campaign portal on http://localhost:${PORT} (BOARD_MODE=${BOARD_MODE}, MODEL_MODE=${process.env.MODEL_MODE ?? 'aiml'})`);
+}
+
+main().catch((err: unknown) => {
+  console.error(err);
+  process.exit(1);
+});

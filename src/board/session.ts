@@ -48,6 +48,8 @@ export interface BoardSessionOptions {
   models: BoardModels;
   onEvent: (event: BoardEvent) => void;
   onPrecedent?: (precedent: Precedent) => void;
+  /** Host generated images (base64 -> short URL) so messages stay small. */
+  hostImage?: (url: string) => string;
 }
 
 export class BoardSession {
@@ -110,7 +112,7 @@ export class BoardSession {
       agentId: 'rem',
       name: 'Remediation',
       handle: '@remediation',
-      onMessage: makeRemediation({ brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: '@coordinator' }),
+      onMessage: makeRemediation({ brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: '@coordinator', ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}) }),
     });
     await room.connectAgent({
       agentId: 'rec',
