@@ -21,6 +21,15 @@ export interface RegionReviewerOptions {
   precedents?: () => string[];
 }
 
+const REBUTTAL_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    stance: { type: 'string', enum: ['hold', 'concede'] },
+    rationale: { type: 'string' },
+  },
+  required: ['stance', 'rationale'],
+} as const;
+
 // JSON Schema handed to the model for structured output. Mirrors ReviewOutput.
 const REVIEW_OUTPUT_JSON_SCHEMA = {
   type: 'object',
@@ -52,6 +61,22 @@ const REVIEW_OUTPUT_JSON_SCHEMA = {
 // structured findings to the reconcile agent (or back to the requester).
 export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
   return async (message, tools) => {
+    // Debate branch: a pod lead relays a peer's argument; we hold or concede.
+    let challenge: { kind?: string; claim?: string; peerRegion?: string; peerRationale?: string } | null = null;
+    try { challenge = JSON.parse(message.content); } catch { challenge = null; }
+    if (challenge && challenge.kind === 'challenge') {
+      const res = await opts.model.complete({
+        system: `You are the ${opts.region} reviewer. A peer (${challenge.peerRegion}) argues: "${challenge.peerRationale}". Decide whether to hold your block on "${challenge.claim}" under the ${opts.region} rulebook, or concede. Answer JSON.`,
+        messages: [{ role: 'user', content: `Claim under dispute: ${challenge.claim}` }],
+        jsonSchema: REBUTTAL_JSON_SCHEMA,
+      });
+      const out = (res.json ?? {}) as { stance?: string; rationale?: string };
+      const target = matchParticipant(await tools.getParticipants(), opts.reportToHandle ?? '', 'agent') ?? null;
+      const mention = target ? [{ id: target.id, handle: target.handle }] : [{ id: message.senderId }];
+      await tools.sendEvent(`${opts.reviewerName} rebuts on "${challenge.claim}": ${out.stance ?? 'hold'}`, 'debate', { region: opts.region });
+      await tools.sendMessage(JSON.stringify({ kind: 'rebuttal', region: opts.region, claim: challenge.claim, stance: out.stance ?? 'hold', rationale: out.rationale ?? '' }), mention);
+      return;
+    }
     if (message.senderType !== 'agent') return;
     if (opts.ignoreFromHandle && nameMatchesHandle(message.senderName, opts.ignoreFromHandle)) return;
     const asset = tryParseAsset(message.content);
