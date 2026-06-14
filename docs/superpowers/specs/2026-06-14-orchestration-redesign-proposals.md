@@ -51,3 +51,31 @@ Replace `decideRegion()` flag-merge with a round loop in the Chair; add a `negot
 
 ### Tradeoffs
 Strongest direct hit on the win condition (genuine negotiation over a mutating artifact). Risk: rounds can wander, so the Chair needs a firm round cap and a crisp deadlock rule to stay demo-stable.
+
+---
+
+## Proposal 2: The Courtroom
+
+Metaphor: a hearing. Compliance sign-off is quasi-legal, so this fits the domain and reads instantly on video.
+
+### Shape
+Turn-structured, not parallel. Roles: Advocate (brand, argues to ship as written), Challengers (US and EU, each counsel for its jurisdiction, file objections citing the rulebook as case law), Judge (reconcile, a strong model), Clerk (coordinator, maintains the docket), Higher Court (the human, reached only on appeal). Phases:
+1. Filing: the Advocate enters the asset plus its evidence (the two-RCT substantiation file).
+2. Objections: each Challenger files objections directed at the Advocate, each citing a rule, a span, and a severity.
+3. Cross-examination: the Advocate rebuts each objection directly (`@eu my evidence is RCT-grade, does the Article 14 risk-reduction path not apply?`); the Challenger sustains or withdraws; the Judge may question either side.
+4. Ruling: the Judge rules per objection (sustained / overruled) to yield a per-region verdict. Sustained but curable becomes a remand to remediation; sustained, incurable, and contested escalates to the Higher Court with the full trial record.
+
+### Why it is not scatter-gather
+The adversarial structure is the product. Rebuttal and cross-examination are genuine directed exchange, and the human inherits a real record rather than a flag count.
+
+### Band primitives it leans on
+Directed @mentions carry objection then rebuttal between specific parties. `sendEvent` posts the Judge's reasoning and the docket. `addParticipant` summons the Higher Court.
+
+### Multi-model fit
+Judge on Opus (authority), Advocate on Sonnet (persuasion), EU on Gemini Pro, US on Sonnet or Haiku. Natural home for a cross-framework move: put one Challenger on a LangGraph adapter as "opposing counsel from another firm."
+
+### Build delta (low to medium)
+Mostly role and phase sequencing over existing agents. The reviewers become Advocate and Challengers (prompt changes plus a rebuttal turn); reconcile becomes the Judge issuing per-objection rulings (the per-objection verdict can stay deterministic while the cross-examination round is an LLM exchange). Reuses every agent.
+
+### Tradeoffs
+Best presentation value: a judge can follow it without narration, and the deadlock-to-appeal moment is dramatic. Risk: the theater can feel scripted if the rebuttals are shallow, so the cross-examination prompts must let a Challenger genuinely change its position.
