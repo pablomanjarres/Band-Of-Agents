@@ -163,3 +163,46 @@ Reconcile becomes a shuttle loop (alternating directed messages plus a convergen
 
 ### Tradeoffs
 The cleanest single-conflict story and very legible visually (a pendulum closing a gap). Risk: it models one bilateral conflict well but is awkward when three or more mandates clash at once, so it scales worse than the Table.
+
+---
+
+## Comparison
+
+| Pattern | Centers conflict via | Best judging line | Build effort | Demo-stability |
+|---|---|---|---|---|
+| 1 Negotiation Table | directed offers / counters over a mutating draft | Originality | Medium | Medium (needs round cap) |
+| 2 Courtroom | objection then rebuttal then ruling | Presentation | Low to medium | High |
+| 3 Escalation Ladder | conflict gates promotion upward | Business value | Medium to high | Medium |
+| 4 Blackboard | conflict is a state that wakes the mediator | Application of tech | High | Low |
+| 5 Shuttle Diplomacy | alternating bilateral proposals | Originality | Medium | High |
+
+## Recommendation: a hybrid (Ladder shell, Negotiation Table core, Courtroom framing)
+
+No single pattern maximizes all four judging lines, but they compose cleanly. The recommended build:
+
+1. Outer shell is the Escalation Ladder. Triage (Featherless, cheap) marks risky spans, specialists examine only those spans, and conflict gates work upward. This carries the business-value and multi-model-routing stories and keeps cheap paths cheap.
+2. The negotiation rung is the Negotiation Table. When a span gates upward, agents exchange directed offers and counteroffers over that contested span, the artifact mutates, a conflict ledger tracks open items, and a stable deadlock is detected. This delivers the genuine agent-to-agent negotiation the brief promises and the current code fakes.
+3. The negotiation rung wears Courtroom framing for legibility. Each turn is an "objection plus remedy" or a "rebuttal," the Chair is a "judge," and the human is the "higher court." This makes the debate readable on video without narration.
+
+### Why this hybrid wins
+It fixes all four baseline problems at once: directed negotiation becomes the center (not a boolean), the human is reached only on an observed stable deadlock (earned escalation), Band's enforced directed routing is used rather than wasted, and the topology no longer looks like map-reduce. Every judging line gets a concrete hook: Application (directed handoffs plus summon-on-conflict), Business value (cost-gated tiers), Originality (agents argue over a mutating artifact and form or break deals), Presentation (a courtroom-legible deadlock then a human ruling).
+
+### Build delta, all on existing seams
+1. Add a Triage agent (Featherless) plus a span-gating step before specialists. Touches the fan-out at `coordinator.ts:77`.
+2. Replace `decideRegion()` flag-merge with a round-based negotiation loop in the Chair, with a conflict ledger and a stable-deadlock detector. Touches `reconcile.ts:67` to `:91`.
+3. Add `negotiateWith` to `makeRegionReviewer` so an objection is directed at brand and carries a remedy; let brand ACCEPT / COUNTER / HOLD. Touches `region-reviewer.ts:53`.
+4. Turn remediation into "apply the accepted remedy to the draft" so the artifact mutates, and re-review only the changed span. Touches `remediation.ts:27`.
+5. Summon the human via `addParticipant` only on a stable deadlock; fold the ruling into the rulebook as precedent (partly present already).
+
+## Band primitive mapping (shared by all proposals)
+
+| Primitive | Role in the redesign |
+|---|---|
+| `sendMessage(content, mentions)` | The directed-argument channel. Band requires at least one @mention to route, so objections, counters, rebuttals, and shuttles all use it. This is the primitive the baseline wastes. |
+| `sendEvent(content, type, metadata)` | Visible reasoning and audit: each agent's private rationale, the conflict ledger, the docket, the narrowing gap. Makes the debate legible to judges without pinging everyone. |
+| `addParticipant` / `removeParticipant` | Dynamic recruitment: summon the next tier, the mediator, or the human exactly when conflict requires it. |
+| `lookupPeers` (gate on `capabilities.peers`) | Discover who can be summoned (used by the Ladder and Blackboard controllers). |
+| `getChatContext` | Rehydrate room state for a waking agent (the blackboard read). |
+
+## Next step
+Pick a direction from the deck. Once chosen, this exploration doc graduates into an updated design spec and an implementation plan (writing-plans), and the build proceeds on the existing seams listed above.
