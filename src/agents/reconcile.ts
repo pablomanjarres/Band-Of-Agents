@@ -31,6 +31,8 @@ export interface ReconcileOptions {
 export function makeReconcile(opts: ReconcileOptions): AgentHandler {
   const reviewsByRoom = new Map<string, Map<string, ReviewResult>>();
   const pendingByRoom = new Map<string, string[]>();
+  const remediationCountByRoom = new Map<string, number>();
+  const MAX_REMEDIATION_ROUNDS = 1;
 
   return async (message, tools) => {
     const fromHumanProxy =
@@ -64,6 +66,18 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
 
     const verdicts = opts.expectedRegions.map((r) => decideRegion(collected.get(r)!));
 
+    // Re-review cap: once a region has been remediated MAX_REMEDIATION_ROUNDS
+    // times, a still-fixable 'adapt' escalates to the human instead of looping.
+    const priorRemediations = remediationCountByRoom.get(message.roomId) ?? 0;
+    if (priorRemediations >= MAX_REMEDIATION_ROUNDS) {
+      for (const v of verdicts) {
+        if (v.decision === 'adapt') {
+          v.decision = 'escalate';
+          v.rationale = `Remediation exhausted; ${v.rationale}`;
+        }
+      }
+    }
+
     const canPublish = verdicts.filter((v) => v.decision === 'publish').map((v) => v.region);
     const adaptRegions = verdicts.filter((v) => v.decision === 'adapt').map((v) => v.region);
     const escalateRegions = verdicts.filter((v) => v.decision === 'escalate').map((v) => v.region);
@@ -91,6 +105,7 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
           );
         }
         await tools.sendEvent(`Requested remediation for ${adaptRegions.join('/')}.`, 'remediation');
+        remediationCountByRoom.set(message.roomId, priorRemediations + 1);
       }
     }
 

@@ -81,7 +81,7 @@ export class BoardSession {
     const room = this.room;
 
     room.addUser('lead', 'Compliance Lead', '@compliance-lead');
-    await room.connectAgent({ agentId: 'coord', name: 'Coordinator', handle: '@coordinator', onMessage: makeCoordinator() });
+    await room.connectAgent({ agentId: 'coord', name: 'Coordinator', handle: '@coordinator', onMessage: makeCoordinator({ remediationHandle: '@remediation' }) });
     await room.connectAgent({
       agentId: 'us',
       name: 'US Reviewer',

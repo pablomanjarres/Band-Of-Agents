@@ -1,5 +1,5 @@
 import type { AgentHandler } from '../band/types';
-import { toAsset } from '../domain/load';
+import { toAsset, tryParseAsset } from '../domain/load';
 import { nameMatchesHandle } from './handles';
 
 export interface CoordinatorOptions {
@@ -9,6 +9,24 @@ export interface CoordinatorOptions {
    * the asset arrives from a human user and this is left unset.
    */
   intakeAgentHandle?: string;
+  /**
+   * Accept a remediated (revised) asset from this agent as a re-intake. Closes
+   * the adapt -> re-review loop: a fixed variant is reviewed again by the board
+   * instead of being a one-shot output.
+   */
+  remediationHandle?: string;
+}
+
+/** Pull the revised ContentAsset out of a remediation `{kind:'revised'}` message. */
+function revisedAssetJson(content: string): string | null {
+  try {
+    const parsed = JSON.parse(content) as { kind?: string; revised?: unknown };
+    if (parsed?.kind !== 'revised' || parsed.revised == null) return null;
+    const json = JSON.stringify(parsed.revised);
+    return tryParseAsset(json) ? json : null;
+  } catch {
+    return null;
+  }
 }
 
 // The coordinator/chair. On an intake message (an asset posted into the room as
@@ -21,7 +39,16 @@ export function makeCoordinator(opts: CoordinatorOptions = {}): AgentHandler {
       opts.intakeAgentHandle !== undefined &&
       message.senderType === 'agent' &&
       nameMatchesHandle(message.senderName, opts.intakeAgentHandle);
-    if (message.senderType === 'agent' && !fromIntake) return;
+    const fromRemediation =
+      opts.remediationHandle !== undefined &&
+      message.senderType === 'agent' &&
+      nameMatchesHandle(message.senderName, opts.remediationHandle);
+    if (message.senderType === 'agent' && !fromIntake && !fromRemediation) return;
+
+    // A revised asset from remediation is re-intaked (the re-review loop); any
+    // other accepted message carries the asset directly.
+    const assetContent = fromRemediation ? revisedAssetJson(message.content) : message.content;
+    if (assetContent === null) return;
 
     const participants = await tools.getParticipants();
     const reviewers = participants.filter(
@@ -32,9 +59,9 @@ export function makeCoordinator(opts: CoordinatorOptions = {}): AgentHandler {
     );
     if (reviewers.length === 0) return;
 
-    const asset = toAsset(message.content);
+    const asset = toAsset(assetContent);
     await tools.sendEvent(
-      `Intake: asset "${asset.id}" for ${asset.markets.join(', ')}. Recruiting ${reviewers.length} reviewer(s).`,
+      `${fromRemediation ? 'Re-review' : 'Intake'}: asset "${asset.id}" for ${asset.markets.join(', ')}. Recruiting ${reviewers.length} reviewer(s).`,
       'intake',
     );
     await tools.sendMessage(
