@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { BoardEvent, BoardStatus } from '../board/events';
 import type { ContentAsset, Rulebook } from '../domain/types';
+import type { Artifact } from '../domain/artifact';
 import type { Precedent } from '../agents/reconcile';
 
 export interface StoredReview {
@@ -117,5 +118,18 @@ export class Store {
 
   saveRulebookOverride(region: string, rulebook: Rulebook): void {
     writeFileSync(join(this.rulebooksDir, `${region.toLowerCase()}.json`), JSON.stringify(rulebook, null, 2));
+  }
+
+  // Artifacts: things an agent produced (images, structured docs) that Band
+  // cannot show inline. Stored small (images keep their hosted /api/images path
+  // in `src`, never base64), served back to the dashboard viewer by id.
+  saveArtifact(artifact: Artifact): void {
+    const all = this.readJson<Artifact[]>('artifacts.json', []).filter((a) => a.id !== artifact.id);
+    all.push(artifact);
+    this.writeJson('artifacts.json', all);
+  }
+
+  getArtifact(id: string): Artifact | undefined {
+    return this.readJson<Artifact[]>('artifacts.json', []).find((a) => a.id === id);
   }
 }

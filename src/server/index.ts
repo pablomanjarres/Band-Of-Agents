@@ -22,15 +22,28 @@ import { z } from 'zod';
 import { loadBrandDna, loadRulebook } from '../domain/load';
 import { ContentAsset as ContentAssetSchema, Rulebook as RulebookSchema } from '../domain/types';
 import type { ContentAsset, Rulebook } from '../domain/types';
+import { NewArtifact as NewArtifactSchema } from '../domain/artifact';
 import { BoardSession, realBoardModels } from '../board/session';
 import { BandBoard } from '../board/band-session';
 import type { BoardEvent, BoardStatus } from '../board/events';
 import { Store } from '../store/store';
+import { makePublishArtifact } from '../store/artifacts';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
 const WEB_DIST = new URL('../../web/dist/', import.meta.url).pathname;
 const DATA_DIR = new URL('../../data/', import.meta.url).pathname;
 const PORT = Number(process.env.PORT ?? 8787);
+// The origin baked into artifact links agents paste into Band, so a human can
+// click them from the Band UI. Prefer an explicit PUBLIC_BASE_URL; on Vercel
+// fall back to the deployment hostname (VERCEL_PROJECT_PRODUCTION_URL or the
+// per-deploy VERCEL_URL, both without a scheme); otherwise the local origin.
+function resolvePublicBaseUrl(): string {
+  const explicit = process.env.PUBLIC_BASE_URL;
+  const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
+  const base = explicit ?? (vercelHost ? `https://${vercelHost}` : `http://localhost:${PORT}`);
+  return base.replace(/\/+$/, '');
+}
+const PUBLIC_BASE_URL = resolvePublicBaseUrl();
 const BOARD_MODE = process.env.BOARD_MODE === 'local' ? 'local' : 'band';
 const REGIONS = ['us', 'eu', 'latam'] as const;
 type RegionKey = (typeof REGIONS)[number];
@@ -48,6 +61,9 @@ interface ReviewRecord {
 
 const reviews = new Map<string, ReviewRecord>();
 const store = new Store(DATA_DIR);
+// Agents publish artifacts (images, reports) and paste the returned viewer URL
+// into the room, since Band shows only plain text.
+const publishArtifact = makePublishArtifact(store, PUBLIC_BASE_URL);
 
 // Feed recent human-decision precedents back into the reviewers' shared context.
 const recentPrecedents = (): string[] =>
@@ -107,6 +123,7 @@ const bandBoard =
         models: realBoardModels(),
         ...(process.env.HUMAN_HANDLE ? { humanHandle: process.env.HUMAN_HANDLE } : {}),
         hostImage: (u) => store.hostImage(u) ?? u,
+        publishArtifact,
         getPrecedents: recentPrecedents,
         getRulebook: (region) => store.getRulebookOverride(region) ?? defaultRulebooks[region.toLowerCase() as RegionKey] ?? defaultRulebooks.us,
         lookupCampaign: findCampaign,
@@ -205,6 +222,7 @@ app.post('/api/reviews', async (c) => {
     onEvent,
     onPrecedent: (p) => store.appendPrecedent(p),
     hostImage: (u) => store.hostImage(u) ?? u,
+    publishArtifact,
     getPrecedents: recentPrecedents,
   });
   record.submitDecision = (text) => session.submitDecision(text);
@@ -289,6 +307,22 @@ app.get('/api/images/:name', (c) => {
   const buf = store.readImage(c.req.param('name'));
   if (!buf) return c.json({ error: 'not found' }, 404);
   return c.body(new Uint8Array(buf), 200, { 'content-type': imageContentType(c.req.param('name')), 'cache-control': 'public, max-age=31536000, immutable' });
+});
+
+// Artifacts: agents publish images/reports here and paste the viewer URL into
+// the room; the /a/:id dashboard page fetches GET /api/artifacts/:id to render.
+app.post('/api/artifacts', async (c) => {
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const parsed = NewArtifactSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const published = publishArtifact(parsed.data);
+  return c.json(published);
+});
+
+app.get('/api/artifacts/:id', (c) => {
+  const artifact = store.getArtifact(c.req.param('id'));
+  if (!artifact) return c.json({ error: 'not found' }, 404);
+  return c.json({ artifact });
 });
 
 app.get('/api/precedents', (c) => c.json({ precedents: store.listPrecedents() }));

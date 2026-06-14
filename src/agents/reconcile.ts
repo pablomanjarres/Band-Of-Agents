@@ -1,5 +1,6 @@
 import type { AgentHandler, Mention, Participant, RoomMessage, RoomTools } from '../band/types';
 import type { Finding, RegionVerdict, ReviewResult } from '../domain/types';
+import type { NewArtifact } from '../domain/artifact';
 import type { SharedBoard } from '../board/shared';
 import { matchParticipant, nameMatchesHandle } from './handles';
 
@@ -32,6 +33,12 @@ export interface ReconcileOptions {
   logPrecedent?: (precedent: Precedent) => void;
   /** band.ai room mode: accept the human ruling relayed by this intake/proxy agent. */
   humanProxyHandle?: string;
+  /**
+   * Register a findings/verdict report and get back a dashboard viewer URL to
+   * paste into the room, since Band shows only plain text. Optional: when absent
+   * (tests/stubs) the verdict message just omits the report link.
+   */
+  publishArtifact?: (input: NewArtifact) => { id: string; url: string };
 }
 
 const MAX_REMEDIATION_ROUNDS = 1;
@@ -118,9 +125,23 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
       'verdict',
     );
 
+    // Publish the full findings/verdict report and link it: Band shows only the
+    // plain-English summary, so the detail lives on our dashboard viewer.
+    let reportLink = '';
+    if (opts.publishArtifact) {
+      const { url } = opts.publishArtifact({
+        kind: 'markdown',
+        title: 'Review report',
+        content: buildReportMarkdown(verdicts, byRegion),
+        reviewId: ctx.roomId,
+        createdBy: ctx.agentName,
+      });
+      reportLink = ` Full report: ${url}`;
+    }
+
     // Tell the coordinator the outcome in plain English.
     const coordTarget = await resolveByHandle(tools, opts.coordinatorHandle, message);
-    await tools.sendMessage(verdictSummary(verdicts, conflict, canPublish, blocked), [coordTarget]);
+    await tools.sendMessage(verdictSummary(verdicts, conflict, canPublish, blocked) + reportLink, [coordTarget]);
 
     // Route fixable regions to remediation. The findings live on the board, so the
     // message just asks for the adaptation.
@@ -170,6 +191,28 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
       opts.board.complete(ctx.roomId);
     }
   };
+}
+
+/** Render the findings + verdicts as a markdown report for the dashboard viewer. */
+function buildReportMarkdown(verdicts: RegionVerdict[], byRegion: Map<string, ReviewResult>): string {
+  const lines: string[] = ['# Review report', ''];
+  lines.push('## Verdicts', '');
+  for (const v of verdicts) lines.push(`- **${v.region}**: ${v.decision} - ${v.rationale}`);
+  lines.push('', '## Findings by region', '');
+  for (const v of verdicts) {
+    const findings = byRegion.get(v.region)?.findings ?? [];
+    lines.push(`### ${v.region}`, '');
+    if (findings.length === 0) {
+      lines.push('No findings.', '');
+      continue;
+    }
+    for (const f of findings) {
+      const disclosure = f.requiredDisclosure ? ` (add: ${f.requiredDisclosure})` : '';
+      lines.push(`- [${f.severity}] ${f.ruleId ?? f.category}: ${f.rationale}${disclosure}`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
 }
 
 /** Compose a plain-English verdict summary for the coordinator. */
