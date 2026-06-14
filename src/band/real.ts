@@ -22,6 +22,7 @@ import type {
   RoomMessage,
   RoomTools,
 } from './types';
+import { makeBandSharedContext, type ContextRest, type SharedContextStore } from './shared-context';
 
 const DEBUG = process.env.BAND_DEBUG === '1';
 function dbg(...args: unknown[]): void {
@@ -190,6 +191,37 @@ export class RealBandTransport implements BandTransport {
     return buildIntakeControl(api, onTaskBind, async () => {
       await agent.stop();
     });
+  }
+
+  /**
+   * Connect a lightweight agent and return a Band-native shared-context store for
+   * a room: publish the brand DNA and rulebooks into the room as a tagged message
+   * and rehydrate them via the /context endpoint (getChatContext), instead of a
+   * local store and without the gated Memory tools. Mirrors connectIntake.
+   */
+  async connectContext(opts: { envPrefix?: string; name?: string } = {}): Promise<SharedContextStore & { stop(): Promise<void> }> {
+    const config = opts.envPrefix ? loadAgentConfigFromEnv({ prefix: opts.envPrefix }) : loadAgentConfigFromEnv();
+    const agent = Agent.create({ adapter: new GenericAdapter(async () => {}), config });
+    dbg(`${opts.name ?? 'Context'} connecting (${config.agentId})`);
+    void agent.run({ signals: false });
+
+    let rest: ContextRest | undefined;
+    for (let i = 0; i < 20; i += 1) {
+      rest = (agent as { runtime?: { link?: { rest?: ContextRest } } })?.runtime?.link?.rest;
+      if (rest?.createChatMessage && rest.getChatContext) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!rest?.createChatMessage || !rest.getChatContext) {
+      throw new Error('Context REST facade unavailable (agent.runtime.link.rest getChatContext/createChatMessage)');
+    }
+    const store = makeBandSharedContext(rest);
+    return {
+      publish: (roomId, payload) => store.publish(roomId, payload),
+      rehydrate: (roomId) => store.rehydrate(roomId),
+      stop: async () => {
+        await agent.stop();
+      },
+    };
   }
 }
 
