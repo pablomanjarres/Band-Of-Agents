@@ -62,3 +62,631 @@ Every payload is JSON in the message `content`; visible reasoning goes through `
 - `web/src/pipeline.ts` (rewrite `NodeId`/`EdgeId` + `buildPipelineModel`), `web/src/components/PipelineDiagram.tsx` (render pods + board + spine). `boardState.ts`, `api.ts`, `LiveBoardPage.tsx` need no change (event folding and SSE are topology-agnostic).
 
 ---
+
+## Phase 0: Domain types for the board
+
+### Task 0.1: Board Zod schemas
+
+**Files:**
+- Create: `src/domain/board.ts`
+- Test: `test/board-types.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+// test/board-types.test.ts
+import { describe, expect, it } from 'vitest';
+import {
+  WorkItem, ScoutOutput, ConflictItem, PodFinding, AdjudicatorDecision,
+  MediationResult, TerminalDecision,
+} from '../src/domain/board';
+
+describe('board domain schemas', () => {
+  it('parses a Scout work-item list', () => {
+    const out = ScoutOutput.parse({
+      workItems: [{ id: 'w1', kind: 'claim', text: 'boost your immune system', surfaces: ['headline'] }],
+    });
+    expect(out.workItems[0].kind).toBe('claim');
+  });
+
+  it('defaults surfaces and conflicts to empty arrays', () => {
+    expect(WorkItem.parse({ id: 'w1', kind: 'cta', text: 'sign up' }).surfaces).toEqual([]);
+    const pf = PodFinding.parse({ kind: 'pod-finding', pod: 'regulatory', summary: 's', findings: [] });
+    expect(pf.conflicts).toEqual([]);
+  });
+
+  it('models a cross-region conflict', () => {
+    const c = ConflictItem.parse({ span: 'boost', blockedBy: ['EU'], passedBy: ['US'] });
+    expect(c.blockedBy).toContain('EU');
+    expect(c.rationale).toBe('');
+  });
+
+  it('parses an adjudicator decision and terminal enum', () => {
+    const d = AdjudicatorDecision.parse({ kind: 'adjudication', decision: 'escalate', score: 0.2, rationale: 'deadlock' });
+    expect(d.decision).toBe('escalate');
+    expect(TerminalDecision.parse('spiked')).toBe('spiked');
+    expect(MediationResult.parse({ kind: 'mediation', resolved: false, note: 'no movement' }).requiredDisclosure).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run test/board-types.test.ts`
+Expected: FAIL, cannot resolve `../src/domain/board`.
+
+- [ ] **Step 3: Implement `src/domain/board.ts`**
+
+```typescript
+// src/domain/board.ts
+// Schemas for the pods -> board -> spine orchestration. Reuses Finding from types.ts.
+import { z } from 'zod';
+import { Finding } from './types';
+
+// A unit of risky surface the Scout extracts for pods to work on.
+export const WorkItem = z.object({
+  id: z.string(),
+  kind: z.enum(['claim', 'copy-span', 'image', 'cta']),
+  text: z.string(),
+  surfaces: z.array(z.string()).default([]),
+});
+export type WorkItem = z.infer<typeof WorkItem>;
+
+export const ScoutOutput = z.object({ workItems: z.array(WorkItem) });
+export type ScoutOutput = z.infer<typeof ScoutOutput>;
+
+// A disagreement on one span: who blocked it, who passed it.
+export const ConflictItem = z.object({
+  span: z.string(),
+  blockedBy: z.array(z.string()),
+  passedBy: z.array(z.string()),
+  rationale: z.string().default(''),
+});
+export type ConflictItem = z.infer<typeof ConflictItem>;
+
+// The single consolidated finding a pod files to the board.
+export const PodFinding = z.object({
+  kind: z.literal('pod-finding'),
+  pod: z.enum(['claims', 'regulatory', 'brand']),
+  summary: z.string(),
+  findings: z.array(Finding),
+  conflicts: z.array(ConflictItem).default([]),
+});
+export type PodFinding = z.infer<typeof PodFinding>;
+
+// The Mediator's attempt to resolve a conflict at the board.
+export const MediationResult = z.object({
+  kind: z.literal('mediation'),
+  resolved: z.boolean(),
+  note: z.string(),
+  requiredDisclosure: z.string().nullable().default(null),
+});
+export type MediationResult = z.infer<typeof MediationResult>;
+
+// The Risk Adjudicator's decision that drives the spine.
+export const AdjudicatorDecision = z.object({
+  kind: z.literal('adjudication'),
+  decision: z.enum(['publish', 'spike', 'remediate', 'escalate']),
+  score: z.number().min(0).max(1),
+  rationale: z.string(),
+  unresolved: z.array(ConflictItem).default([]),
+});
+export type AdjudicatorDecision = z.infer<typeof AdjudicatorDecision>;
+
+// Terminal states the spine ends in.
+export const TerminalDecision = z.enum(['published', 'spiked', 'escalated']);
+export type TerminalDecision = z.infer<typeof TerminalDecision>;
+
+// JSON Schema constants passed to model.complete({ jsonSchema }) for LLM agents.
+export const SCOUT_OUTPUT_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    workItems: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          kind: { type: 'string', enum: ['claim', 'copy-span', 'image', 'cta'] },
+          text: { type: 'string' },
+          surfaces: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['id', 'kind', 'text'],
+      },
+    },
+  },
+  required: ['workItems'],
+} as const;
+
+export const MEDIATION_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    resolved: { type: 'boolean' },
+    note: { type: 'string' },
+    requiredDisclosure: { type: ['string', 'null'] },
+  },
+  required: ['resolved', 'note'],
+} as const;
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pnpm vitest run test/board-types.test.ts`
+Expected: PASS (4 tests).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/domain/board.ts test/board-types.test.ts
+git commit -m "feat(domain): board schemas (work-items, pod findings, conflicts, adjudication)"
+```
+
+---
+
+## Phase 1: The pods (knowledge-source shell, pod-lead, the Regulatory debate)
+
+### Task 1.1: Generic knowledge-source agent shell
+
+The Claims and Brand pod members and the board specialists are all the same shape: parse the asset, one model call with a JSON schema, post the result to a pod-lead. Write that shell once.
+
+**Files:**
+- Create: `src/agents/knowledge-source.ts`
+- Test: `test/knowledge-source.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+// test/knowledge-source.test.ts
+import { describe, expect, it } from 'vitest';
+import { FakeBandTransport } from '../src/band/fake';
+import { makeKnowledgeSource } from '../src/agents/knowledge-source';
+import { StubModelClient } from '../src/models/client';
+
+const ASSET = JSON.stringify({ id: 'a1', channel: 'instagram', markets: ['US'], copy: 'c', claim: 'boost immunity' });
+
+describe('knowledge source shell', () => {
+  it('reviews the asset and reports findings to its pod lead', async () => {
+    const room = new FakeBandTransport('r');
+    const model = new StubModelClient(() => ({ text: '', json: { findings: [{ category: 'claim', severity: 'warn', claim: 'boost immunity', rationale: 'unsupported' }] } }));
+    await room.connectAgent({ agentId: 'lead', name: 'Claims Lead', handle: '@claims-lead', onMessage: async () => {} });
+    await room.connectAgent({
+      agentId: 'ce', name: 'Claim & Evidence', handle: '@claim-evidence',
+      onMessage: makeKnowledgeSource({ role: 'claim-evidence', reviewerName: 'Claim & Evidence', system: 'sys', jsonSchema: {}, model, reportToHandle: '@claims-lead' }),
+    });
+    room.post('lead', ASSET, [{ id: 'ce' }]);
+    await room.drain();
+    const reply = room.transcript.find((t) => t.fromId === 'ce' && t.kind === 'message');
+    expect(reply).toBeTruthy();
+    const payload = JSON.parse(reply!.content);
+    expect(payload.source).toBe('claim-evidence');
+    expect(payload.findings[0].severity).toBe('warn');
+    expect(reply!.mentions.some((m) => m.id === 'lead')).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run test/knowledge-source.test.ts`
+Expected: FAIL, cannot resolve `../src/agents/knowledge-source`.
+
+- [ ] **Step 3: Implement `src/agents/knowledge-source.ts`**
+
+```typescript
+// src/agents/knowledge-source.ts
+import type { AgentHandler } from '../band/types';
+import type { ModelClient } from '../models/client';
+import type { ContentAsset } from '../domain/types';
+import { matchParticipant } from './handles';
+import { tryParseAsset } from '../domain/load';
+
+export interface KnowledgeSourceOptions {
+  role: string;                                  // stable key, e.g. 'claim-evidence'
+  reviewerName: string;                          // display name in events
+  system: string;                                // system prompt
+  jsonSchema: unknown;                           // output schema for model.complete
+  model: ModelClient;
+  reportToHandle: string;                        // pod-lead handle, e.g. '@claims-lead'
+  eventType?: string;                            // sendEvent type, default 'review'
+  buildUser?: (asset: ContentAsset) => string;   // default: pretty JSON of the asset
+  ignoreFromHandle?: string;                     // optional: skip messages from this handle
+}
+
+export function makeKnowledgeSource(opts: KnowledgeSourceOptions): AgentHandler {
+  const eventType = opts.eventType ?? 'review';
+  return async (message, tools) => {
+    if (opts.ignoreFromHandle && message.senderName && message.senderName.includes(opts.ignoreFromHandle.replace('@', ''))) return;
+    const asset = tryParseAsset(message.content);
+    if (!asset) return;
+    const user = opts.buildUser ? opts.buildUser(asset) : `Asset (JSON):\n${JSON.stringify(asset, null, 2)}`;
+    const res = await opts.model.complete({ system: opts.system, messages: [{ role: 'user', content: user }], jsonSchema: opts.jsonSchema });
+    const payload = (res.json && typeof res.json === 'object') ? (res.json as Record<string, unknown>) : {};
+    await tools.sendEvent(`${opts.reviewerName} reviewed ${asset.id}`, eventType, { role: opts.role });
+    const target = matchParticipant(await tools.getParticipants(), opts.reportToHandle, 'agent');
+    if (target) {
+      await tools.sendMessage(JSON.stringify({ source: opts.role, asset: asset.id, ...payload }), [{ id: target.id, handle: target.handle }]);
+    }
+  };
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pnpm vitest run test/knowledge-source.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/agents/knowledge-source.ts test/knowledge-source.test.ts
+git commit -m "feat(agents): generic knowledge-source shell (parse asset, one model call, report to pod lead)"
+```
+
+### Task 1.2: Region reviewer gains a one-round rebuttal (the debate)
+
+Add a debate branch to the existing reviewer so a pod-lead can challenge it with a peer's argument and it replies hold or concede. Default behavior (a fresh asset) is unchanged.
+
+**Files:**
+- Modify: `src/agents/region-reviewer.ts` (add a challenge branch at the top of the handler)
+- Test: `test/region-debate.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+// test/region-debate.test.ts
+import { describe, expect, it } from 'vitest';
+import { FakeBandTransport } from '../src/band/fake';
+import { makeRegionReviewer } from '../src/agents/region-reviewer';
+import { StubModelClient } from '../src/models/client';
+import { loadBrandDna, loadRulebook } from '../src/domain/load';
+
+const ASSETS = new URL('../assets/', import.meta.url).pathname;
+const challenge = JSON.stringify({ kind: 'challenge', claim: 'boost', peerRegion: 'US', peerRationale: 'substantiated by RCT' });
+
+describe('region reviewer debate', () => {
+  it('answers a peer challenge with a hold/concede rebuttal addressed to the pod lead', async () => {
+    const brand = loadBrandDna(`${ASSETS}brand-dna.json`);
+    const eu = loadRulebook(`${ASSETS}rulebook.eu.json`);
+    const model = new StubModelClient(() => ({ text: '', json: { stance: 'hold', rationale: 'Article 10(2) still applies' } }));
+    const room = new FakeBandTransport('r');
+    await room.connectAgent({ agentId: 'lead', name: 'Reg Lead', handle: '@reg-lead', onMessage: async () => {} });
+    await room.connectAgent({
+      agentId: 'eu', name: 'EU Reviewer', handle: '@eu-reviewer',
+      onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: eu, brand, model, reportToHandle: '@reg-lead' }),
+    });
+    room.post('lead', challenge, [{ id: 'eu' }]);
+    await room.drain();
+    const reply = room.transcript.find((t) => t.fromId === 'eu' && t.kind === 'message');
+    const payload = JSON.parse(reply!.content);
+    expect(payload.kind).toBe('rebuttal');
+    expect(payload.region).toBe('EU');
+    expect(payload.stance).toBe('hold');
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run test/region-debate.test.ts`
+Expected: FAIL (the reviewer ignores a challenge message because it is not an asset).
+
+- [ ] **Step 3: Add the challenge branch to `src/agents/region-reviewer.ts`**
+
+Add this constant near the top of the file (after imports):
+
+```typescript
+const REBUTTAL_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    stance: { type: 'string', enum: ['hold', 'concede'] },
+    rationale: { type: 'string' },
+  },
+  required: ['stance', 'rationale'],
+} as const;
+```
+
+Inside `makeRegionReviewer`, at the very start of the returned handler (before the existing asset-parsing logic), insert:
+
+```typescript
+    // Debate branch: a pod lead relays a peer's argument; we hold or concede.
+    let challenge: { kind?: string; claim?: string; peerRegion?: string; peerRationale?: string } | null = null;
+    try { challenge = JSON.parse(message.content); } catch { challenge = null; }
+    if (challenge && challenge.kind === 'challenge') {
+      const res = await opts.model.complete({
+        system: `You are the ${opts.region} reviewer. A peer (${challenge.peerRegion}) argues: "${challenge.peerRationale}". Decide whether to hold your block on "${challenge.claim}" under the ${opts.region} rulebook, or concede. Answer JSON.`,
+        messages: [{ role: 'user', content: `Claim under dispute: ${challenge.claim}` }],
+        jsonSchema: REBUTTAL_JSON_SCHEMA,
+      });
+      const out = (res.json ?? {}) as { stance?: string; rationale?: string };
+      const target = matchParticipant(await tools.getParticipants(), opts.reportToHandle ?? '', 'agent') ?? null;
+      const mention = target ? [{ id: target.id, handle: target.handle }] : [{ id: message.senderId }];
+      await tools.sendEvent(`${opts.reviewerName} rebuts on "${challenge.claim}": ${out.stance ?? 'hold'}`, 'debate', { region: opts.region });
+      await tools.sendMessage(JSON.stringify({ kind: 'rebuttal', region: opts.region, claim: challenge.claim, stance: out.stance ?? 'hold', rationale: out.rationale ?? '' }), mention);
+      return;
+    }
+```
+
+(`matchParticipant` is already imported in this file; confirm the import line `import { matchParticipant } from './handles';` is present, it is used by the existing report path.)
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pnpm vitest run test/region-debate.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Run the full suite to confirm no regression**
+
+Run: `pnpm test`
+Expected: PASS (existing tests still green; the challenge branch only triggers on `kind: 'challenge'`).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/agents/region-reviewer.ts test/region-debate.test.ts
+git commit -m "feat(agents): region reviewer answers peer challenges (one-round rebuttal)"
+```
+
+### Task 1.3: The pod-lead (collect, debate on conflict, consolidate)
+
+**Files:**
+- Create: `src/agents/pod-lead.ts`
+- Test: `test/pod-lead.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+// test/pod-lead.test.ts
+import { describe, expect, it } from 'vitest';
+import { FakeBandTransport } from '../src/band/fake';
+import { makePodLead } from '../src/agents/pod-lead';
+
+const review = (region: string, severity: 'block' | 'warn' | 'info', claim = 'boost') =>
+  JSON.stringify({ region, reviewer: `${region} Reviewer`, findings: [{ category: 'claim', severity, claim, rationale: 'r' }] });
+
+describe('pod lead', () => {
+  it('files one PodFinding to the adjudicator once all members report, flagging the cross-region conflict', async () => {
+    const room = new FakeBandTransport('r');
+    const filed: string[] = [];
+    await room.connectAgent({ agentId: 'adj', name: 'Adjudicator', handle: '@adjudicator', onMessage: async (m) => { filed.push(m.content); } });
+    await room.connectAgent({
+      agentId: 'lead', name: 'Reg Lead', handle: '@reg-lead',
+      onMessage: makePodLead({ pod: 'regulatory', members: ['@us-reviewer', '@eu-reviewer'], memberKeys: ['US', 'EU'], reportToHandle: '@adjudicator', debate: false }),
+    });
+    // US passes (info), EU blocks the same span -> conflict
+    room.post('us', review('US', 'info'), [{ id: 'lead' }]);
+    room.post('eu', review('EU', 'block'), [{ id: 'lead' }]);
+    await room.drain();
+    expect(filed).toHaveLength(1);
+    const pf = JSON.parse(filed[0]);
+    expect(pf.kind).toBe('pod-finding');
+    expect(pf.pod).toBe('regulatory');
+    expect(pf.conflicts[0].span).toBe('boost');
+    expect(pf.conflicts[0].blockedBy).toContain('EU');
+    expect(pf.conflicts[0].passedBy).toContain('US');
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run test/pod-lead.test.ts`
+Expected: FAIL, cannot resolve `../src/agents/pod-lead`.
+
+- [ ] **Step 3: Implement `src/agents/pod-lead.ts`**
+
+```typescript
+// src/agents/pod-lead.ts
+import type { AgentHandler, RoomTools } from '../band/types';
+import type { Finding } from '../domain/types';
+import type { ConflictItem, PodFinding } from '../domain/board';
+import { matchParticipant } from './handles';
+import { tryParseAsset } from '../domain/load';
+
+export interface PodLeadOptions {
+  pod: 'claims' | 'regulatory' | 'brand';
+  members: string[];        // member handles to dispatch the asset to
+  memberKeys: string[];     // expected reply keys (region or source) to wait for
+  reportToHandle: string;   // '@adjudicator'
+  debate?: boolean;         // run a one-round rebuttal when a conflict is detected
+}
+
+interface MemberReply { key: string; findings: Finding[] }
+
+export function makePodLead(opts: PodLeadOptions): AgentHandler {
+  // Per-room accumulation, mirroring makeReconcile's collected-Map pattern.
+  const replies = new Map<string, Map<string, MemberReply>>();
+  const debated = new Set<string>();
+
+  const detectConflicts = (all: MemberReply[]): ConflictItem[] => {
+    const byClaim = new Map<string, { blockedBy: string[]; passedBy: string[]; rationale: string }>();
+    for (const r of all) {
+      const blockedClaims = new Set(r.findings.filter((f) => f.severity === 'block').map((f) => f.claim));
+      const seen = new Set<string>();
+      for (const f of r.findings) {
+        if (seen.has(f.claim)) continue;
+        seen.add(f.claim);
+        const entry = byClaim.get(f.claim) ?? { blockedBy: [], passedBy: [], rationale: '' };
+        if (blockedClaims.has(f.claim)) { entry.blockedBy.push(r.key); entry.rationale = f.rationale; }
+        else entry.passedBy.push(r.key);
+        byClaim.set(f.claim, entry);
+      }
+      // Members with no finding on a blocked claim count as passing it.
+    }
+    // A claim blocked by some members and not by others is a conflict.
+    const conflicts: ConflictItem[] = [];
+    for (const [span, e] of byClaim) {
+      const passedBy = opts.memberKeys.filter((k) => !e.blockedBy.includes(k));
+      if (e.blockedBy.length > 0 && passedBy.length > 0) {
+        conflicts.push({ span, blockedBy: e.blockedBy, passedBy, rationale: e.rationale });
+      }
+    }
+    return conflicts;
+  };
+
+  const consolidateAndFile = async (roomId: string, tools: RoomTools): Promise<void> => {
+    const map = replies.get(roomId);
+    if (!map) return;
+    const all = [...map.values()];
+    const findings = all.flatMap((r) => r.findings);
+    const conflicts = detectConflicts(all);
+    const pf: PodFinding = {
+      kind: 'pod-finding',
+      pod: opts.pod,
+      summary: `${opts.pod} pod: ${findings.length} findings, ${conflicts.length} conflict(s)`,
+      findings,
+      conflicts,
+    };
+    await tools.sendEvent(pf.summary, 'pod-finding', { pod: opts.pod, conflicts: conflicts.length });
+    const target = matchParticipant(await tools.getParticipants(), opts.reportToHandle, 'agent');
+    if (target) await tools.sendMessage(JSON.stringify(pf), [{ id: target.id, handle: target.handle }]);
+    replies.delete(roomId);
+    debated.delete(roomId);
+  };
+
+  return async (message, tools) => {
+    const roomId = message.roomId;
+
+    // 1) Asset from the conductor: dispatch to members.
+    const asset = tryParseAsset(message.content);
+    if (asset) {
+      replies.set(roomId, new Map());
+      const participants = await tools.getParticipants();
+      for (const handle of opts.members) {
+        const t = matchParticipant(participants, handle, 'agent');
+        if (t) await tools.sendMessage(JSON.stringify(asset), [{ id: t.id, handle: t.handle }]);
+      }
+      await tools.sendEvent(`${opts.pod} pod deliberating (${opts.members.length} members)`, 'recruited', { pod: opts.pod });
+      return;
+    }
+
+    // 2) A member reply (review result, rebuttal) or noise.
+    let body: Record<string, unknown> | null = null;
+    try { body = JSON.parse(message.content); } catch { return; }
+    if (!body) return;
+
+    const map = replies.get(roomId) ?? new Map<string, MemberReply>();
+    replies.set(roomId, map);
+
+    if (body.kind === 'rebuttal') {
+      const key = String(body.region ?? '');
+      const prev = map.get(key);
+      // concede drops the block to a warn so it no longer conflicts.
+      if (prev && body.stance === 'concede') {
+        prev.findings = prev.findings.map((f) => (f.claim === body.claim && f.severity === 'block' ? { ...f, severity: 'warn' as const } : f));
+      }
+      map.set(`${key}:rebut`, { key: `${key}:rebut`, findings: [] }); // mark received
+    } else {
+      const key = String(body.region ?? body.source ?? '');
+      const findings = (Array.isArray(body.findings) ? body.findings : []) as Finding[];
+      map.set(key, { key, findings });
+    }
+
+    // 3) All initial members in?
+    const haveAll = opts.memberKeys.every((k) => map.has(k));
+    if (!haveAll) return;
+
+    const initial = opts.memberKeys.map((k) => map.get(k)!).filter(Boolean);
+    const conflicts = detectConflicts(initial);
+
+    // 4) Optional one rebuttal round on conflict.
+    if (opts.debate && conflicts.length > 0 && !debated.has(roomId)) {
+      debated.add(roomId);
+      const participants = await tools.getParticipants();
+      for (const c of conflicts) {
+        for (const region of c.blockedBy) {
+          const handle = `@${region.toLowerCase()}-reviewer`;
+          const t = matchParticipant(participants, handle, 'agent');
+          if (t) await tools.sendMessage(JSON.stringify({ kind: 'challenge', claim: c.span, peerRegion: c.passedBy[0], peerRationale: 'peer passes this span' }), [{ id: t.id, handle: t.handle }]);
+        }
+      }
+      return; // wait for rebuttals, then this handler re-fires and re-evaluates
+    }
+
+    // 5) Consolidate and file.
+    await consolidateAndFile(roomId, tools);
+  };
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pnpm vitest run test/pod-lead.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/agents/pod-lead.ts test/pod-lead.test.ts
+git commit -m "feat(agents): pod-lead collects member positions, runs rebuttal on conflict, files one PodFinding"
+```
+
+### Task 1.4: Regulatory pod end-to-end debate (integration)
+
+Prove US + EU + LATAM + a debating lead produce a single conflict-bearing PodFinding on the fake transport.
+
+**Files:**
+- Test: `test/regulatory-pod.test.ts`
+
+- [ ] **Step 1: Write the test**
+
+```typescript
+// test/regulatory-pod.test.ts
+import { describe, expect, it } from 'vitest';
+import { FakeBandTransport } from '../src/band/fake';
+import { makePodLead } from '../src/agents/pod-lead';
+import { makeRegionReviewer } from '../src/agents/region-reviewer';
+import { StubModelClient } from '../src/models/client';
+import { loadAsset, loadBrandDna, loadRulebook } from '../src/domain/load';
+
+const ASSETS = new URL('../assets/', import.meta.url).pathname;
+
+describe('regulatory pod debate', () => {
+  it('US passes, EU holds a block on rebuttal, pod files a conflict', async () => {
+    const brand = loadBrandDna(`${ASSETS}brand-dna.json`);
+    const usRules = loadRulebook(`${ASSETS}rulebook.us.json`);
+    const euRules = loadRulebook(`${ASSETS}rulebook.eu.json`);
+    const latamRules = loadRulebook(`${ASSETS}rulebook.latam.json`);
+    const asset = loadAsset(`${ASSETS}sample-asset.json`);
+    const claim = asset.claim;
+
+    const pass = new StubModelClient(() => ({ text: '', json: { findings: [{ category: 'claim', severity: 'info', claim, rationale: 'substantiated' }] } }));
+    const block = new StubModelClient(() => ({ text: '', json: { findings: [{ category: 'claim', severity: 'block', claim, rationale: 'Article 10(2)' }] } }));
+    const hold = new StubModelClient(() => ({ text: '', json: { stance: 'hold', rationale: 'still unlawful' } }));
+    // EU model returns a block on review, and a hold on rebuttal. Use a counter.
+    let euCall = 0;
+    const euModel = new StubModelClient(() => (euCall++ === 0 ? { text: '', json: { findings: [{ category: 'claim', severity: 'block', claim, rationale: 'Article 10(2)' }] } } : { text: '', json: { stance: 'hold', rationale: 'still unlawful' } }));
+
+    const filed: string[] = [];
+    const room = new FakeBandTransport('r');
+    await room.connectAgent({ agentId: 'adj', name: 'Adjudicator', handle: '@adjudicator', onMessage: async (m) => { filed.push(m.content); } });
+    await room.connectAgent({ agentId: 'reglead', name: 'Reg Lead', handle: '@reg-lead', onMessage: makePodLead({ pod: 'regulatory', members: ['@us-reviewer', '@eu-reviewer', '@latam-reviewer'], memberKeys: ['US', 'EU', 'LATAM'], reportToHandle: '@adjudicator', debate: true }) });
+    await room.connectAgent({ agentId: 'us', name: 'US Reviewer', handle: '@us-reviewer', onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: usRules, brand, model: pass, reportToHandle: '@reg-lead' }) });
+    await room.connectAgent({ agentId: 'eu', name: 'EU Reviewer', handle: '@eu-reviewer', onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: euRules, brand, model: euModel, reportToHandle: '@reg-lead' }) });
+    await room.connectAgent({ agentId: 'latam', name: 'LATAM Reviewer', handle: '@latam-reviewer', onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: latamRules, brand, model: pass, reportToHandle: '@reg-lead' }) });
+
+    room.post('cond', JSON.stringify(asset), [{ id: 'reglead' }]);
+    await room.drain();
+
+    expect(filed).toHaveLength(1);
+    const pf = JSON.parse(filed[0]);
+    expect(pf.conflicts.length).toBeGreaterThan(0);
+    expect(pf.conflicts[0].blockedBy).toContain('EU');
+    // the debate happened: EU was challenged and held
+    const debate = room.transcript.find((t) => t.kind === 'event' && (t.content ?? '').includes('rebuts'));
+    expect(debate).toBeTruthy();
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it passes**
+
+Run: `pnpm vitest run test/regulatory-pod.test.ts`
+Expected: PASS. If the rebuttal mark-received bookkeeping prevents re-consolidation, adjust `makePodLead` step 4/5 so that after the rebuttal replies arrive the handler reaches `consolidateAndFile` (the `debated` set guard ensures the challenge round runs once, then the next member message triggers consolidation).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add test/regulatory-pod.test.ts
+git commit -m "test(agents): regulatory pod produces a single conflict-bearing PodFinding through a debate"
+```
+
+---
