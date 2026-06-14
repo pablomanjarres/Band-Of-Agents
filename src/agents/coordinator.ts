@@ -1,4 +1,4 @@
-import type { AgentHandler } from '../band/types';
+import type { AgentHandler, Participant } from '../band/types';
 import type { ContentAsset } from '../domain/types';
 import type { SharedBoard } from '../board/shared';
 import { toAsset } from '../domain/load';
@@ -28,6 +28,14 @@ export interface CoordinatorOptions {
    * coordinator pulls it. Returns undefined to fall back to an inline campaign.
    */
   lookupCampaign?: (query: string) => ContentAsset | undefined;
+  /**
+   * Region code (US/EU/LATAM) -> the reviewer's configured handle. Recruitment is
+   * then filtered to the asset's markets: a region reviewer joins only when its
+   * market is targeted, and a targeted market with no agent present is pulled in
+   * via addParticipant. Non-region reviewers (Brand) are always recruited. Omit
+   * to recruit every present reviewer (the prior behavior).
+   */
+  regionHandles?: Record<string, string>;
 }
 
 // The coordinator/chair. It accepts an intake (from a human or the configured
@@ -50,13 +58,54 @@ export function makeCoordinator(opts: CoordinatorOptions): AgentHandler {
     if (!fromHuman && !fromIntake && !fromRemediation) return;
 
     const participants = await tools.getParticipants();
-    const reviewers = participants.filter(
+
+    // Resolve the campaign first so recruitment can target its markets. A
+    // re-submit reuses the campaign already on the board; an intake or human
+    // post carries it (a saved-campaign lookup, or inline JSON).
+    const campaign = fromRemediation
+      ? opts.board.campaign(ctx.roomId)
+      : (opts.lookupCampaign?.(message.content) ?? toAsset(message.content));
+    const markets = campaign?.markets ?? [];
+
+    // Base pool: every agent in the room except this coordinator, the intake
+    // relay, and the remediation agent.
+    const candidates = participants.filter(
       (p) =>
         p.type === 'agent' &&
         p.id !== ctx.agentId &&
         !(opts.intakeAgentHandle !== undefined && nameMatchesHandle(p.name, opts.intakeAgentHandle)) &&
         !(opts.remediationHandle !== undefined && nameMatchesHandle(p.name, opts.remediationHandle)),
     );
+
+    // Target the recruitment to the asset's markets: a region reviewer joins
+    // only when its market is in scope, while non-region reviewers (Brand,
+    // Reconcile) always do. With no regionHandles configured this is a no-op and
+    // every present reviewer is recruited, as before.
+    const regionHandles = opts.regionHandles ?? {};
+    const regionOf = (p: Participant): string | undefined =>
+      Object.keys(regionHandles).find(
+        (code) =>
+          nameMatchesHandle(p.name, regionHandles[code]!) || nameMatchesHandle(p.handle, regionHandles[code]!),
+      );
+    const reviewers = candidates.filter((p) => {
+      const region = regionOf(p);
+      return region === undefined || markets.includes(region);
+    });
+
+    // Dynamic recruitment: pull in a targeted market's reviewer that is not yet
+    // in the room, so the room composes itself to the asset.
+    for (const code of markets) {
+      const handle = regionHandles[code];
+      if (handle === undefined) continue;
+      const present = participants.some(
+        (p) => p.type === 'agent' && (nameMatchesHandle(p.name, handle) || nameMatchesHandle(p.handle, handle)),
+      );
+      if (present) continue;
+      const segment = handle.replace(/^@/, '').split('/').pop() ?? handle;
+      await tools.addParticipant(segment, 'reviewer');
+      await tools.sendEvent(`Recruited the ${code} reviewer (${segment}) into the room for this asset.`, 'intake');
+    }
+
     if (reviewers.length === 0) return;
 
     const reconcile =
@@ -83,8 +132,8 @@ export function makeCoordinator(opts: CoordinatorOptions): AgentHandler {
       return;
     }
 
-    // Human/intake: resolve and stash the campaign, then recruit.
-    const campaign = opts.lookupCampaign?.(message.content) ?? toAsset(message.content);
+    // Human/intake: the campaign is always resolved off this path. Stash it and recruit.
+    if (!campaign) return;
     opts.board.startReview(ctx.roomId, campaign);
     await tools.sendEvent(
       `Intake: "${campaignLabel(campaign)}" for ${campaign.markets.join(', ')}. Recruiting ${reviewers.length} reviewer(s).`,
