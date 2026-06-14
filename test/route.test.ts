@@ -17,4 +17,13 @@ describe('model routing', () => {
     expect(r.eu).toBe('gemini:gemini-2.5-pro');
     expect(r.latam).toBe('featherless:meta-llama/Meta-Llama-3.1-8B-Instruct');
   });
+
+  it('routes every new pod/board role', () => {
+    const r = describeRoutes('dev');
+    for (const role of ['scout', 'claim', 'precedent', 'disclosure', 'channel', 'visual', 'mediator']) {
+      expect(r[role as keyof typeof r]).toBeTruthy();
+    }
+    expect(r.scout).toContain('featherless:');
+    expect(r.mediator).toContain('bedrock:');
+  });
 });
