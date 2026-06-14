@@ -70,12 +70,17 @@ export function HistoryPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-900">Review history</h1>
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">Reviews</h1>
+          <p className="mt-0.5 text-xs text-slate-400">
+            Reviews you start in band.ai appear here automatically.
+          </p>
+        </div>
         <Link
           to="/"
           className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
         >
-          + New review
+          + Compose campaign
         </Link>
       </div>
 
@@ -85,7 +90,7 @@ export function HistoryPage() {
         <p className="text-sm text-red-600">{load.message}</p>
       ) : load.reviews.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
-          No reviews yet. Submit one from the New review tab.
+          No reviews yet. Start one in the band.ai room and it will appear here.
         </div>
       ) : (
         <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">

@@ -87,6 +87,20 @@ send/recv/event -> BoardActivity -> BoardEvent -> SSE per review.
 - [x] precedent -> shared context loop: recent human rulings fed into the region reviewers' prompts.
 - [~] render the live board AS the diagram (Coordinator/Reconcile/Remediation/Compliance-lead nodes). In progress.
 
+## band.ai-app reframe (band.ai is the entry point; UI is the back-office)
+- [x] Coordinator fetches a saved campaign by name (lookupCampaign) - the band.ai kickoff.
+- [x] Region reviewers read the live rulebook from the store (UI edits apply to the next review).
+- [x] BandBoard is an OBSERVER: connects the agents (no room creation, no Intake) and auto-discovers
+      reviews from band.ai room activity; agents write verdicts (events) + precedents to the store.
+- [x] Server: band mode disables POST /api/reviews (start in band.ai); wires store into the agents.
+- [x] Verified: agents connect in observe mode (7 agents, waiting). Pushed (PR #1 merged to main).
+- [~] UI: compose/save campaigns (with name), read-only audit board, band.ai-flow framing. In progress.
+- [ ] Live end-to-end: post "Coordinator, review campaign <name>" in app.band.ai, watch it auto-appear.
+
+## Paused
+- [ ] Image vision-review (region agents review the campaign image, not just copy). Adapters read;
+      paused for the band.ai-app reframe.
+
 ## Submission (rubric) backlog
 - [ ] README section making AIML multi-model routing visible (AIML prize).
 - [ ] Public MIT repo, hosted demo URL, slides, video.

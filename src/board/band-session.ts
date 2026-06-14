@@ -1,13 +1,13 @@
-// band.ai room mode: band.ai is the integration layer. The campaign portal
-// (server) calls createReview(); the Intake agent creates a real band.ai room,
-// adds the reviewer agents, and posts the campaign. The agents then collaborate
-// in that room (recruit, review, reconcile, remediate, escalate) entirely
-// through band.ai. Every outbound message/event is observed via the transport's
-// activity hook, translated, and streamed to the UI. The app never calls a
-// reviewer; it drops the campaign into band.ai and watches.
+// band.ai room mode: band.ai's app is the entry point. You create a room in
+// app.band.ai, add the agents, and post "Coordinator, review campaign <name>".
+// The agents collaborate in that room in PLAIN ENGLISH, sharing the structured
+// data in-process via a SharedBoard, and reading/writing our store (rulebooks,
+// saved campaigns, verdicts, precedents). This backend only connects the agents
+// and OBSERVES: it never creates rooms. The dashboard is fed by the SharedBoard
+// (structured) plus the room's plain-English chatter (timeline).
 
 import { RealBandTransport } from '../band/real';
-import type { BoardActivity, IntakeControl } from '../band/types';
+import type { BoardActivity } from '../band/types';
 import { makeCoordinator } from '../agents/coordinator';
 import { makeRegionReviewer } from '../agents/region-reviewer';
 import { makeBrandReviewer } from '../agents/brand-reviewer';
@@ -15,9 +15,9 @@ import { makeRemediation } from '../agents/remediation';
 import { makeReconcile, type Precedent } from '../agents/reconcile';
 import type { BrandDna, ContentAsset, Rulebook } from '../domain/types';
 import { translateActivity, type BoardEvent } from './events';
+import { SharedBoard } from './shared';
 import type { BoardModels } from './session';
 
-const INTAKE_HANDLE = '@pablomanjarres/intake';
 const COORDINATOR_HANDLE = '@pablomanjarres/coordinator';
 const RECONCILE_HANDLE = '@pablomanjarres/reconcile';
 const REMEDIATION_HANDLE = '@pablomanjarres/remediation';
@@ -27,171 +27,119 @@ export interface BandBoardOptions {
   rulebooks: { us: Rulebook; eu: Rulebook; latam: Rulebook };
   models: BoardModels;
   humanHandle?: string;
-  onPrecedent?: (precedent: Precedent) => void;
-  /** Host generated images (base64 -> short URL) so band.ai messages stay small. */
   hostImage?: (url: string) => string;
-  /** Recent precedent lines fed into the region reviewers' shared context. */
   getPrecedents?: () => string[];
-  /** Delay after adding agents before posting, so they subscribe to the new room. */
-  joinDelayMs?: number;
+  /** Current rulebook per region from the store, so UI edits apply to the next review. */
+  getRulebook?: (region: string) => Rulebook;
+  /** Resolve a human's free-text reference to a saved campaign (the band.ai kickoff). */
+  lookupCampaign?: (query: string) => ContentAsset | undefined;
+  /** A human ruling on an escalation becomes precedent. */
+  logPrecedent?: (precedent: Precedent) => void;
+  /** Called when a review is first seen in a band.ai room; returns the event sink to stream into. */
+  onReviewDiscovered: (roomId: string) => (event: BoardEvent) => void;
 }
 
 interface RoomBinding {
   onEvent: (event: BoardEvent) => void;
-  escalated: boolean;
-  decided: boolean;
-}
-
-interface AgentIds {
-  coord: string;
-  us: string;
-  eu: string;
-  latam: string;
-  brand: string;
-  rem: string;
-  rec: string;
 }
 
 export class BandBoard {
-  private transport: RealBandTransport;
-  private intake: IntakeControl | undefined;
-  private ids: AgentIds | undefined;
+  private readonly transport: RealBandTransport;
+  private readonly board: SharedBoard;
   private started = false;
   private readonly rooms = new Map<string, RoomBinding>();
 
   constructor(private readonly opts: BandBoardOptions) {
     this.transport = new RealBandTransport({ onActivity: (a) => this.dispatch(a) });
+    this.board = new SharedBoard((roomId, event) => this.routeEvent(roomId, event));
   }
 
+  /** Connect the agents so you can add them to a room in app.band.ai. We never create rooms. */
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
-
-    const ids: AgentIds = {
-      coord: requireEnv('COORDINATOR_AGENT_ID'),
-      us: requireEnv('US_AGENT_ID'),
-      eu: requireEnv('EU_AGENT_ID'),
-      latam: requireEnv('LATAM_AGENT_ID'),
-      brand: requireEnv('BRAND_AGENT_ID'),
-      rem: requireEnv('REMEDIATION_AGENT_ID'),
-      rec: requireEnv('RECONCILE_AGENT_ID'),
-    };
-    this.ids = ids;
-
     const { brand, rulebooks, models } = this.opts;
+    const board = this.board;
+    const rulebookFor = (region: 'us' | 'eu' | 'latam'): (() => Rulebook) => () =>
+      this.opts.getRulebook?.(region.toUpperCase()) ?? rulebooks[region];
 
     await this.transport.connectAgent({
-      agentId: ids.coord,
+      agentId: requireEnv('COORDINATOR_AGENT_ID'),
       name: 'Coordinator',
       handle: COORDINATOR_HANDLE,
       envPrefix: 'COORDINATOR',
-      onMessage: makeCoordinator({ intakeAgentHandle: INTAKE_HANDLE, remediationHandle: REMEDIATION_HANDLE }),
+      onMessage: makeCoordinator({
+        board,
+        remediationHandle: REMEDIATION_HANDLE,
+        reconcileHandle: RECONCILE_HANDLE,
+        ...(this.opts.lookupCampaign ? { lookupCampaign: this.opts.lookupCampaign } : {}),
+      }),
     });
     await this.transport.connectAgent({
-      agentId: ids.us,
+      agentId: requireEnv('US_AGENT_ID'),
       name: 'US Reviewer',
       handle: '@pablomanjarres/us-reviewer',
       envPrefix: 'US',
-      onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: rulebooks.us, brand, model: models.us, reportToHandle: RECONCILE_HANDLE, ignoreFromHandle: INTAKE_HANDLE, precedents: this.opts.getPrecedents }),
+      onMessage: makeRegionReviewer({ board, region: 'US', reviewerName: 'US Reviewer', rulebook: rulebooks.us, brand, model: models.us, reportToHandle: RECONCILE_HANDLE, getRulebook: rulebookFor('us'), precedents: this.opts.getPrecedents }),
     });
     await this.transport.connectAgent({
-      agentId: ids.eu,
+      agentId: requireEnv('EU_AGENT_ID'),
       name: 'EU Reviewer',
       handle: '@pablomanjarres/eu-reviewer',
       envPrefix: 'EU',
-      onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: rulebooks.eu, brand, model: models.eu, reportToHandle: RECONCILE_HANDLE, ignoreFromHandle: INTAKE_HANDLE, precedents: this.opts.getPrecedents }),
+      onMessage: makeRegionReviewer({ board, region: 'EU', reviewerName: 'EU Reviewer', rulebook: rulebooks.eu, brand, model: models.eu, reportToHandle: RECONCILE_HANDLE, getRulebook: rulebookFor('eu'), precedents: this.opts.getPrecedents }),
     });
     await this.transport.connectAgent({
-      agentId: ids.latam,
+      agentId: requireEnv('LATAM_AGENT_ID'),
       name: 'LATAM Reviewer',
       handle: '@pablomanjarres/latam-reviewer',
       envPrefix: 'LATAM',
-      onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: rulebooks.latam, brand, model: models.latam, reportToHandle: RECONCILE_HANDLE, ignoreFromHandle: INTAKE_HANDLE, precedents: this.opts.getPrecedents }),
+      onMessage: makeRegionReviewer({ board, region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: rulebooks.latam, brand, model: models.latam, reportToHandle: RECONCILE_HANDLE, getRulebook: rulebookFor('latam'), precedents: this.opts.getPrecedents }),
     });
     await this.transport.connectAgent({
-      agentId: ids.brand,
+      agentId: requireEnv('BRAND_AGENT_ID'),
       name: 'Brand Reviewer',
       handle: '@pablomanjarres/brand-reviewer',
       envPrefix: 'BRAND',
-      onMessage: makeBrandReviewer({ brand, model: models.brand, reportToHandle: RECONCILE_HANDLE, ignoreFromHandle: INTAKE_HANDLE }),
+      onMessage: makeBrandReviewer({ board, brand, model: models.brand, reportToHandle: RECONCILE_HANDLE }),
     });
     await this.transport.connectAgent({
-      agentId: ids.rem,
+      agentId: requireEnv('REMEDIATION_AGENT_ID'),
       name: 'Remediation',
       handle: REMEDIATION_HANDLE,
       envPrefix: 'REMEDIATION',
-      onMessage: makeRemediation({ brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: COORDINATOR_HANDLE, ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}) }),
+      onMessage: makeRemediation({ board, brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: COORDINATOR_HANDLE, ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}) }),
     });
     await this.transport.connectAgent({
-      agentId: ids.rec,
+      agentId: requireEnv('RECONCILE_AGENT_ID'),
       name: 'Reconcile',
       handle: RECONCILE_HANDLE,
       envPrefix: 'RECONCILE',
       onMessage: makeReconcile({
+        board,
         expectedRegions: ['US', 'EU', 'LATAM', 'BRAND'],
         coordinatorHandle: COORDINATOR_HANDLE,
         remediationHandle: REMEDIATION_HANDLE,
-        humanProxyHandle: INTAKE_HANDLE,
         ...(this.opts.humanHandle ? { humanHandle: this.opts.humanHandle } : {}),
-        ...(this.opts.onPrecedent ? { logPrecedent: this.opts.onPrecedent } : {}),
+        ...(this.opts.logPrecedent ? { logPrecedent: this.opts.logPrecedent } : {}),
       }),
     });
-
-    this.intake = await this.transport.connectIntake({ envPrefix: 'INTAKE', name: 'Intake' });
   }
 
-  /** Create a band.ai room for one campaign, add the agents, and post it. Returns the room id. */
-  async createReview(asset: ContentAsset, onEvent: (event: BoardEvent) => void): Promise<string> {
-    if (!this.intake || !this.ids) throw new Error('BandBoard not started');
-    const ids = this.ids;
-    const roomId = await this.intake.createRoom();
-    this.rooms.set(roomId, { onEvent, escalated: false, decided: false });
-
-    for (const id of [ids.coord, ids.us, ids.eu, ids.latam, ids.brand, ids.rem, ids.rec]) {
-      await this.intake.addParticipant(roomId, id);
-    }
-    // Give the freshly added agents a moment to subscribe to the new room.
-    await new Promise((resolve) => setTimeout(resolve, this.opts.joinDelayMs ?? 1500));
-
-    onEvent({ type: 'intake', seq: 0, fromName: 'You', asset });
-    onEvent({ type: 'status', seq: 0, fromName: 'system', status: 'running' });
-    await this.intake.postMessage(roomId, JSON.stringify(asset), [
-      { id: ids.coord, handle: COORDINATOR_HANDLE, name: 'Coordinator' },
-    ]);
-    return roomId;
-  }
-
-  /** Relay a human ruling on an escalation into the room (mentions Reconcile). */
-  async submitDecision(roomId: string, text: string): Promise<void> {
-    if (!this.intake || !this.ids) throw new Error('BandBoard not started');
-    await this.intake.postMessage(roomId, text, [{ id: this.ids.rec, handle: RECONCILE_HANDLE, name: 'Reconcile' }]);
-  }
-
+  /** Plain-English room chatter -> timeline log lines. Structured diagram state comes from the board. */
   private dispatch(activity: BoardActivity): void {
-    const binding = this.rooms.get(activity.roomId);
-    if (!binding) return;
     const event = translateActivity(activity);
-    if (!event) return;
+    if (event) this.routeEvent(activity.roomId, event);
+  }
 
-    if (event.type === 'escalation') binding.escalated = true;
-    if (event.type === 'decision') binding.decided = true;
+  /** Route a board/chatter event to the dashboard, auto-discovering the review on first activity. */
+  private routeEvent(roomId: string, event: BoardEvent): void {
+    let binding = this.rooms.get(roomId);
+    if (!binding) {
+      binding = { onEvent: this.opts.onReviewDiscovered(roomId) };
+      this.rooms.set(roomId, binding);
+    }
     binding.onEvent(event);
-
-    // Derive terminal status from the verdict (band.ai has no local drain):
-    // an adapt round is not terminal (remediation + re-review follow), an
-    // escalate awaits the human, all-publish is complete.
-    if (event.type === 'verdict') {
-      const decisions = event.verdicts.map((v) => v.decision);
-      const status = decisions.includes('adapt')
-        ? 'running'
-        : decisions.includes('escalate')
-          ? 'awaiting-decision'
-          : 'complete';
-      binding.onEvent({ type: 'status', seq: 0, fromName: 'system', status });
-    }
-    if (event.type === 'decision') {
-      binding.onEvent({ type: 'status', seq: 0, fromName: 'system', status: 'complete' });
-    }
   }
 }
 

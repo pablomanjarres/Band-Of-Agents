@@ -9,8 +9,8 @@ import { RulebooksPage } from './pages/RulebooksPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 const NAV_ITEMS = [
-  { to: '/', label: 'New Review', end: true },
-  { to: '/history', label: 'History', end: false },
+  { to: '/', label: 'Compose', end: true },
+  { to: '/history', label: 'Reviews', end: false },
   { to: '/rulebooks', label: 'Rulebooks', end: false },
   { to: '/library', label: 'Library', end: false },
 ];
@@ -23,7 +23,7 @@ function Nav() {
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
             L
           </span>
-          <span className="text-sm font-semibold text-slate-800">Lumavida Review Console</span>
+          <span className="text-sm font-semibold text-slate-800">Lumavida Compliance Console</span>
         </div>
         <nav className="flex items-center gap-1">
           {NAV_ITEMS.map((item) => (

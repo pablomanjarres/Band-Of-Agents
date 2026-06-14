@@ -106,8 +106,26 @@ export class RealBandTransport implements BandTransport {
     const agent = Agent.create({ adapter, config });
     dbg(`${opts.name} connecting (${config.agentId})`);
     void agent.run({ signals: false });
+
+    // The SDK does not reliably auto-join rooms a human creates in app.band.ai
+    // after the agent connected, so re-subscribe to all of the agent's rooms on a
+    // short interval. This lets you add the agents to a room and post, and they
+    // pick it up within a few seconds without restarting the server.
+    const subscribeRooms = (): void => {
+      const link = (agent as { runtime?: { link?: { subscribeAgentRooms?: () => Promise<void> } } })?.runtime?.link;
+      dbg(`${opts.name} subscribeAgentRooms: link=${!!link} method=${typeof link?.subscribeAgentRooms}`);
+      try {
+        void link?.subscribeAgentRooms?.();
+      } catch (e) {
+        dbg(`${opts.name} subscribe error: ${(e as Error)?.message ?? String(e)}`);
+      }
+    };
+    const initial = setTimeout(subscribeRooms, 1500);
+    const interval = setInterval(subscribeRooms, 8000);
     return {
       stop: async () => {
+        clearTimeout(initial);
+        clearInterval(interval);
         await agent.stop();
       },
     };

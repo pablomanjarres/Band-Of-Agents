@@ -1,8 +1,8 @@
 import type { AgentHandler, Mention, RoomMessage, RoomTools } from '../band/types';
 import type { CompleteResult, ModelClient } from '../models/client';
-import type { BrandDna, ReviewResult } from '../domain/types';
+import type { BrandDna, Finding, ReviewResult } from '../domain/types';
 import { ReviewOutput } from '../domain/types';
-import { tryParseAsset } from '../domain/load';
+import type { SharedBoard } from '../board/shared';
 import { matchParticipant, nameMatchesHandle } from './handles';
 
 const BRAND_OUTPUT_JSON_SCHEMA = {
@@ -31,6 +31,8 @@ const BRAND_OUTPUT_JSON_SCHEMA = {
 } as const;
 
 export interface BrandReviewerOptions {
+  /** In-process data hub. The campaign is read from here; the finding is written here. */
+  board: SharedBoard;
   brand: BrandDna;
   model: ModelClient;
   reviewerName?: string;
@@ -40,15 +42,17 @@ export interface BrandReviewerOptions {
 }
 
 // The brand-consistency reviewer: keeps localized versions on-voice and free of
-// forbidden phrasing. Reports findings under the 'BRAND' region so reconcile can
-// treat brand consistency as its own gate alongside the market regions.
+// forbidden phrasing. It reads the campaign off the board, reviews it, files the
+// finding under the 'BRAND' region on the board so reconcile treats brand
+// consistency as its own gate, and reports to reconcile in plain English.
 export function makeBrandReviewer(opts: BrandReviewerOptions): AgentHandler {
   const reviewerName = opts.reviewerName ?? 'Brand Reviewer';
-  return async (message, tools) => {
+  return async (message, tools, ctx) => {
     if (message.senderType !== 'agent') return;
     if (opts.ignoreFromHandle && nameMatchesHandle(message.senderName, opts.ignoreFromHandle)) return;
-    const asset = tryParseAsset(message.content);
+    const asset = opts.board.campaign(ctx.roomId);
     if (!asset) return;
+    if (opts.board.reviewFor(ctx.roomId, 'BRAND')) return; // already reviewed this round
 
     const system = [
       `You are the brand-consistency reviewer for ${opts.brand.brand}. This is a demo, NOT legal advice.`,
@@ -62,12 +66,30 @@ export function makeBrandReviewer(opts: BrandReviewerOptions): AgentHandler {
       jsonSchema: BRAND_OUTPUT_JSON_SCHEMA,
     });
     const review: ReviewResult = { region: 'BRAND', reviewer: reviewerName, findings: parseFindings(res) };
+    opts.board.addReview(ctx.roomId, review);
 
     const blocking = review.findings.filter((f) => f.severity === 'block').length;
-    await tools.sendEvent(`Brand review of "${asset.id}": ${review.findings.length} finding(s), ${blocking} blocking.`, 'review');
+    await tools.sendEvent(`Brand review: ${review.findings.length} finding(s), ${blocking} blocking.`, 'review');
     const target = await resolveTarget(tools, opts.reportToHandle, message);
-    await tools.sendMessage(JSON.stringify(review), [target]);
+    await tools.sendMessage(brandMessage(review.findings), [target]);
   };
+}
+
+/** Compose a plain-English brand report to Reconcile from the structured findings. */
+function brandMessage(findings: Finding[]): string {
+  const first = findings[0];
+  if (!first) {
+    return `Brand review: this one is clear. No blocking issues from my rules.`;
+  }
+  const firstBlock = findings.find((f) => f.severity === 'block');
+  if (firstBlock) {
+    const fix =
+      typeof firstBlock.requiredDisclosure === 'string' && firstBlock.requiredDisclosure.length > 0
+        ? 'It is fixable by adding the required disclosure.'
+        : 'This is not fixable by a simple disclosure.';
+    return `Brand review: I have to flag this. ${firstBlock.rationale} ${fix}`;
+  }
+  return `Brand review: it can run, but note: ${first.rationale}`;
 }
 
 function parseFindings(res: CompleteResult): ReviewResult['findings'] {

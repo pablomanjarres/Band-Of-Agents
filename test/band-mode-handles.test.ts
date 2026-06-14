@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { makeCoordinator } from '../src/agents/coordinator';
 import { makeReconcile } from '../src/agents/reconcile';
 import { nameMatchesHandle } from '../src/agents/handles';
+import type { ContentAsset } from '../src/domain/types';
 import type { Participant, RoomMessage, RoomTools } from '../src/band/types';
+import { probeBoard } from './helpers';
 
 // The band.ai SDK can only post as an agent, so room mode routes the asset and
 // the human ruling through one intake/proxy agent. These tests pin the opt-in
@@ -45,6 +47,7 @@ function msg(partial: Partial<RoomMessage>): RoomMessage {
 }
 
 const ASSET = JSON.stringify({ id: 'a1', channel: 'post', markets: ['EU'], copy: 'c', claim: 'c' });
+const EU_ASSET: ContentAsset = { id: 'a1', channel: 'post', markets: ['EU'], copy: 'c', claim: 'c' };
 const INTAKE = '@pablomanjarres/intake';
 
 describe('band.ai room-mode opt-in tweaks', () => {
@@ -62,12 +65,14 @@ describe('band.ai room-mode opt-in tweaks', () => {
       { id: 'intake', name: 'Intake', handle: '@intake', type: 'agent' },
     ];
     const { tools, sent } = mockTools(participants);
-    const handler = makeCoordinator({ intakeAgentHandle: INTAKE });
+    const { board } = probeBoard();
+    const handler = makeCoordinator({ board, intakeAgentHandle: INTAKE });
     await handler(msg({ senderName: 'Intake', senderId: 'intake', content: ASSET }), tools, { roomId: 'r', agentId: 'coord', agentName: 'Coordinator' });
     expect(sent.messages.length).toBe(1);
     expect(sent.events.some((e) => e.type === 'intake')).toBe(true);
-    // the intake agent itself is excluded from the recruited reviewers.
-    expect(sent.messages[0]).not.toContain('"intake"');
+    // the recruit goes to the reviewer; the intake relay is excluded from it.
+    expect(sent.messages[0]).toContain('@us');
+    expect(sent.messages[0]!.toLowerCase()).not.toContain('intake');
   });
 
   it('coordinator without intake config still ignores agent posts (local-mode default)', async () => {
@@ -76,7 +81,8 @@ describe('band.ai room-mode opt-in tweaks', () => {
       { id: 'us', name: 'US Reviewer', handle: '@us', type: 'agent' },
     ];
     const { tools, sent } = mockTools(participants);
-    const handler = makeCoordinator();
+    const { board } = probeBoard();
+    const handler = makeCoordinator({ board });
     await handler(msg({ senderName: 'Intake', senderId: 'intake', content: ASSET }), tools, { roomId: 'r', agentId: 'coord', agentName: 'Coordinator' });
     expect(sent.messages.length).toBe(0);
   });
@@ -89,7 +95,16 @@ describe('band.ai room-mode opt-in tweaks', () => {
     ];
     const { tools, sent } = mockTools(participants);
     const precedents: { decision: string }[] = [];
+    const { board } = probeBoard();
+    // The campaign and the EU review live on the board; reconcile reads them there.
+    board.startReview('r', EU_ASSET);
+    board.addReview('r', {
+      region: 'EU',
+      reviewer: 'EU',
+      findings: [{ category: 'health_claim', severity: 'block', claim: 'x', rationale: 'unauthorised', ruleId: 'eu-health-preauth' }],
+    });
     const handler = makeReconcile({
+      board,
       expectedRegions: ['EU'],
       coordinatorHandle: '@coordinator',
       humanHandle: '@compliance-lead',
@@ -97,12 +112,8 @@ describe('band.ai room-mode opt-in tweaks', () => {
       logPrecedent: (p) => precedents.push({ decision: p.decision }),
     });
 
-    const euReview = JSON.stringify({
-      region: 'EU',
-      reviewer: 'EU',
-      findings: [{ category: 'health_claim', severity: 'block', claim: 'x', rationale: 'unauthorised', ruleId: 'eu-health-preauth' }],
-    });
-    await handler(msg({ senderName: 'EU Reviewer', senderId: 'eu', content: euReview }), tools, { roomId: 'r', agentId: 'rec', agentName: 'Reconcile' });
+    // The EU reviewer's plain-English report triggers reconcile; the finding is read off the board.
+    await handler(msg({ senderName: 'EU Reviewer', senderId: 'eu', content: 'EU is blocking on an unauthorised health claim.' }), tools, { roomId: 'r', agentId: 'rec', agentName: 'Reconcile' });
     expect(sent.events.some((e) => e.type === 'escalation')).toBe(true);
 
     await handler(msg({ senderName: 'Intake', senderId: 'intake', content: 'Reject EU.' }), tools, { roomId: 'r', agentId: 'rec', agentName: 'Reconcile' });

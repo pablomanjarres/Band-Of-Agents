@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import type { CreateReviewRequest } from '../types';
+import { Link } from 'react-router-dom';
+import type { ContentAsset } from '../types';
 
 const MARKET_OPTIONS = ['US', 'EU', 'LATAM'] as const;
 type Market = (typeof MARKET_OPTIONS)[number];
 
-const SAMPLE: CreateReviewRequest = {
+const SAMPLE: CampaignFormValues = {
+  name: 'Lumavida-VitC',
   copy: 'Lumavida Immune+ with Vitamin C. Vitamin C contributes to the normal function of the immune system. Feel your best, every day.',
   claim: 'Vitamin C contributes to the normal function of the immune system.',
   channel: 'instagram',
@@ -14,7 +16,8 @@ const SAMPLE: CreateReviewRequest = {
     'Uses the EFSA-authorised health-claim wording for vitamin C and the normal function of the immune system; 80 mg per serving (100% NRV).',
 };
 
-export interface ReviewFormValues {
+export interface CampaignFormValues {
+  name: string;
   copy: string;
   claim: string;
   channel: string;
@@ -23,10 +26,13 @@ export interface ReviewFormValues {
   substantiation: string;
 }
 
+// Kept for callers that still import the prior name (e.g. Library prefill mapping).
+export type ReviewFormValues = CampaignFormValues;
+
 interface ReviewFormProps {
-  onSubmit: (body: CreateReviewRequest) => Promise<void>;
-  initial?: Partial<ReviewFormValues>;
-  onSaveToLibrary?: (values: ReviewFormValues) => Promise<void>;
+  // Saves the composed campaign to the library and resolves with the stored asset.
+  onSave: (values: CampaignFormValues) => Promise<ContentAsset>;
+  initial?: Partial<CampaignFormValues>;
 }
 
 function normalizeMarkets(markets: readonly string[] | undefined): Market[] {
@@ -34,17 +40,17 @@ function normalizeMarkets(markets: readonly string[] | undefined): Market[] {
   return MARKET_OPTIONS.filter((option) => markets.includes(option));
 }
 
-export function ReviewForm({ onSubmit, initial, onSaveToLibrary }: ReviewFormProps) {
+export function ReviewForm({ onSave, initial }: ReviewFormProps) {
+  const [name, setName] = useState(initial?.name ?? '');
   const [copy, setCopy] = useState(initial?.copy ?? '');
   const [claim, setClaim] = useState(initial?.claim ?? '');
   const [channel, setChannel] = useState(initial?.channel ?? 'instagram');
   const [markets, setMarkets] = useState<Market[]>(normalizeMarkets(initial?.markets));
   const [imagePrompt, setImagePrompt] = useState(initial?.imagePrompt ?? '');
   const [substantiation, setSubstantiation] = useState(initial?.substantiation ?? '');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<ContentAsset | null>(null);
 
   function toggleMarket(market: Market) {
     setMarkets((prev) =>
@@ -53,18 +59,20 @@ export function ReviewForm({ onSubmit, initial, onSaveToLibrary }: ReviewFormPro
   }
 
   function loadSample() {
+    setName(SAMPLE.name);
     setCopy(SAMPLE.copy);
     setClaim(SAMPLE.claim);
     setChannel(SAMPLE.channel);
     setMarkets([...SAMPLE.markets] as Market[]);
-    setImagePrompt(SAMPLE.imagePrompt ?? '');
-    setSubstantiation(SAMPLE.substantiation ?? '');
+    setImagePrompt(SAMPLE.imagePrompt);
+    setSubstantiation(SAMPLE.substantiation);
     setError(null);
-    setSaveMessage(null);
+    setSaved(null);
   }
 
-  function currentValues(): ReviewFormValues {
+  function currentValues(): CampaignFormValues {
     return {
+      name: name.trim(),
       copy: copy.trim(),
       claim: claim.trim(),
       channel: channel.trim() || 'instagram',
@@ -76,6 +84,10 @@ export function ReviewForm({ onSubmit, initial, onSaveToLibrary }: ReviewFormPro
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (!name.trim()) {
+      setError('A campaign name is required.');
+      return;
+    }
     if (!copy.trim() || !claim.trim()) {
       setError('Copy and claim are required.');
       return;
@@ -84,39 +96,13 @@ export function ReviewForm({ onSubmit, initial, onSaveToLibrary }: ReviewFormPro
       setError('Select at least one market.');
       return;
     }
-    setSubmitting(true);
-    setError(null);
-    try {
-      const body: CreateReviewRequest = {
-        copy: copy.trim(),
-        claim: claim.trim(),
-        channel: channel.trim() || 'instagram',
-        markets,
-      };
-      if (imagePrompt.trim()) body.imagePrompt = imagePrompt.trim();
-      if (substantiation.trim()) body.substantiation = substantiation.trim();
-      await onSubmit(body);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to submit review.');
-      setSubmitting(false);
-    }
-  }
-
-  async function handleSaveToLibrary() {
-    if (!onSaveToLibrary) return;
-    if (!copy.trim() || !claim.trim()) {
-      setSaveMessage(null);
-      setError('Copy and claim are required to save to the library.');
-      return;
-    }
     setSaving(true);
     setError(null);
-    setSaveMessage(null);
     try {
-      await onSaveToLibrary(currentValues());
-      setSaveMessage('Saved to library.');
+      const asset = await onSave(currentValues());
+      setSaved(asset);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save to library.');
+      setError(err instanceof Error ? err.message : 'Failed to save campaign.');
     } finally {
       setSaving(false);
     }
@@ -126,10 +112,29 @@ export function ReviewForm({ onSubmit, initial, onSaveToLibrary }: ReviewFormPro
   const inputClass =
     'mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm text-slate-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400';
 
+  if (saved) {
+    const savedName = saved.name ?? currentValues().name;
+    return (
+      <SuccessPanel
+        name={savedName}
+        onComposeAnother={() => {
+          setSaved(null);
+          setName('');
+          setCopy('');
+          setClaim('');
+          setChannel('instagram');
+          setMarkets([]);
+          setImagePrompt('');
+          setSubstantiation('');
+        }}
+      />
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-900">New review</h1>
+        <h1 className="text-xl font-bold text-slate-900">Compose campaign</h1>
         <button
           type="button"
           onClick={loadSample}
@@ -137,6 +142,20 @@ export function ReviewForm({ onSubmit, initial, onSaveToLibrary }: ReviewFormPro
         >
           Load sample
         </button>
+      </div>
+
+      <div>
+        <label className={labelClass} htmlFor="name">
+          Campaign name
+        </label>
+        <input
+          id="name"
+          type="text"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          className={inputClass}
+          placeholder="e.g. Lumavida-Q3"
+        />
       </div>
 
       <div>
@@ -231,27 +250,82 @@ export function ReviewForm({ onSubmit, initial, onSaveToLibrary }: ReviewFormPro
       </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
-      {saveMessage ? <p className="text-sm text-emerald-600">{saveMessage}</p> : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="submit"
-          disabled={submitting}
+          disabled={saving}
           className="inline-flex items-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? 'Submitting.' : 'Submit for review'}
+          {saving ? 'Saving.' : 'Save campaign'}
         </button>
-        {onSaveToLibrary ? (
-          <button
-            type="button"
-            onClick={handleSaveToLibrary}
-            disabled={saving}
-            className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {saving ? 'Saving.' : 'Save to library'}
-          </button>
-        ) : null}
       </div>
     </form>
+  );
+}
+
+interface SuccessPanelProps {
+  name: string;
+  onComposeAnother: () => void;
+}
+
+function SuccessPanel({ name, onComposeAnother }: SuccessPanelProps) {
+  const instruction = `Coordinator, review campaign ${name}`;
+  const [copied, setCopied] = useState(false);
+
+  async function copyInstruction() {
+    try {
+      await navigator.clipboard.writeText(instruction);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard may be unavailable; the text stays visible to copy manually.
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-sm">
+        <h1 className="text-lg font-bold text-emerald-900">
+          Campaign "{name}" saved to the library.
+        </h1>
+        <p className="mt-2 text-sm text-emerald-800">
+          To run the review, hand it to the agents in band.ai. Open the room, then post to the
+          Coordinator:
+        </p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <code className="flex-1 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm text-slate-800">
+            "{instruction}"
+          </code>
+          <button
+            type="button"
+            onClick={copyInstruction}
+            className="inline-flex items-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500"
+          >
+            {copied ? 'Copied.' : 'Copy'}
+          </button>
+        </div>
+        <p className="mt-3 text-xs text-emerald-700">
+          The agents collaborate in band.ai. The review then appears under Reviews here
+          automatically.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={onComposeAnother}
+          className="inline-flex items-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
+        >
+          Compose another
+        </button>
+        <Link
+          to="/library"
+          className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50"
+        >
+          View Library
+        </Link>
+      </div>
+    </div>
   );
 }

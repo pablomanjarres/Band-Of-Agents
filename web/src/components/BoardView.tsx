@@ -7,11 +7,9 @@ import { Timeline } from './Timeline';
 
 interface BoardViewProps {
   state: BoardState;
-  // Provided only for live boards that can accept a human decision.
-  onDecision?: (decision: string) => Promise<void> | void;
 }
 
-export function BoardView({ state, onDecision }: BoardViewProps) {
+export function BoardView({ state }: BoardViewProps) {
   // Timeline is a secondary, collapsible panel under the diagram.
   const [showTimeline, setShowTimeline] = useState(false);
 
@@ -32,7 +30,7 @@ export function BoardView({ state, onDecision }: BoardViewProps) {
       {state.conflict ? <ConflictBanner /> : null}
 
       {/* Presentation centerpiece: the live multi-agent pipeline. */}
-      <PipelineDiagram state={state} onDecision={onDecision} />
+      <PipelineDiagram state={state} />
 
       <div>
         <button
