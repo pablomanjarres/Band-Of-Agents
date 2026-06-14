@@ -3,7 +3,7 @@ import type { CompleteResult, ModelClient } from '../models/client';
 import type { BrandDna, ReviewResult } from '../domain/types';
 import { ReviewOutput } from '../domain/types';
 import { tryParseAsset } from '../domain/load';
-import { matchParticipant } from './handles';
+import { matchParticipant, nameMatchesHandle } from './handles';
 
 const BRAND_OUTPUT_JSON_SCHEMA = {
   type: 'object',
@@ -35,6 +35,8 @@ export interface BrandReviewerOptions {
   model: ModelClient;
   reviewerName?: string;
   reportToHandle?: string;
+  /** band.ai room mode: ignore posts from this agent (the intake relay) so only the coordinator's forward triggers a review. */
+  ignoreFromHandle?: string;
 }
 
 // The brand-consistency reviewer: keeps localized versions on-voice and free of
@@ -44,6 +46,7 @@ export function makeBrandReviewer(opts: BrandReviewerOptions): AgentHandler {
   const reviewerName = opts.reviewerName ?? 'Brand Reviewer';
   return async (message, tools) => {
     if (message.senderType !== 'agent') return;
+    if (opts.ignoreFromHandle && nameMatchesHandle(message.senderName, opts.ignoreFromHandle)) return;
     const asset = tryParseAsset(message.content);
     if (!asset) return;
 

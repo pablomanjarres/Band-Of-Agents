@@ -3,6 +3,7 @@ import type { ModelClient } from '../models/client';
 import type { BrandDna, ContentAsset, RemediationRequest } from '../domain/types';
 import { RemediationRequest as RemediationRequestSchema } from '../domain/types';
 import { tryParseAsset } from '../domain/load';
+import { matchParticipant } from './handles';
 
 export interface RemediationOptions {
   brand: BrandDna;
@@ -10,6 +11,12 @@ export interface RemediationOptions {
   imageModel: ModelClient;
   /** Who to send the revised asset to for re-review (e.g. the coordinator). */
   reportToHandle?: string;
+  /**
+   * Host a generated image (base64 data URL) and return a short URL. Keeps the
+   * revised message small enough for band.ai (a full data URL is rejected as too
+   * large). When absent, the data URL is used as-is (fine for tests/stubs).
+   */
+  hostImage?: (url: string) => string;
 }
 
 // The remediation agent: caches the asset as it goes round, and on a remediation
@@ -39,9 +46,10 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
     if (opts.imageModel.generateImage) {
       try {
         const img = await opts.imageModel.generateImage({ prompt: localizedImagePrompt(base, directive.region) });
-        // Full image so the console can render it inline. AIML returns a hosted
-        // URL; the Vertex dev path returns base64, which we inline as a data URL.
-        imageUrl = img.url ?? (img.b64 ? `data:image/png;base64,${img.b64}` : undefined);
+        // AIML returns a hosted URL; the Vertex dev path returns base64. Host the
+        // data URL so the revised message stays small (band.ai rejects large ones).
+        const raw = img.url ?? (img.b64 ? `data:image/png;base64,${img.b64}` : undefined);
+        imageUrl = raw && opts.hostImage ? opts.hostImage(raw) : raw;
         imageNote = imageUrl ? ' + regenerated image' : '';
       } catch {
         imageNote = ' (image generation skipped)';
@@ -99,8 +107,7 @@ async function resolveTarget(
   message: RoomMessage,
 ): Promise<Mention> {
   if (handle) {
-    const peers = await tools.getParticipants();
-    const found = peers.find((p) => p.handle === handle || p.handle.endsWith(handle));
+    const found = matchParticipant(await tools.getParticipants(), handle, 'agent');
     if (found) return { id: found.id, handle: found.handle };
   }
   return { id: message.senderId };

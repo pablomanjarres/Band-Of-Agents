@@ -3,7 +3,7 @@ import type { CompleteResult, ModelClient } from '../models/client';
 import type { BrandDna, ContentAsset, ReviewResult, Rulebook } from '../domain/types';
 import { ReviewOutput } from '../domain/types';
 import { tryParseAsset } from '../domain/load';
-import { matchParticipant } from './handles';
+import { matchParticipant, nameMatchesHandle } from './handles';
 
 export interface RegionReviewerOptions {
   region: string;
@@ -13,6 +13,8 @@ export interface RegionReviewerOptions {
   model: ModelClient;
   /** Handle of the agent to report findings to (e.g. the reconcile agent). */
   reportToHandle?: string;
+  /** band.ai room mode: ignore posts from this agent (the intake relay) so only the coordinator's forward triggers a review. */
+  ignoreFromHandle?: string;
 }
 
 // JSON Schema handed to the model for structured output. Mirrors ReviewOutput.
@@ -47,6 +49,7 @@ const REVIEW_OUTPUT_JSON_SCHEMA = {
 export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
   return async (message, tools) => {
     if (message.senderType !== 'agent') return;
+    if (opts.ignoreFromHandle && nameMatchesHandle(message.senderName, opts.ignoreFromHandle)) return;
     const asset = tryParseAsset(message.content);
     if (!asset) return;
 
