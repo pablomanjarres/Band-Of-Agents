@@ -141,3 +141,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Local compliance-console store (reviews, precedents, images, rulebook overrides)
+/data/

@@ -1,6 +1,8 @@
 // HTTP + SSE backend for the compliance console. Reuses the domain, agents, and
 // model routing in src/. A POST starts a BoardSession (in-process, real models);
-// the console subscribes over SSE and watches the review stream in live.
+// the console subscribes over SSE and watches the review stream in live. A small
+// file-backed Store persists reviews, the precedent log, the asset library, and
+// per-region rulebook overrides edited in the UI.
 //
 //   pnpm serve            (BOARD_MODE=local: FakeBandTransport + real models)
 //
@@ -17,13 +19,18 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { z } from 'zod';
 import { loadBrandDna, loadRulebook } from '../domain/load';
-import type { ContentAsset } from '../domain/types';
+import { ContentAsset as ContentAssetSchema, Rulebook as RulebookSchema } from '../domain/types';
+import type { ContentAsset, Rulebook } from '../domain/types';
 import { BoardSession, realBoardModels } from '../board/session';
 import type { BoardEvent, BoardStatus } from '../board/events';
+import { Store } from '../store/store';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
 const WEB_DIST = new URL('../../web/dist/', import.meta.url).pathname;
+const DATA_DIR = new URL('../../data/', import.meta.url).pathname;
 const PORT = Number(process.env.PORT ?? 8787);
+const REGIONS = ['us', 'eu', 'latam'] as const;
+type RegionKey = (typeof REGIONS)[number];
 
 interface ReviewRecord {
   id: string;
@@ -37,13 +44,23 @@ interface ReviewRecord {
 }
 
 const reviews = new Map<string, ReviewRecord>();
+const store = new Store(DATA_DIR);
 
 const brand = loadBrandDna(`${ASSETS}brand-dna.json`);
-const rulebooks = {
+const defaultRulebooks: Record<RegionKey, Rulebook> = {
   us: loadRulebook(`${ASSETS}rulebook.us.json`),
   eu: loadRulebook(`${ASSETS}rulebook.eu.json`),
   latam: loadRulebook(`${ASSETS}rulebook.latam.json`),
 };
+
+/** Current rulebooks, applying any UI edits saved as overrides (live per review). */
+function currentRulebooks(): Record<RegionKey, Rulebook> {
+  return {
+    us: store.getRulebookOverride('US') ?? defaultRulebooks.us,
+    eu: store.getRulebookOverride('EU') ?? defaultRulebooks.eu,
+    latam: store.getRulebookOverride('LATAM') ?? defaultRulebooks.latam,
+  };
+}
 
 const CreateReview = z.object({
   copy: z.string().min(1),
@@ -53,6 +70,12 @@ const CreateReview = z.object({
   imagePrompt: z.string().optional(),
   substantiation: z.string().optional(),
 });
+
+function imageContentType(name: string): string {
+  if (name.endsWith('.png')) return 'image/png';
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+  return 'application/octet-stream';
+}
 
 const app = new Hono();
 app.use('/api/*', cors());
@@ -83,13 +106,36 @@ app.post('/api/reviews', async (c) => {
     subscribers: new Set(),
     session: undefined as unknown as BoardSession,
   };
-  const onEvent = (event: BoardEvent): void => {
-    record.events.push(event);
-    if (event.type === 'verdict' && event.conflict) record.conflict = true;
-    if (event.type === 'status') record.status = event.status;
-    for (const sub of record.subscribers) sub(event);
+
+  const persist = (): void => {
+    store.saveReview({ id, createdAt: record.createdAt, asset, events: record.events, status: record.status, conflict: record.conflict });
   };
-  record.session = new BoardSession({ roomId: `review-${id}`, asset, brand, rulebooks, models: realBoardModels(), onEvent });
+
+  const onEvent = (event: BoardEvent): void => {
+    // Host generated images out of the event stream so stored/streamed payloads stay small.
+    let e = event;
+    if (e.type === 'revised' && e.imageUrl) {
+      const hosted = store.hostImage(e.imageUrl);
+      if (hosted) e = { ...e, imageUrl: hosted };
+    }
+    record.events.push(e);
+    if (e.type === 'verdict' && e.conflict) record.conflict = true;
+    if (e.type === 'status') {
+      record.status = e.status;
+      if (e.status !== 'running') persist();
+    }
+    for (const sub of record.subscribers) sub(e);
+  };
+
+  record.session = new BoardSession({
+    roomId: `review-${id}`,
+    asset,
+    brand,
+    rulebooks: currentRulebooks(),
+    models: realBoardModels(),
+    onEvent,
+    onPrecedent: (p) => store.appendPrecedent(p),
+  });
   reviews.set(id, record);
 
   void record.session.run().catch((err: unknown) => {
@@ -101,21 +147,36 @@ app.post('/api/reviews', async (c) => {
 });
 
 app.get('/api/reviews', (c) => {
-  const list = [...reviews.values()]
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .map((r) => ({ id: r.id, createdAt: r.createdAt, assetId: r.asset.id, copy: r.asset.copy, markets: r.asset.markets, status: r.status, conflict: r.conflict }));
+  const byId = new Map<string, { id: string; createdAt: number; assetId: string; copy: string; markets: string[]; status: BoardStatus; conflict: boolean }>();
+  for (const r of store.listReviews()) {
+    byId.set(r.id, { id: r.id, createdAt: r.createdAt, assetId: r.asset.id, copy: r.asset.copy, markets: r.asset.markets, status: r.status, conflict: r.conflict });
+  }
+  for (const r of reviews.values()) {
+    byId.set(r.id, { id: r.id, createdAt: r.createdAt, assetId: r.asset.id, copy: r.asset.copy, markets: r.asset.markets, status: r.status, conflict: r.conflict });
+  }
+  const list = [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
   return c.json({ reviews: list });
 });
 
 app.get('/api/reviews/:id', (c) => {
-  const record = reviews.get(c.req.param('id'));
-  if (!record) return c.json({ error: 'not found' }, 404);
-  return c.json({ id: record.id, status: record.status, asset: record.asset, events: record.events });
+  const id = c.req.param('id');
+  const record = reviews.get(id);
+  if (record) return c.json({ id: record.id, status: record.status, asset: record.asset, events: record.events });
+  const stored = store.getReview(id);
+  if (!stored) return c.json({ error: 'not found' }, 404);
+  return c.json({ id: stored.id, status: stored.status, asset: stored.asset, events: stored.events });
 });
 
 app.get('/api/reviews/:id/events', (c) => {
-  const record = reviews.get(c.req.param('id'));
-  if (!record) return c.json({ error: 'not found' }, 404);
+  const id = c.req.param('id');
+  const record = reviews.get(id);
+  if (!record) {
+    const stored = store.getReview(id);
+    if (!stored) return c.json({ error: 'not found' }, 404);
+    return streamSSE(c, async (stream) => {
+      for (const event of stored.events) await stream.writeSSE({ data: JSON.stringify(event) });
+    });
+  }
   return streamSSE(c, async (stream) => {
     for (const event of record.events) await stream.writeSSE({ data: JSON.stringify(event) });
     if (record.status === 'complete' || record.status === 'error') return;
@@ -152,6 +213,46 @@ app.post('/api/reviews/:id/decision', async (c) => {
   if (!decision) return c.json({ error: 'decision required' }, 400);
   void record.session.submitDecision(decision).catch(() => {});
   return c.json({ ok: true });
+});
+
+app.get('/api/images/:name', (c) => {
+  const buf = store.readImage(c.req.param('name'));
+  if (!buf) return c.json({ error: 'not found' }, 404);
+  return c.body(new Uint8Array(buf), 200, { 'content-type': imageContentType(c.req.param('name')), 'cache-control': 'public, max-age=31536000, immutable' });
+});
+
+app.get('/api/precedents', (c) => c.json({ precedents: store.listPrecedents() }));
+
+app.get('/api/assets', (c) => c.json({ assets: store.listAssets() }));
+
+app.post('/api/assets', async (c) => {
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const candidate = (body as { id?: unknown })?.id ? body : { ...(body as object), id: `asset-${randomUUID().slice(0, 8)}` };
+  const parsed = ContentAssetSchema.safeParse(candidate);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  store.saveAsset(parsed.data);
+  return c.json({ asset: parsed.data });
+});
+
+app.get('/api/rulebooks', (c) => {
+  const current = currentRulebooks();
+  return c.json({ rulebooks: REGIONS.map((r) => current[r]) });
+});
+
+app.get('/api/rulebooks/:region', (c) => {
+  const region = c.req.param('region').toLowerCase();
+  if (!(REGIONS as readonly string[]).includes(region)) return c.json({ error: 'unknown region' }, 404);
+  return c.json({ rulebook: currentRulebooks()[region as RegionKey] });
+});
+
+app.put('/api/rulebooks/:region', async (c) => {
+  const region = c.req.param('region').toLowerCase();
+  if (!(REGIONS as readonly string[]).includes(region)) return c.json({ error: 'unknown region' }, 404);
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const parsed = RulebookSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  store.saveRulebookOverride(region, parsed.data);
+  return c.json({ rulebook: parsed.data });
 });
 
 if (existsSync(WEB_DIST)) {
