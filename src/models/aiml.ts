@@ -32,9 +32,29 @@ export class AimlModelClient implements ModelClient {
   }
 
   async complete(req: CompleteRequest): Promise<CompleteResult> {
+    // Vision INPUT: when images are supplied, the last user message carries
+    // OpenAI-style content parts (text plus one image_url per image). Otherwise
+    // every message stays a plain string, as before.
+    const hasImages = (req.images?.length ?? 0) > 0;
+    let lastUserIdx = -1;
+    req.messages.forEach((m, i) => {
+      if (m.role === 'user') lastUserIdx = i;
+    });
+    const chat = req.messages.map((m, i) => {
+      if (hasImages && i === lastUserIdx) {
+        return {
+          role: 'user' as const,
+          content: [
+            { type: 'text' as const, text: m.content },
+            ...req.images!.map((url) => ({ type: 'image_url' as const, image_url: { url } })),
+          ],
+        };
+      }
+      return { role: m.role, content: m.content };
+    });
     const messages = [
       ...(req.system ? [{ role: 'system', content: req.system }] : []),
-      ...req.messages.map((m) => ({ role: m.role, content: m.content })),
+      ...chat,
     ] as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
 
     const res = await withRetry(() =>
