@@ -54,6 +54,9 @@ export function makeBrandReviewer(opts: BrandReviewerOptions): AgentHandler {
     if (!asset) return;
     if (opts.board.reviewFor(ctx.roomId, 'BRAND')) return; // already reviewed this round
 
+    // Open the brand review on Band's task channel, like the region reviewers.
+    await tools.sendEvent('Brand review: starting brand-consistency review.', 'task');
+
     const system = [
       `You are the brand-consistency reviewer for ${opts.brand.brand}. This is a demo, NOT legal advice.`,
       `Keep localized versions on-brand. Voice: ${opts.brand.voice.join(', ')}. Approved vocabulary: ${opts.brand.approvedVocabulary.join(', ')}. Forbidden phrases: ${opts.brand.forbiddenPhrases.join(', ')}.`,
@@ -69,7 +72,8 @@ export function makeBrandReviewer(opts: BrandReviewerOptions): AgentHandler {
     opts.board.addReview(ctx.roomId, review);
 
     const blocking = review.findings.filter((f) => f.severity === 'block').length;
-    await tools.sendEvent(`Brand review: ${review.findings.length} finding(s), ${blocking} blocking.`, 'review');
+    // Close the brand review on the same task channel.
+    await tools.sendEvent(`Brand review: ${review.findings.length} finding(s), ${blocking} blocking.`, 'task');
     const target = await resolveTarget(tools, opts.reportToHandle, message);
     await tools.sendMessage(brandMessage(review.findings), [target]);
   };

@@ -40,6 +40,8 @@ describe("Per-region progress shows under Band's task channel", () => {
     expect(taskEvents.length).toBeGreaterThan(0);
     expect(taskEvents.some((t) => t.content.includes('US'))).toBe(true);
     expect(taskEvents.some((t) => t.content.includes('EU'))).toBe(true);
+    // The brand lane reports its progress on the same task channel, for consistency.
+    expect(taskEvents.some((t) => t.content.includes('Brand'))).toBe(true);
     // They are genuine 'task' events, not the generic 'thought' fallback.
     expect(taskEvents.every((t) => t.messageType === 'task')).toBe(true);
   });
