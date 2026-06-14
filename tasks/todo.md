@@ -125,10 +125,19 @@ Baseline before any change: 19 tests pass, tsc clean.
 Guardrail (from the punch list): depth over breadth. Land P1 first, reassess against the
 demo, then P2. P3 is stretch only and must not risk the verified demo.
 
-## P1 (do first: highest lift, smallest change)
-- [ ] P1.1 Target-region recruitment: coordinator filters recruited reviewers by
-      `asset.markets`; `addParticipant` pulls in a targeted region agent not yet in the room.
-- [ ] P1.2 Bind room to task: `createChat(taskId)` carries the asset id; surface task state.
+## P1 (do first: highest lift, smallest change) -- DONE
+- [x] P1.1 Target-region recruitment: coordinator filters recruited reviewers by
+      `asset.markets` (opt-in `regionHandles`); `addParticipant` pulls in a targeted region
+      agent not yet in the room. Reconcile waits only for recruited regions (opt-in
+      `marketRegions`) so a single-market asset does not hang. Wired into band mode.
+      Tests: target-region.test.ts, target-region-reconcile.test.ts.
+- [x] P1.2 Bind room to task: `createRoom(taskId)` forwards the asset id to `createChat`
+      via the testable `buildIntakeControl` helper; intake-probe binds a task id. Live
+      band.ai persistence of task_id remains a manual probe. Test: intake-task-binding.test.ts.
+
+Reassess checkpoint (guardrail): 24 tests green, tsc clean. The verified demo is intact
+(all original 19 tests pass; new behavior is opt-in and additive; local BoardSession demo
+unchanged). Proceeding to P2.
 
 ## P2 (then reassess against the demo)
 - [ ] P2.3 Emit `task`-typed events for per-region progress (region-reviewer, reconcile,
