@@ -110,31 +110,66 @@ Best business-value story (most content never touches the expensive board) and t
 
 ---
 
-## Proposal 4: The Blackboard
+## Proposal 4: The Blackboard (expanded: the full knowledge-source cast)
 
-Metaphor: experts around a shared whiteboard. Whoever has something relevant to the current state of the board speaks next. Order emerges from content, not from a fixed graph. (This is the classic blackboard AI architecture, and the Band room is the blackboard.)
+Metaphor: a war room of specialists around a shared board. The board holds the asset plus every annotation and open work-item. Each agent is a knowledge source: it watches the board and acts only when the board hits its trigger condition. Order emerges from the content on the board, not from a fixed graph. (Classic blackboard AI architecture; the Band room is the board.)
 
-### Shape
-No fan-out. A lightweight Controller inspects the board (the asset plus accumulated annotations) and, each step, wakes the single agent whose trigger condition best matches the current state:
-- Board has a raw asset, so wake the specialist who owns the highest-risk surface.
-- Board now carries "EU: disease-claim flag on span X," so wake the disclosure specialist for span X.
-- Board now shows brand and EU annotations conflicting on span X, so wake the mediator.
-- Board reaches a stable disagreement, so wake the human.
+This is the pattern with the most room for a large, legible cast, because adding an agent is just adding one more knowledge source with a trigger and a model. The roster below is what makes the board feel alive, and it is the part the first draft was missing.
+
+### The cast (knowledge sources)
+
+| Agent | Tier | Wakes when the board shows | Posts to the board | Model |
+|---|---|---|---|---|
+| Scout | scout | a new or revised asset | claims, spans, surfaces, work-items | Featherless small (open) |
+| Claim & Evidence | review | a factual or efficacy claim | supported, or unsupported + needs-source | Gemini Pro |
+| US Regulatory (FTC) | review | a claim on a US-targeted asset | pass or block + rule cite | Claude Sonnet |
+| EU Regulatory + GDPR | review | a claim or data-capture CTA on an EU asset | pass or block + rule cite | Gemini Pro |
+| LATAM Regulatory | review | a LATAM target is in scope (added on demand) | pass or block + rule cite | Featherless (cross-framework) |
+| Brand Voice | review | any copy span | on-voice or off-voice + forbidden phrasing | Claude Haiku |
+| Channel Fit | review | the channel and format are known | hook, length, format notes | Gemini Flash |
+| Visual / Image | review | an image is present or was regenerated | visual compliance + brand fit | AIML multimodal |
+| Disclosure Drafter | specialist | an annotation says a claim needs a disclosure | the exact required disclosure text | Claude Sonnet |
+| Precedent Librarian | specialist | a claim or a clash appears | matching past rulings + rulebook entries | Gemini Flash + retrieval |
+| Mediator | resolver | two annotations disagree on the same span | a proposed resolution | Claude Opus |
+| Remediation | resolver | a fixable block | a revised draft + a regenerated image | Sonnet + Nano Banana (AIML) |
+| Conductor | control | more than one knowledge source is eligible | which source acts next (arbitration only) | Gemini Flash |
+| Risk Adjudicator | control | the board state changed | publishable, needs-human, or deadlocked | Claude Opus |
+| Marketing Lead | human | the adjudicator summons on deadlock or high risk | a ruling that folds into the rulebook | human |
+
+That is thirteen specialist agents plus a human, each a different lens, several on different models and at least one on a different framework. The minimum-of-three requirement is cleared many times over, and the multi-model and cross-framework judging lines are covered by the roster itself.
+
+### Control without a hub
+The risk with a blackboard is that the controller becomes a hidden orchestrator that does all the thinking. This design splits control so that does not happen:
+- Agents self-subscribe to board predicates (their trigger column). They are not told what to do; they wake themselves when the board matches.
+- The Conductor only arbitrates contention. When several sources are eligible at once it picks an order, so it is a traffic cop, not a decision maker.
+- The Risk Adjudicator is the only agent that can summon the human, and it does so from a board-wide risk score, not from a single finding.
+
+No single agent reviews the content; coordination is a property of the board state plus many small triggers.
+
+### A conflict cascade (how the cast comes alive)
+1. Scout posts the claim "boost your immune system" and its spans.
+2. Claim & Evidence flags it unsupported and asks for a source.
+3. US Regulatory passes (the mock RCT file substantiates it); EU Regulatory blocks on Article 10(2). The board now holds a clash on the same span.
+4. The clash wakes the Mediator, which drafts a resolution.
+5. The Precedent Librarian injects a past ruling on the word "boost" to bias the resolution.
+6. The Disclosure Drafter writes the exact Article 10(2) accompanying statement.
+7. Remediation rewrites the span and regenerates the image (Nano Banana), posts the revised draft, which re-wakes the Scout.
+8. The Risk Adjudicator sees EU still blocked, scores the board deadlocked, and summons the Marketing Lead.
+9. The human rules; the ruling folds into the rulebook, so the next "boost" never climbs this far.
+
+Conflict is the engine of the whole cascade: the clash is what pulls the mediator, precedent, disclosure, and remediation agents in.
 
 ### Why it is not scatter-gather
-Conflict is a board state that triggers the mediator, so the system reacts to disagreement as it emerges rather than running a fixed pass. It is the most "agents discover the work" of any pattern here.
+There is no broadcast and no single aggregator. Agents wake on board state, act, and post back; the same agent can wake several times across a run; and the order is different for every asset. The board is a shared artifact, not an orchestrator.
 
 ### Band primitives it leans on
-The room is the blackboard; `getChatContext` rehydrates board state for any waking agent. `sendEvent` is the act of posting an annotation. The Controller uses `addParticipant` and a directed @mention to wake the chosen agent.
+The room is the board; `getChatContext` rehydrates board state for any waking agent. `sendEvent` posts an annotation or a work-item (visible reasoning). A waking agent is brought in via `addParticipant` and a directed @mention; `lookupPeers` lets the Conductor see who can be woken. LATAM Regulatory is added with `addParticipant` only when a LATAM target is in scope (dynamic recruitment on camera).
 
-### Multi-model fit
-Controller on a cheap fast router model (Gemini Flash) making the "who acts next" call, specialists on assorted models, mediator on Opus.
-
-### Build delta (high)
-The biggest rework: replace the parallel fan-out with a Controller scheduler loop that selects the next agent from board state, and make agents reactive (each gets a trigger predicate). New controller logic in place of `makeCoordinator`'s broadcast.
+### Build approach (high effort, but cheap per agent)
+Build the knowledge-source framework once: a uniform agent shell of (trigger predicate, read board via context, one model call, post annotation), plus a Conductor loop that reads board state and arbitrates eligible sources, plus the Risk Adjudicator scoring. After that, each new agent is config: a trigger, a prompt, a model, and (for reviewers) a rulebook. The existing parameterized `region-reviewer` is already most of a knowledge source, so the regional agents port over quickly. The real work is the board state model and the Conductor, replacing `makeCoordinator`'s broadcast.
 
 ### Tradeoffs
-Most architecturally novel and the strongest "emergent coordination" story. Risk: emergent order is the least predictable on video and the hardest to keep demo-stable in a 2 to 3 minute run, and the Controller can become a hidden single point of orchestration if it is too prescriptive.
+The most agents, the most "agents discover the work," and the richest demo cast. Risk: emergent order is the least predictable on video, so for the demo the Scout should seed a known asset and the Conductor should cap how many sources fire per tick, to keep the run legible in two to three minutes. The board state model is the hardest single piece to get right.
 
 ---
 
