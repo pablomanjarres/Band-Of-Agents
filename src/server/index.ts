@@ -28,6 +28,7 @@ import { BandBoard } from '../board/band-session';
 import type { BoardEvent, BoardStatus } from '../board/events';
 import { Store } from '../store/store';
 import { makePublishArtifact } from '../store/artifacts';
+import { makeGcsMirror, restoreFromGcs } from '../store/gcs-backup';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
 const WEB_DIST = new URL('../../web/dist/', import.meta.url).pathname;
@@ -60,7 +61,13 @@ interface ReviewRecord {
 }
 
 const reviews = new Map<string, ReviewRecord>();
-const store = new Store(DATA_DIR);
+// Durable state on Cloud Run: when GCS_BUCKET is set, mirror every write to a
+// private bucket and restore from it on boot (see main()). Local dev leaves it
+// unset and uses the plain file store.
+const GCS_BUCKET = process.env.GCS_BUCKET;
+const GCS_PREFIX = process.env.GCS_PREFIX ?? 'state';
+const gcsMirror = GCS_BUCKET ? makeGcsMirror(GCS_BUCKET, DATA_DIR, GCS_PREFIX) : undefined;
+const store = new Store(DATA_DIR, gcsMirror);
 // Agents publish artifacts (images, reports) and paste the returned viewer URL
 // into the room, since Band shows only plain text.
 const publishArtifact = makePublishArtifact(store, PUBLIC_BASE_URL);
@@ -369,6 +376,17 @@ if (existsSync(WEB_DIST)) {
 }
 
 async function main(): Promise<void> {
+  // Restore persisted state before serving or connecting agents (disk is
+  // ephemeral on Cloud Run). Best effort: a first run with an empty bucket, or a
+  // transient GCS error, falls back to whatever is on local disk.
+  if (GCS_BUCKET) {
+    try {
+      const n = await restoreFromGcs(GCS_BUCKET, DATA_DIR, GCS_PREFIX);
+      console.log(`Restored ${n} file(s) from gs://${GCS_BUCKET}/${GCS_PREFIX}`);
+    } catch (err) {
+      console.error('[gcs-backup] restore failed (continuing with local state):', (err as Error)?.message ?? err);
+    }
+  }
   if (bandBoard) {
     console.log('Connecting band.ai agents (BOARD_MODE=band). This is the real coordination layer...');
     await bandBoard.start();

@@ -12,8 +12,8 @@
 FROM node:22-slim
 
 WORKDIR /app
-ENV NODE_ENV=production
-RUN corepack enable
+# Install pnpm directly (avoids corepack's interactive download prompt in CI).
+RUN npm install -g pnpm@10.30.3
 
 # Install deps first for layer caching. tsx is a devDependency, so install the
 # full set (the runtime entrypoint is tsx).
@@ -25,6 +25,8 @@ COPY tsconfig.json ./
 COPY src ./src
 COPY assets ./assets
 
+ENV NODE_ENV=production
 # Cloud Run sets PORT; EXPOSE is documentation only.
 EXPOSE 8080
 CMD ["pnpm", "exec", "tsx", "src/server/index.ts"]
+# (pnpm install above includes devDependencies, so tsx is on PATH at runtime.)
