@@ -139,11 +139,44 @@ Reassess checkpoint (guardrail): 24 tests green, tsc clean. The verified demo is
 (all original 19 tests pass; new behavior is opt-in and additive; local BoardSession demo
 unchanged). Proceeding to P2.
 
-## P2 (then reassess against the demo)
-- [ ] P2.3 Emit `task`-typed events for per-region progress (region-reviewer, reconcile,
-      and the allowed-types map in `src/band/real.ts`).
-- [ ] P2.4 One vision reviewer reads the campaign image on an AIML vision model (third modality).
+## P2 (then reassess against the demo) -- DONE
+- [x] P2.3 Emit `task`-typed events for per-region progress: region reviewers (and now the
+      brand reviewer, for consistency) open and close their review on Band's `task` channel.
+      `task` was already in the transport's allowed set, so no transport change. Tests:
+      region-task-event.test.ts.
+- [x] P2.4 Vision reviewer reads the campaign image (third AIML modality): optional `images`
+      on the model request, AIML adapter sends OpenAI `image_url` parts, a standalone vision
+      reviewer files an IMAGE-lane finding and reports to Reconcile. Kept out of the production
+      board wiring on purpose (would force a vision model into BoardModels and break the suite);
+      live wiring is the follow-up. Test: vision-reviewer.test.ts.
 
-## P3 (stretch, only if P1+P2 are solid and green; do not risk the verified demo)
-- [ ] P3.5 Shared context via Band `/workspace` + `/context`.
-- [ ] P3.6 Cross-framework reviewer adapter in the room.
+## P3 (stretch, NOT started: reserved for the demo reassessment, per the guardrail)
+- [ ] P3.5 Shared context via Band `/workspace` + `/context`. Bigger lift: needs the Band
+      workspace API and touches the store plus every reviewer prompt builder. Live-dependent.
+- [ ] P3.6 Cross-framework reviewer adapter in the room. Needs a second Band adapter alongside
+      GenericAdapter (a different framework's adapter must exist for Band) and a new dependency;
+      live-dependent. Highest originality value, real effort.
+
+## Review (feature gaps, 2026-06-14)
+Shipped P1 + P2 on branch `feature-gaps`, branched from `worktree-band-review-board`, with strict
+TDD (a failing test on the FakeBandTransport, then minimal code, then green) and granular commits.
+Baseline was 19 tests; the suite is now 26 (7 new), with `tsc --noEmit` clean after every change.
+
+Verified by an adversarial review workflow (5 skeptics, one per gap plus integration): all gaps
+returned doneWhenMet, no regression, conventions OK, and zero non-low issues. The original 19 tests
+all still pass, so the verified demo is intact; every new behavior is opt-in and additive.
+
+What is proven on the fake-transport / unit proxy, and what remains for a live band.ai/AIML run:
+- P1.1 targeting and dynamic addParticipant: proven at the coordinator and reconcile level.
+  Live remains: confirm a dynamically added region agent actually joins and reviews in a real room.
+- P1.2 task binding: forwarding of the asset id into `createChat(taskId)` is unit-proven; live
+  remains: confirm band.ai persists the task_id (run `pnpm exec tsx src/run/intake-probe.ts`).
+- P2.3 task events: proven the events carry `messageType: 'task'`; live remains: confirm they
+  render under Band's task channel in app.band.ai.
+- P2.4 vision: proven the reviewer is fed the image and files an image-level finding; live remains:
+  a real AIML vision slug (e.g. `google/gemini-2.5-pro`) on an asset with a real imageUrl, and the
+  optional production wiring (a vision agent + `IMAGE` in expectedRegions).
+
+P3 not started by design: the guardrail says do not risk the verified demo and to reassess against
+the video before P3, and both P3 items are larger, dependency-adding, and live-dependent. They are
+teed up above for that decision.
