@@ -39,7 +39,9 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
     if (opts.imageModel.generateImage) {
       try {
         const img = await opts.imageModel.generateImage({ prompt: localizedImagePrompt(base, directive.region) });
-        imageUrl = img.url ?? (img.b64 ? `data:image/png;base64,${img.b64.slice(0, 24)}...` : undefined);
+        // Full image so the console can render it inline. AIML returns a hosted
+        // URL; the Vertex dev path returns base64, which we inline as a data URL.
+        imageUrl = img.url ?? (img.b64 ? `data:image/png;base64,${img.b64}` : undefined);
         imageNote = imageUrl ? ' + regenerated image' : '';
       } catch {
         imageNote = ' (image generation skipped)';
