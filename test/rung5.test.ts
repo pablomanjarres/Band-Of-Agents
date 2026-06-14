@@ -5,6 +5,7 @@ import { makeRegionReviewer } from '../src/agents/region-reviewer';
 import { makeReconcile, type Precedent } from '../src/agents/reconcile';
 import { StubModelClient } from '../src/models/client';
 import { loadAsset, loadBrandDna, loadRulebook } from '../src/domain/load';
+import { probeBoard } from './helpers';
 
 const ASSETS = new URL('../assets/', import.meta.url).pathname;
 
@@ -32,26 +33,28 @@ describe('Rung 5 (MVP): deadlock escalates to the human and the decision is reco
     }));
 
     const precedents: Precedent[] = [];
+    const { board, find } = probeBoard();
     const room = new FakeBandTransport('room-r5');
     room.addUser('lead', 'Compliance Lead', '@compliance-lead');
-    await room.connectAgent({ agentId: 'coord', name: 'Coordinator', handle: '@coordinator', onMessage: makeCoordinator() });
+    await room.connectAgent({ agentId: 'coord', name: 'Coordinator', handle: '@coordinator', onMessage: makeCoordinator({ board, reconcileHandle: '@reconcile' }) });
     await room.connectAgent({
       agentId: 'us',
       name: 'US',
       handle: '@us-reviewer',
-      onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US', rulebook: usRules, brand, model: usModel, reportToHandle: '@reconcile' }),
+      onMessage: makeRegionReviewer({ board, region: 'US', reviewerName: 'US', rulebook: usRules, brand, model: usModel, reportToHandle: '@reconcile' }),
     });
     await room.connectAgent({
       agentId: 'eu',
       name: 'EU',
       handle: '@eu-reviewer',
-      onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU', rulebook: euRules, brand, model: euModel, reportToHandle: '@reconcile' }),
+      onMessage: makeRegionReviewer({ board, region: 'EU', reviewerName: 'EU', rulebook: euRules, brand, model: euModel, reportToHandle: '@reconcile' }),
     });
     await room.connectAgent({
       agentId: 'rec',
       name: 'Reconcile',
       handle: '@reconcile',
       onMessage: makeReconcile({
+        board,
         expectedRegions: ['US', 'EU'],
         coordinatorHandle: '@coordinator',
         humanHandle: '@compliance-lead',
@@ -78,9 +81,9 @@ describe('Rung 5 (MVP): deadlock escalates to the human and the decision is reco
     expect(precedents[0]?.regions).toContain('EU');
     expect(precedents[0]?.decision).toContain('Reject');
 
-    const decisionEvent = room.transcript.find(
-      (t) => t.fromId === 'rec' && t.kind === 'event' && t.content.includes('Human decision recorded'),
-    );
-    expect(decisionEvent).toBeDefined();
+    // The ruling is recorded on the board as the decision.
+    const decision = find('decision');
+    expect(decision).toBeDefined();
+    expect(decision!.text).toContain('Reject');
   });
 });
