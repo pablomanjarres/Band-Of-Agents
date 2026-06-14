@@ -38,7 +38,7 @@ new HTTP endpoints, a standalone viewer route in the React app, and a
 `publishArtifact` capability threaded into agents the same way `hostImage`
 already is.
 
-### 1. Artifact model — `src/domain/artifact.ts` (new)
+### 1. Artifact model: `src/domain/artifact.ts` (new)
 
 ```ts
 export const ArtifactKind = z.enum(['image', 'markdown', 'json', 'text']);
@@ -64,7 +64,7 @@ Mapping to what agents actually produce:
 - the asset under review, a rulebook, brand DNA -> `json`
 - a findings / verdict report -> `markdown`
 
-### 2. Store — `src/store/store.ts` (additive)
+### 2. Store: `src/store/store.ts` (additive)
 
 - `data/artifacts.json` backing file (same readJson/writeJson pattern as
   reviews/assets).
@@ -75,7 +75,7 @@ Mapping to what agents actually produce:
   `data/images/` path. Artifacts only ever store the resulting `/api/images/...`
   string in `src`, never base64.
 
-### 3. publish helper — `src/store/artifacts.ts` (new, pure-ish)
+### 3. publish helper: `src/store/artifacts.ts` (new, pure-ish)
 
 ```ts
 export function buildArtifactUrl(baseUrl: string, id: string): string;
@@ -89,11 +89,11 @@ export function makePublishArtifact(store, baseUrl, now: () => number):
 `store.saveArtifact`, and returns `{ id, url }`. The URL builder is split out so
 it is testable without a store. `now` is injected so tests are deterministic.
 
-### 4. Backend endpoints — `src/server/index.ts`
+### 4. Backend endpoints: `src/server/index.ts`
 
-- `POST /api/artifacts` — body is a `NewArtifact`; returns `{ id, url }`.
+- `POST /api/artifacts`: body is a `NewArtifact`; returns `{ id, url }`.
   Used by any in-process caller; also usable directly for manual testing.
-- `GET /api/artifacts/:id` — returns the `Artifact` JSON, or 404
+- `GET /api/artifacts/:id`: returns the `Artifact` JSON, or 404
   `{ error: 'not found' }`.
 - The server constructs `publishArtifact` from the store and `PUBLIC_BASE_URL`
   and passes it into the board session opts (next section).
@@ -102,7 +102,7 @@ New env: `PUBLIC_BASE_URL`, default `http://localhost:${PORT}` (the port the
 server already reads). This is the origin baked into pasted links so they
 resolve when a human clicks them from the Band UI.
 
-### 5. Agent integration — `publishArtifact` capability
+### 5. Agent integration: `publishArtifact` capability
 
 Thread `publishArtifact` into agent opts exactly like the existing `hostImage`
 injection (`hostImage: (u) => store.hostImage(u) ?? u` is wired in both the
@@ -122,7 +122,7 @@ both media types end to end:
 Both capabilities are optional in the agent opts (`publishArtifact?`), so the
 fake/in-process and test paths that do not provide it still work unchanged.
 
-### 6. Viewer page — `web/src/pages/ArtifactViewerPage.tsx`, route `/a/:id`
+### 6. Viewer page: `web/src/pages/ArtifactViewerPage.tsx`, route `/a/:id`
 
 - Registered in `web/src/App.tsx` as `<Route path="/a/:id" .../>`.
 - Fetches `/api/artifacts/:id` via a new `api.ts` function `getArtifact(id)`.
