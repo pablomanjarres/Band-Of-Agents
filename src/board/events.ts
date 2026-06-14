@@ -37,7 +37,13 @@ export type BoardEvent =
   | { type: 'escalation'; seq: number; fromName: string; text: string }
   | { type: 'decision'; seq: number; fromName: string; text: string }
   | { type: 'log'; seq: number; fromName: string; messageType: string; text: string }
-  | { type: 'status'; seq: number; fromName: string; status: BoardStatus };
+  | { type: 'status'; seq: number; fromName: string; status: BoardStatus }
+  | { type: 'workitem'; seq: number; fromName: string; text: string }
+  | { type: 'debate'; seq: number; fromName: string; text: string }
+  | { type: 'pod-finding'; seq: number; fromName: string; pod: string; conflicts: number; text: string }
+  | { type: 'mediation'; seq: number; fromName: string; resolved: boolean; text: string }
+  | { type: 'adjudication'; seq: number; fromName: string; decision: string; text: string }
+  | { type: 'terminal'; seq: number; fromName: string; decision: 'published' | 'spiked' | 'escalated' };
 
 export type BoardStatus = 'running' | 'awaiting-decision' | 'complete' | 'error';
 
@@ -105,6 +111,17 @@ export function translateActivity(a: BoardActivity): BoardEvent | null {
     if (a.content.startsWith('Escalation for')) return null;
     return { type: 'log', ...base, messageType: 'message', text: a.content };
   }
+
+  if (a.messageType === 'workitem') return { type: 'workitem', ...base, text: a.content };
+  if (a.messageType === 'debate') return { type: 'debate', ...base, text: a.content };
+  if (a.messageType === 'pod-finding')
+    return { type: 'pod-finding', ...base, pod: String(a.metadata?.pod ?? ''), conflicts: Number(a.metadata?.conflicts ?? 0), text: a.content };
+  if (a.messageType === 'mediation')
+    return { type: 'mediation', ...base, resolved: Boolean(a.metadata?.resolved), text: a.content };
+  if (a.messageType === 'adjudication')
+    return { type: 'adjudication', ...base, decision: String(a.metadata?.decision ?? ''), text: a.content };
+  if (a.messageType === 'terminal')
+    return { type: 'terminal', ...base, decision: (a.metadata?.decision as 'published' | 'spiked' | 'escalated') ?? 'published' };
 
   switch (a.messageType) {
     case 'intake':
