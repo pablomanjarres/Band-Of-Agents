@@ -35,8 +35,9 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const room = await rest.createChat();
-  console.log('createChat ->', room);
+  // Bind the room to an asset id as its Band task id (the task-state feature).
+  const room = await rest.createChat('probe-asset-1');
+  console.log('createChat (task_id=probe-asset-1) ->', room);
 
   const coordId = process.env.COORDINATOR_AGENT_ID;
   if (rest.addChatParticipant && coordId) {

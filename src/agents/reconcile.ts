@@ -14,6 +14,14 @@ export interface ReconcileOptions {
   board: SharedBoard;
   /** Regions whose reviews to wait for before deciding, e.g. ['US','EU']. */
   expectedRegions: string[];
+  /**
+   * The subset of expectedRegions that are market-bound (US/EU/LATAM). When set,
+   * Reconcile waits only for the market-bound regions in the asset's markets,
+   * plus every non-market reviewer (Brand), so a targeted single-market asset
+   * does not block on regions that were never recruited. Omit to wait for every
+   * expected region (the prior behavior).
+   */
+  marketRegions?: string[];
   /** Handle of the coordinator to report the verdict to. */
   coordinatorHandle?: string;
   /** Handle of the human reviewer to escalate to (e.g. the compliance lead). */
@@ -64,17 +72,27 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
     // re-review clears them (startReReview), reopening the decision for that round.
     if (opts.board.hasVerdicts(ctx.roomId)) return;
 
+    // Wait only for the reviewers this asset actually recruited. With targeted
+    // recruitment a single-market asset engages a subset of the regions, so a
+    // market-bound region not in the asset's markets is dropped from the wait set
+    // (Reconcile would otherwise block on a reviewer that never joins). Non-market
+    // reviewers like Brand are always expected. With no marketRegions configured
+    // this is a no-op and Reconcile waits for every expected region, as before.
+    const markets = opts.board.campaign(ctx.roomId)?.markets ?? [];
+    const marketBound = new Set(opts.marketRegions ?? []);
+    const expected =
+      marketBound.size === 0
+        ? opts.expectedRegions
+        : opts.expectedRegions.filter((r) => !marketBound.has(r) || markets.includes(r));
+
     // A reviewer just reported. Read the running tally off the board.
     const reviews = opts.board.reviews(ctx.roomId);
     const have = new Set(reviews.map((r) => r.region));
-    await tools.sendEvent(
-      `${have.size}/${opts.expectedRegions.length} reviews in.`,
-      'reconcile',
-    );
-    if (!opts.expectedRegions.every((r) => have.has(r))) return; // wait for the rest
+    await tools.sendEvent(`${have.size}/${expected.length} reviews in.`, 'reconcile');
+    if (!expected.every((r) => have.has(r))) return; // wait for the rest
 
     const byRegion = new Map<string, ReviewResult>(reviews.map((r) => [r.region, r]));
-    const verdicts = opts.expectedRegions.map((r) => decideRegion(byRegion.get(r)!));
+    const verdicts = expected.map((r) => decideRegion(byRegion.get(r)!));
 
     // Re-review cap: once a region has been remediated MAX_REMEDIATION_ROUNDS
     // times, a still-fixable 'adapt' escalates to the human instead of looping.
