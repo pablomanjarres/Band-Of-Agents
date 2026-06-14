@@ -112,3 +112,29 @@ send/recv/event -> BoardActivity -> BoardEvent -> SSE per review.
   editor/asset library, persistence across restart. 16 vitest tests pass, tsc clean. The board uses
   the exact same agents as band.ai; only the message transport differs. Live-room mode (band.ai)
   is the remaining piece and needs one more agent created in app.band.ai.
+
+---
+
+# Feature gaps execution (2026-06-14, branch feature-gaps)
+
+Source: `.private/FEATURE_GAPS_TODO.md` (derived from the BAND_FEATURE_USAGE audit).
+Method: TDD per gap (write a failing test on the FakeBandTransport, then minimal code,
+then green), granular commits, `tsc --noEmit` + `vitest run` green after each gap.
+Baseline before any change: 19 tests pass, tsc clean.
+
+Guardrail (from the punch list): depth over breadth. Land P1 first, reassess against the
+demo, then P2. P3 is stretch only and must not risk the verified demo.
+
+## P1 (do first: highest lift, smallest change)
+- [ ] P1.1 Target-region recruitment: coordinator filters recruited reviewers by
+      `asset.markets`; `addParticipant` pulls in a targeted region agent not yet in the room.
+- [ ] P1.2 Bind room to task: `createChat(taskId)` carries the asset id; surface task state.
+
+## P2 (then reassess against the demo)
+- [ ] P2.3 Emit `task`-typed events for per-region progress (region-reviewer, reconcile,
+      and the allowed-types map in `src/band/real.ts`).
+- [ ] P2.4 One vision reviewer reads the campaign image on an AIML vision model (third modality).
+
+## P3 (stretch, only if P1+P2 are solid and green; do not risk the verified demo)
+- [ ] P3.5 Shared context via Band `/workspace` + `/context`.
+- [ ] P3.6 Cross-framework reviewer adapter in the room.
