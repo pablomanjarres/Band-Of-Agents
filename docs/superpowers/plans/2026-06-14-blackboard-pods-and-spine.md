@@ -1292,3 +1292,320 @@ git commit -m "feat(agents): risk adjudicator drives the spine (mediate, remedia
 ```
 
 ---
+
+## Phase 5: Routing, events, wiring, and the walking-skeleton run
+
+### Task 5.1: Add the new agent roles to the model router
+
+**Files:**
+- Modify: `src/models/route.ts:7` (extend `AgentRole`) and `:14-23` (extend `ROUTES`)
+- Test: `test/route.test.ts` (extend)
+
+- [ ] **Step 1: Extend the test**
+
+Add to `test/route.test.ts`:
+
+```typescript
+import { describe, expect, it } from 'vitest';
+import { describeRoutes } from '../src/models/route';
+
+it('routes every new pod/board role', () => {
+  const r = describeRoutes('dev');
+  for (const role of ['scout', 'claim', 'precedent', 'disclosure', 'channel', 'visual', 'mediator']) {
+    expect(r[role as keyof typeof r]).toBeTruthy();
+  }
+  expect(r.scout).toContain('featherless:');
+  expect(r.mediator).toContain('bedrock:');
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `pnpm vitest run test/route.test.ts`
+Expected: FAIL (new roles undefined).
+
+- [ ] **Step 3: Edit `src/models/route.ts`**
+
+Replace the `AgentRole` type (line 7) with:
+
+```typescript
+export type AgentRole =
+  | 'coordinator' | 'us' | 'eu' | 'latam' | 'brand' | 'reconcile' | 'remediation'
+  | 'scout' | 'claim' | 'precedent' | 'disclosure' | 'channel' | 'visual' | 'mediator';
+```
+
+Add these entries to the `ROUTES` object (keep the existing seven):
+
+```typescript
+  scout: { aiml: 'meta-llama/llama-3.1-8b-instruct', devProvider: 'featherless', devModel: 'meta-llama/Meta-Llama-3.1-8B-Instruct' },
+  claim: { aiml: 'google/gemini-2.5-pro', devProvider: 'gemini', devModel: 'gemini-2.5-pro' },
+  precedent: { aiml: 'google/gemini-2.5-flash', devProvider: 'gemini', devModel: 'gemini-2.5-flash' },
+  disclosure: { aiml: 'anthropic/claude-sonnet-4.5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-sonnet-4-6' },
+  channel: { aiml: 'google/gemini-2.5-flash', devProvider: 'gemini', devModel: 'gemini-2.5-flash' },
+  visual: { aiml: 'google/gemini-2.5-flash', devProvider: 'gemini', devModel: 'gemini-2.5-flash' },
+  mediator: { aiml: 'anthropic/claude-opus-4-5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-opus-4-6-v1' },
+```
+
+- [ ] **Step 4: Run + commit**
+
+Run: `pnpm vitest run test/route.test.ts` (Expected: PASS)
+
+```bash
+git add src/models/route.ts test/route.test.ts
+git commit -m "feat(models): route the new pod/board roles (scout..mediator) across aiml and dev"
+```
+
+### Task 5.2: Extend BoardEvent for the new topology
+
+**Files:**
+- Modify: `src/board/events.ts` (extend the `BoardEvent` union and `translateActivity`'s messageType switch)
+
+- [ ] **Step 1: Add the new variants to the `BoardEvent` union** (alongside the existing ones)
+
+```typescript
+  | { type: 'workitem'; seq: number; fromName: string; text: string }
+  | { type: 'debate'; seq: number; fromName: string; text: string }
+  | { type: 'pod-finding'; seq: number; fromName: string; pod: string; conflicts: number; text: string }
+  | { type: 'mediation'; seq: number; fromName: string; resolved: boolean; text: string }
+  | { type: 'adjudication'; seq: number; fromName: string; decision: string; text: string }
+  | { type: 'terminal'; seq: number; fromName: string; decision: 'published' | 'spiked' | 'escalated' }
+```
+
+- [ ] **Step 2: Add cases to `translateActivity`** (in the event/messageType switch, before the `default` case)
+
+```typescript
+    if (activity.messageType === 'workitem') return { type: 'workitem', seq, fromName, text: activity.content };
+    if (activity.messageType === 'debate') return { type: 'debate', seq, fromName, text: activity.content };
+    if (activity.messageType === 'pod-finding')
+      return { type: 'pod-finding', seq, fromName, pod: String(activity.metadata?.pod ?? ''), conflicts: Number(activity.metadata?.conflicts ?? 0), text: activity.content };
+    if (activity.messageType === 'mediation')
+      return { type: 'mediation', seq, fromName, resolved: Boolean(activity.metadata?.resolved), text: activity.content };
+    if (activity.messageType === 'adjudication')
+      return { type: 'adjudication', seq, fromName, decision: String(activity.metadata?.decision ?? ''), text: activity.content };
+    if (activity.messageType === 'terminal')
+      return { type: 'terminal', seq, fromName, decision: (activity.metadata?.decision as 'published' | 'spiked' | 'escalated') ?? 'published' };
+```
+
+- [ ] **Step 3: Run the suite (no test asserts these yet; confirm it compiles)**
+
+Run: `pnpm test`
+Expected: PASS (existing tests unaffected; the union is additive).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/board/events.ts
+git commit -m "feat(board): board events for work-items, debate, pod findings, mediation, adjudication, terminal"
+```
+
+### Task 5.3: One wiring function for the whole board
+
+**Files:**
+- Create: `src/board/pod-board.ts`
+
+- [ ] **Step 1: Implement `connectPodBoardAgents`** (no test of its own; Task 5.4 exercises it end to end)
+
+```typescript
+// src/board/pod-board.ts
+import type { BandTransport } from '../band/types';
+import type { ModelClient } from '../models/client';
+import type { BrandDna, Rulebook } from '../domain/types';
+import { makeConductor } from '../agents/conductor';
+import { makePodLead } from '../agents/pod-lead';
+import { makeRegionReviewer } from '../agents/region-reviewer';
+import { makeScout, makeClaimEvidence, makePrecedent, makeDisclosure, makeBrandVoice, makeChannel, makeVisual } from '../agents/pod-members';
+import { makeMediator } from '../agents/mediator';
+import { makeRemediation } from '../agents/remediation';
+import { makeRiskAdjudicator } from '../agents/risk-adjudicator';
+
+export interface PodBoardModels {
+  scout: ModelClient; claim: ModelClient; precedent: ModelClient; disclosure: ModelClient;
+  us: ModelClient; eu: ModelClient; latam: ModelClient;
+  brand: ModelClient; channel: ModelClient; visual: ModelClient;
+  mediator: ModelClient; remediationCopy: ModelClient; image: ModelClient;
+}
+
+export interface PodBoardConfig {
+  brand: BrandDna;
+  rulebooks: { us: Rulebook; eu: Rulebook; latam: Rulebook };
+  models: PodBoardModels;
+  hostImage?: (url: string) => string;
+  logPrecedent?: (p: { claim: string; decision: string; note: string }) => void;
+}
+
+// Connects the full pods -> board -> spine cast to any transport (fake or real).
+export async function connectPodBoardAgents(t: BandTransport, cfg: PodBoardConfig): Promise<void> {
+  const m = cfg.models;
+
+  await t.connectAgent({ agentId: 'cond', name: 'Conductor', handle: '@conductor', onMessage: makeConductor({ podLeadHandles: ['@claims-lead', '@reg-lead', '@brand-lead'], primeHandles: ['@remediation'] }) });
+
+  // Claims pod
+  await t.connectAgent({ agentId: 'claimslead', name: 'Claims Lead', handle: '@claims-lead', onMessage: makePodLead({ pod: 'claims', members: ['@scout', '@claim-evidence', '@precedent', '@disclosure'], memberKeys: ['scout', 'claim-evidence', 'precedent', 'disclosure'], reportToHandle: '@adjudicator', debate: false }) });
+  await t.connectAgent({ agentId: 'scout', name: 'Scout', handle: '@scout', onMessage: makeScout(m.scout) });
+  await t.connectAgent({ agentId: 'ce', name: 'Claim & Evidence', handle: '@claim-evidence', onMessage: makeClaimEvidence(m.claim) });
+  await t.connectAgent({ agentId: 'prec', name: 'Precedent', handle: '@precedent', onMessage: makePrecedent(m.precedent) });
+  await t.connectAgent({ agentId: 'disc', name: 'Disclosure', handle: '@disclosure', onMessage: makeDisclosure(m.disclosure) });
+
+  // Regulatory pod (debates)
+  await t.connectAgent({ agentId: 'reglead', name: 'Reg Lead', handle: '@reg-lead', onMessage: makePodLead({ pod: 'regulatory', members: ['@us-reviewer', '@eu-reviewer', '@latam-reviewer'], memberKeys: ['US', 'EU', 'LATAM'], reportToHandle: '@adjudicator', debate: true }) });
+  await t.connectAgent({ agentId: 'us', name: 'US Reviewer', handle: '@us-reviewer', onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: cfg.rulebooks.us, brand: cfg.brand, model: m.us, reportToHandle: '@reg-lead' }) });
+  await t.connectAgent({ agentId: 'eu', name: 'EU Reviewer', handle: '@eu-reviewer', onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: cfg.rulebooks.eu, brand: cfg.brand, model: m.eu, reportToHandle: '@reg-lead' }) });
+  await t.connectAgent({ agentId: 'latam', name: 'LATAM Reviewer', handle: '@latam-reviewer', onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: cfg.rulebooks.latam, brand: cfg.brand, model: m.latam, reportToHandle: '@reg-lead' }) });
+
+  // Brand pod
+  await t.connectAgent({ agentId: 'brandlead', name: 'Brand Lead', handle: '@brand-lead', onMessage: makePodLead({ pod: 'brand', members: ['@brand-voice', '@channel', '@visual'], memberKeys: ['brand-voice', 'channel', 'visual'], reportToHandle: '@adjudicator', debate: false }) });
+  await t.connectAgent({ agentId: 'bv', name: 'Brand Voice', handle: '@brand-voice', onMessage: makeBrandVoice(m.brand) });
+  await t.connectAgent({ agentId: 'ch', name: 'Channel Fit', handle: '@channel', onMessage: makeChannel(m.channel) });
+  await t.connectAgent({ agentId: 'vis', name: 'Visual', handle: '@visual', onMessage: makeVisual(m.visual) });
+
+  // Board resolvers
+  await t.connectAgent({ agentId: 'med', name: 'Mediator', handle: '@mediator', onMessage: makeMediator({ model: m.mediator, reportToHandle: '@adjudicator' }) });
+  await t.connectAgent({ agentId: 'rem', name: 'Remediation', handle: '@remediation', onMessage: makeRemediation({ brand: cfg.brand, copyModel: m.remediationCopy, imageModel: m.image, reportToHandle: '@conductor', ...(cfg.hostImage ? { hostImage: cfg.hostImage } : {}) }) });
+
+  // Decision spine
+  await t.connectAgent({ agentId: 'adj', name: 'Risk Adjudicator', handle: '@adjudicator', onMessage: makeRiskAdjudicator({ expectedPods: ['claims', 'regulatory', 'brand'], mediatorHandle: '@mediator', remediationHandle: '@remediation', humanHandle: '@compliance-lead', maxRecommits: 1, ...(cfg.logPrecedent ? { logPrecedent: cfg.logPrecedent } : {}) }) });
+}
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add src/board/pod-board.ts
+git commit -m "feat(board): connectPodBoardAgents wires the full pods/board/spine cast to a transport"
+```
+
+### Task 5.4: Walking-skeleton integration test (fake transport)
+
+**Files:**
+- Test: `test/pod-board.test.ts`
+
+- [ ] **Step 1: Write the test**
+
+```typescript
+// test/pod-board.test.ts
+import { describe, expect, it } from 'vitest';
+import { FakeBandTransport } from '../src/band/fake';
+import { StubModelClient, type ModelClient } from '../src/models/client';
+import { connectPodBoardAgents, type PodBoardModels } from '../src/board/pod-board';
+import { translateActivity, type BoardEvent } from '../src/board/events';
+import { loadAsset, loadBrandDna, loadRulebook } from '../src/domain/load';
+
+const ASSETS = new URL('../assets/', import.meta.url).pathname;
+
+const findings = (severity: 'block' | 'warn' | 'info', claim: string) =>
+  ({ text: '', json: { findings: [{ category: 'claim', severity, claim, rationale: 'r' }] } });
+
+describe('pod board walking skeleton', () => {
+  it('US passes, EU blocks and holds, remediation fails, escalates to the human, human spikes', async () => {
+    const brand = loadBrandDna(`${ASSETS}brand-dna.json`);
+    const asset = loadAsset(`${ASSETS}sample-asset.json`);
+    const claim = asset.claim;
+
+    const pass: ModelClient = new StubModelClient(() => findings('info', claim));
+    const empty: ModelClient = new StubModelClient(() => ({ text: '', json: { findings: [] } }));
+    let euCall = 0;
+    const euModel: ModelClient = new StubModelClient(() => (euCall++ % 2 === 0
+      ? findings('block', claim)                                  // review: block
+      : { text: '', json: { stance: 'hold', rationale: 'unlawful' } })); // rebuttal: hold
+    const mediator: ModelClient = new StubModelClient(() => ({ text: '', json: { resolved: false, note: 'no movement', requiredDisclosure: null } }));
+    const revised: ModelClient = new StubModelClient(() => ({ text: JSON.stringify({ ...asset, copy: 'softened' }) }));
+    const image: ModelClient = { model: 'stub-image', complete: async () => ({ text: '' }), generateImage: async () => ({ url: 'http://img' }) };
+
+    const models: PodBoardModels = {
+      scout: empty, claim: empty, precedent: empty, disclosure: empty,
+      us: pass, eu: euModel, latam: pass,
+      brand: empty, channel: empty, visual: empty,
+      mediator, remediationCopy: revised, image,
+    };
+
+    const events: BoardEvent[] = [];
+    let seq = 0;
+    const room = new FakeBandTransport('demo', { onActivity: (a) => { const e = translateActivity(a, ++seq); if (e) events.push(e); } });
+    room.addUser('lead', 'Compliance Lead', '@compliance-lead');
+    await connectPodBoardAgents(room, { brand, rulebooks: { us: loadRulebook(`${ASSETS}rulebook.us.json`), eu: loadRulebook(`${ASSETS}rulebook.eu.json`), latam: loadRulebook(`${ASSETS}rulebook.latam.json`) }, models });
+
+    room.post('lead', JSON.stringify(asset), [{ id: 'cond' }]);
+    await room.drain();
+
+    // The board reached escalation (deadlock survived one remediation).
+    expect(events.some((e) => e.type === 'escalation')).toBe(true);
+
+    // Human rules: reject.
+    room.post('lead', 'Reject: cannot publish in EU without authorization', [{ id: 'adj' }]);
+    await room.drain();
+
+    const terminal = events.find((e) => e.type === 'terminal') as Extract<BoardEvent, { type: 'terminal' }> | undefined;
+    expect(terminal?.decision).toBe('spiked');
+    // The debate is visible.
+    expect(events.some((e) => e.type === 'debate')).toBe(true);
+    // At least one pod filed a conflict.
+    expect(events.some((e) => e.type === 'pod-finding' && e.conflicts > 0)).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails, then passes after wiring is correct**
+
+Run: `pnpm vitest run test/pod-board.test.ts`
+Expected: PASS. This is the money-shot: asset enters, the Regulatory pod debates (US pass vs EU hold), the pod files a conflict, the Adjudicator mediates, one remediation cycle runs and still fails, the deadlock escalates to the human, and the human spike produces a terminal `spiked`. If the async ordering surfaces the terminal before the assertion, assert on `events.filter(e => e.type === 'terminal')` membership rather than the single `find`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add test/pod-board.test.ts
+git commit -m "test(board): walking skeleton - pods debate, board reconciles, spine escalates, human spikes"
+```
+
+### Task 5.5: Local run entry point
+
+**Files:**
+- Modify: `src/run/local.ts` (replace the old coordinator/reconcile wiring with `connectPodBoardAgents`; keep the stub-model setup and the asset post)
+
+- [ ] **Step 1: Rewrite the body of `src/run/local.ts`** to build stub models, construct `new FakeBandTransport('demo-room', { onActivity })` that logs translated events, `room.addUser('lead', 'Compliance Lead', '@compliance-lead')`, `await connectPodBoardAgents(room, { brand, rulebooks, models })`, `room.post('lead', JSON.stringify(asset), [{ id: 'cond' }])`, `await room.drain()`, then print the transcript. Use the same stub pattern as `test/pod-board.test.ts` Step 1 (the `findings()` helper, `euModel` two-phase, `mediator`, `revised`, `image`).
+
+- [ ] **Step 2: Run it**
+
+Run: `pnpm local`
+Expected: the console shows intake, three pods deliberating, the Regulatory debate (US vs EU), a pod-finding with a conflict, the adjudicator consulting the mediator, one remediation, an escalation, and (since `local.ts` posts a human reject) a terminal `spiked`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/run/local.ts
+git commit -m "feat(run): local walking-skeleton run on the pods/board/spine topology"
+```
+
+### Task 5.6: Real Band wiring (Phase 5b)
+
+**Files:**
+- Modify: `src/run/agents.ts` (construct `RealBandTransport`, build `PodBoardModels` from `modelFor(role)`, call `connectPodBoardAgents`)
+
+- [ ] **Step 1: Build models from the router**
+
+```typescript
+import { modelFor, imageClientFor } from '../models/route';
+const models = {
+  scout: modelFor('scout'), claim: modelFor('claim'), precedent: modelFor('precedent'), disclosure: modelFor('disclosure'),
+  us: modelFor('us'), eu: modelFor('eu'), latam: modelFor('latam'),
+  brand: modelFor('brand'), channel: modelFor('channel'), visual: modelFor('visual'),
+  mediator: modelFor('mediator'), remediationCopy: modelFor('remediation'), image: imageClientFor(),
+};
+```
+
+- [ ] **Step 2: Connect the cast to `RealBandTransport`**
+
+Mirror the existing `src/run/agents.ts` transport construction (per-agent `envPrefix` credentials from `.env`), but call `await connectPodBoardAgents(transport, { brand, rulebooks, models, hostImage, logPrecedent })` instead of the old coordinator/reviewers/reconcile block. Each agent must be registered in app.band.ai with a matching handle (`@conductor`, `@scout`, `@claim-evidence`, `@precedent`, `@disclosure`, `@reg-lead`, `@claims-lead`, `@brand-lead`, `@us-reviewer`, `@eu-reviewer`, `@latam-reviewer`, `@brand-voice`, `@channel`, `@visual`, `@mediator`, `@remediation`, `@adjudicator`) and its `PREFIX_AGENT_ID` / `PREFIX_API_KEY` in `.env`.
+
+- [ ] **Step 3: Smoke test against Band Cloud** (manual, needs creds)
+
+Run: `pnpm agents`
+Expected: agents connect, the asset posted in the Band room drives the full debate to a terminal. This is the demo run.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/run/agents.ts
+git commit -m "feat(run): wire the pods/board/spine cast on real Band (band.ai)"
+```
+
+---
