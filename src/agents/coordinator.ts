@@ -50,12 +50,16 @@ export function makeCoordinator(opts: CoordinatorOptions): AgentHandler {
     if (!fromHuman && !fromIntake && !fromRemediation) return;
 
     const participants = await tools.getParticipants();
+    // Recruit only the reviewer agents: exclude self, the intake relay, the
+    // remediation agent, and the reconcile agent (reconcile is the report-to
+    // target, not a reviewer, so it must not be told to review against a rulebook).
     const reviewers = participants.filter(
       (p) =>
         p.type === 'agent' &&
         p.id !== ctx.agentId &&
         !(opts.intakeAgentHandle !== undefined && nameMatchesHandle(p.name, opts.intakeAgentHandle)) &&
-        !(opts.remediationHandle !== undefined && nameMatchesHandle(p.name, opts.remediationHandle)),
+        !(opts.remediationHandle !== undefined && nameMatchesHandle(p.name, opts.remediationHandle)) &&
+        !(opts.reconcileHandle !== undefined && nameMatchesHandle(p.name, opts.reconcileHandle)),
     );
     if (reviewers.length === 0) return;
 
