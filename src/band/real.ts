@@ -66,6 +66,38 @@ interface IntakeRest {
 
 type EmitActivity = (kind: 'message' | 'event', content: string, messageType: string) => void;
 
+/** A trace sink for the task binding: called with the new room id and the task (asset) id. */
+export type TaskBindNote = (roomId: string, taskId: string) => void;
+
+/**
+ * Build the intake control object from a band.ai REST facade. Extracted as a
+ * pure helper (no SDK or Agent dependency) so the task-id forwarding is testable
+ * without a live band.ai call. createRoom forwards the optional task id to
+ * createChat, so the room is bound to the asset as its Band task, and surfaces
+ * the binding through onTaskBind. Methods are invoked on the facade object so
+ * its `this` stays bound.
+ */
+export function buildIntakeControl(
+  api: IntakeRest,
+  onTaskBind?: TaskBindNote,
+  stop: () => Promise<void> = async () => {},
+): IntakeControl {
+  return {
+    createRoom: async (taskId) => {
+      const roomId = (await api.createChat!(taskId)).id;
+      if (taskId) onTaskBind?.(roomId, taskId);
+      return roomId;
+    },
+    addParticipant: async (roomId, agentId, role = 'member') => {
+      await api.addChatParticipant!(roomId, { participantId: agentId, role });
+    },
+    postMessage: async (roomId, content, mentions) => {
+      await api.createChatMessage!(roomId, { content, mentions });
+    },
+    stop,
+  };
+}
+
 export class RealBandTransport implements BandTransport {
   private readonly onActivity?: ActivityCallback;
   private seq = 0;
@@ -154,18 +186,10 @@ export class RealBandTransport implements BandTransport {
     }
     // Call methods on the facade (not extracted) so `this` stays bound to it.
     const api = rest;
-    return {
-      createRoom: async () => (await api.createChat!()).id,
-      addParticipant: async (roomId, agentId, role = 'member') => {
-        await api.addChatParticipant!(roomId, { participantId: agentId, role });
-      },
-      postMessage: async (roomId, content, mentions) => {
-        await api.createChatMessage!(roomId, { content, mentions });
-      },
-      stop: async () => {
-        await agent.stop();
-      },
-    };
+    const onTaskBind: TaskBindNote = (roomId, taskId) => dbg(`room ${roomId} bound to task ${taskId}`);
+    return buildIntakeControl(api, onTaskBind, async () => {
+      await agent.stop();
+    });
   }
 }
 
