@@ -1,0 +1,323 @@
+// HTTP + SSE backend for the campaign portal. Reuses the domain, agents, and
+// model routing in src/. A POST submits a campaign; the console subscribes over
+// SSE and watches the review stream in live.
+//
+//   pnpm serve                       (BOARD_MODE=band, the product: a real band.ai room)
+//   BOARD_MODE=local pnpm serve      (in-process transport; dev/offline fallback)
+//
+// In band mode the Intake agent creates a real band.ai room, adds the reviewer
+// agents, and posts the campaign; the agents collaborate in band.ai and the
+// server only observes. A small file-backed Store persists reviews, the
+// precedent log, the asset library, and per-region rulebook overrides.
+
+import 'dotenv/config';
+import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { streamSSE } from 'hono/streaming';
+import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { z } from 'zod';
+import { loadBrandDna, loadRulebook } from '../domain/load';
+import { ContentAsset as ContentAssetSchema, Rulebook as RulebookSchema } from '../domain/types';
+import type { ContentAsset, Rulebook } from '../domain/types';
+import { BoardSession, realBoardModels } from '../board/session';
+import { BandBoard } from '../board/band-session';
+import type { BoardEvent, BoardStatus } from '../board/events';
+import { Store } from '../store/store';
+
+const ASSETS = new URL('../../assets/', import.meta.url).pathname;
+const WEB_DIST = new URL('../../web/dist/', import.meta.url).pathname;
+const DATA_DIR = new URL('../../data/', import.meta.url).pathname;
+const PORT = Number(process.env.PORT ?? 8787);
+const BOARD_MODE = process.env.BOARD_MODE === 'local' ? 'local' : 'band';
+const REGIONS = ['us', 'eu', 'latam'] as const;
+type RegionKey = (typeof REGIONS)[number];
+
+interface ReviewRecord {
+  id: string;
+  createdAt: number;
+  asset: ContentAsset;
+  events: BoardEvent[];
+  status: BoardStatus;
+  conflict: boolean;
+  subscribers: Set<(event: BoardEvent) => void>;
+  submitDecision: (text: string) => Promise<void>;
+}
+
+const reviews = new Map<string, ReviewRecord>();
+const store = new Store(DATA_DIR);
+
+// Feed recent human-decision precedents back into the reviewers' shared context.
+const recentPrecedents = (): string[] =>
+  store.listPrecedents().slice(-6).map((p) => `${p.regions.join('/')}: ${p.decision}`);
+
+const brand = loadBrandDna(`${ASSETS}brand-dna.json`);
+const defaultRulebooks: Record<RegionKey, Rulebook> = {
+  us: loadRulebook(`${ASSETS}rulebook.us.json`),
+  eu: loadRulebook(`${ASSETS}rulebook.eu.json`),
+  latam: loadRulebook(`${ASSETS}rulebook.latam.json`),
+};
+
+function currentRulebooks(): Record<RegionKey, Rulebook> {
+  return {
+    us: store.getRulebookOverride('US') ?? defaultRulebooks.us,
+    eu: store.getRulebookOverride('EU') ?? defaultRulebooks.eu,
+    latam: store.getRulebookOverride('LATAM') ?? defaultRulebooks.latam,
+  };
+}
+
+// In band mode the agents connect once and live in band.ai; each campaign gets a room.
+const bandBoard =
+  BOARD_MODE === 'band'
+    ? new BandBoard({
+        brand,
+        rulebooks: currentRulebooks(),
+        models: realBoardModels(),
+        ...(process.env.HUMAN_HANDLE ? { humanHandle: process.env.HUMAN_HANDLE } : {}),
+        onPrecedent: (p) => store.appendPrecedent(p),
+        hostImage: (u) => store.hostImage(u) ?? u,
+        getPrecedents: recentPrecedents,
+      })
+    : undefined;
+
+const CreateReview = z.object({
+  copy: z.string().min(1),
+  claim: z.string().min(1),
+  channel: z.string().min(1).default('instagram'),
+  markets: z.array(z.string()).min(1),
+  imagePrompt: z.string().optional(),
+  substantiation: z.string().optional(),
+});
+
+function imageContentType(name: string): string {
+  if (name.endsWith('.png')) return 'image/png';
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+  return 'application/octet-stream';
+}
+
+function makeOnEvent(record: ReviewRecord): (event: BoardEvent) => void {
+  return (event) => {
+    let e = event;
+    // Host generated images out of the event stream so stored/streamed payloads stay small.
+    if (e.type === 'revised' && e.imageUrl) {
+      const hosted = store.hostImage(e.imageUrl);
+      if (hosted) e = { ...e, imageUrl: hosted };
+    }
+    e = { ...e, seq: record.events.length } as BoardEvent;
+    record.events.push(e);
+    if (e.type === 'verdict' && e.conflict) record.conflict = true;
+    if (e.type === 'status') {
+      record.status = e.status;
+      if (e.status !== 'running') {
+        store.saveReview({ id: record.id, createdAt: record.createdAt, asset: record.asset, events: record.events, status: record.status, conflict: record.conflict });
+      }
+    }
+    for (const sub of record.subscribers) sub(e);
+  };
+}
+
+// A model/provider failure should degrade a single review, never take down the
+// portal (e.g. an expired Vertex token surfacing as an async rejection).
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandled rejection (continuing):', (reason as Error)?.message ?? String(reason));
+});
+
+const app = new Hono();
+app.use('/api/*', cors());
+
+app.post('/api/reviews', async (c) => {
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const parsed = CreateReview.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const d = parsed.data;
+  const asset: ContentAsset = {
+    id: `asset-${randomUUID().slice(0, 8)}`,
+    channel: d.channel,
+    markets: d.markets,
+    copy: d.copy,
+    claim: d.claim,
+    ...(d.imagePrompt ? { imagePrompt: d.imagePrompt } : {}),
+    ...(d.substantiation ? { substantiation: d.substantiation } : {}),
+  };
+
+  const record: ReviewRecord = {
+    id: '',
+    createdAt: Date.now(),
+    asset,
+    events: [],
+    status: 'running',
+    conflict: false,
+    subscribers: new Set(),
+    submitDecision: async () => {},
+  };
+  const onEvent = makeOnEvent(record);
+
+  if (BOARD_MODE === 'band') {
+    if (!bandBoard) return c.json({ error: 'band board unavailable' }, 503);
+    try {
+      const roomId = await bandBoard.createReview(asset, onEvent);
+      record.id = roomId;
+      record.submitDecision = (text) => bandBoard.submitDecision(roomId, text);
+      reviews.set(roomId, record);
+      return c.json({ id: roomId });
+    } catch (err) {
+      return c.json({ error: `Failed to start band review: ${(err as Error)?.message ?? String(err)}` }, 500);
+    }
+  }
+
+  const id = randomUUID();
+  record.id = id;
+  const session = new BoardSession({
+    roomId: `review-${id}`,
+    asset,
+    brand,
+    rulebooks: currentRulebooks(),
+    models: realBoardModels(),
+    onEvent,
+    onPrecedent: (p) => store.appendPrecedent(p),
+    hostImage: (u) => store.hostImage(u) ?? u,
+    getPrecedents: recentPrecedents,
+  });
+  record.submitDecision = (text) => session.submitDecision(text);
+  reviews.set(id, record);
+  void session.run().catch((err: unknown) => {
+    onEvent({ type: 'log', seq: 0, fromName: 'system', messageType: 'error', text: `Review failed: ${(err as Error)?.message ?? String(err)}` });
+    onEvent({ type: 'status', seq: 0, fromName: 'system', status: 'error' });
+  });
+  return c.json({ id });
+});
+
+app.get('/api/reviews', (c) => {
+  const byId = new Map<string, { id: string; createdAt: number; assetId: string; copy: string; markets: string[]; status: BoardStatus; conflict: boolean }>();
+  for (const r of store.listReviews()) {
+    byId.set(r.id, { id: r.id, createdAt: r.createdAt, assetId: r.asset.id, copy: r.asset.copy, markets: r.asset.markets, status: r.status, conflict: r.conflict });
+  }
+  for (const r of reviews.values()) {
+    byId.set(r.id, { id: r.id, createdAt: r.createdAt, assetId: r.asset.id, copy: r.asset.copy, markets: r.asset.markets, status: r.status, conflict: r.conflict });
+  }
+  const list = [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
+  return c.json({ reviews: list, mode: BOARD_MODE });
+});
+
+app.get('/api/reviews/:id', (c) => {
+  const id = c.req.param('id');
+  const record = reviews.get(id);
+  if (record) return c.json({ id: record.id, status: record.status, asset: record.asset, events: record.events });
+  const stored = store.getReview(id);
+  if (!stored) return c.json({ error: 'not found' }, 404);
+  return c.json({ id: stored.id, status: stored.status, asset: stored.asset, events: stored.events });
+});
+
+app.get('/api/reviews/:id/events', (c) => {
+  const id = c.req.param('id');
+  const record = reviews.get(id);
+  if (!record) {
+    const stored = store.getReview(id);
+    if (!stored) return c.json({ error: 'not found' }, 404);
+    return streamSSE(c, async (stream) => {
+      for (const event of stored.events) await stream.writeSSE({ data: JSON.stringify(event) });
+    });
+  }
+  return streamSSE(c, async (stream) => {
+    for (const event of record.events) await stream.writeSSE({ data: JSON.stringify(event) });
+    if (record.status === 'complete' || record.status === 'error') return;
+
+    const queue: BoardEvent[] = [];
+    let wake: (() => void) | null = null;
+    const sub = (event: BoardEvent): void => {
+      queue.push(event);
+      if (wake) {
+        wake();
+        wake = null;
+      }
+    };
+    record.subscribers.add(sub);
+    try {
+      for (;;) {
+        if (queue.length === 0) await new Promise<void>((resolve) => (wake = resolve));
+        const event = queue.shift();
+        if (!event) continue;
+        await stream.writeSSE({ data: JSON.stringify(event) });
+        if (event.type === 'status' && (event.status === 'complete' || event.status === 'error')) break;
+      }
+    } finally {
+      record.subscribers.delete(sub);
+    }
+  });
+});
+
+app.post('/api/reviews/:id/decision', async (c) => {
+  const record = reviews.get(c.req.param('id'));
+  if (!record) return c.json({ error: 'not found' }, 404);
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const decision = typeof (body as { decision?: unknown })?.decision === 'string' ? (body as { decision: string }).decision : '';
+  if (!decision) return c.json({ error: 'decision required' }, 400);
+  void record.submitDecision(decision).catch(() => {});
+  return c.json({ ok: true });
+});
+
+app.get('/api/images/:name', (c) => {
+  const buf = store.readImage(c.req.param('name'));
+  if (!buf) return c.json({ error: 'not found' }, 404);
+  return c.body(new Uint8Array(buf), 200, { 'content-type': imageContentType(c.req.param('name')), 'cache-control': 'public, max-age=31536000, immutable' });
+});
+
+app.get('/api/precedents', (c) => c.json({ precedents: store.listPrecedents() }));
+
+app.get('/api/assets', (c) => c.json({ assets: store.listAssets() }));
+
+app.post('/api/assets', async (c) => {
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const candidate = (body as { id?: unknown })?.id ? body : { ...(body as object), id: `asset-${randomUUID().slice(0, 8)}` };
+  const parsed = ContentAssetSchema.safeParse(candidate);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  store.saveAsset(parsed.data);
+  return c.json({ asset: parsed.data });
+});
+
+app.get('/api/rulebooks', (c) => {
+  const current = currentRulebooks();
+  return c.json({ rulebooks: REGIONS.map((r) => current[r]) });
+});
+
+app.get('/api/rulebooks/:region', (c) => {
+  const region = c.req.param('region').toLowerCase();
+  if (!(REGIONS as readonly string[]).includes(region)) return c.json({ error: 'unknown region' }, 404);
+  return c.json({ rulebook: currentRulebooks()[region as RegionKey] });
+});
+
+app.put('/api/rulebooks/:region', async (c) => {
+  const region = c.req.param('region').toLowerCase();
+  if (!(REGIONS as readonly string[]).includes(region)) return c.json({ error: 'unknown region' }, 404);
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const parsed = RulebookSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  store.saveRulebookOverride(region, parsed.data);
+  return c.json({ rulebook: parsed.data });
+});
+
+if (existsSync(WEB_DIST)) {
+  app.use('/*', serveStatic({ root: './web/dist' }));
+  app.get('*', serveStatic({ path: './web/dist/index.html' }));
+} else {
+  app.get('/', (c) =>
+    c.text('Campaign portal backend is running. Build the UI: cd web && pnpm install && pnpm build, or run cd web && pnpm dev. API is under /api.'),
+  );
+}
+
+async function main(): Promise<void> {
+  if (bandBoard) {
+    console.log('Connecting band.ai agents (BOARD_MODE=band). This is the real coordination layer...');
+    await bandBoard.start();
+    console.log('band.ai agents connected and waiting for campaigns.');
+  }
+  serve({ fetch: app.fetch, port: PORT });
+  console.log(`Campaign portal on http://localhost:${PORT} (BOARD_MODE=${BOARD_MODE}, MODEL_MODE=${process.env.MODEL_MODE ?? 'aiml'})`);
+}
+
+main().catch((err: unknown) => {
+  console.error(err);
+  process.exit(1);
+});

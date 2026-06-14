@@ -1,0 +1,61 @@
+{
+  "region": "US",
+  "label": "United States (FTC)",
+  "notLegalAdvice": true,
+  "rules": [
+    {
+      "id": "us-substantiation",
+      "region": "US",
+      "category": "substantiation",
+      "severity": "block",
+      "check": "Objective or quantified performance claims need competent and reliable scientific evidence before publishing.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/business-guidance/resources/health-products-compliance-guidance"
+    },
+    {
+      "id": "us-health-evidence",
+      "region": "US",
+      "category": "health_claim",
+      "severity": "block",
+      "check": "Health or efficacy claims generally require RCT-grade human evidence.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/business-guidance/resources/health-products-compliance-guidance"
+    },
+    {
+      "id": "us-testimonial",
+      "region": "US",
+      "category": "endorsement",
+      "severity": "warn",
+      "check": "Testimonial claims must be substantiated as if stated directly and disclose the results a typical consumer can expect; 'results not typical' is insufficient.",
+      "requiredDisclosure": "Typical-results disclosure",
+      "sourceUrl": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-255"
+    },
+    {
+      "id": "us-material-connection",
+      "region": "US",
+      "category": "endorsement",
+      "severity": "warn",
+      "check": "Material connections between an endorser and the brand must be disclosed clearly and conspicuously.",
+      "requiredDisclosure": "Material-connection disclosure",
+      "sourceUrl": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-255"
+    },
+    {
+      "id": "us-comparative",
+      "region": "US",
+      "category": "comparative",
+      "severity": "info",
+      "check": "Comparative claims are allowed when truthful and non-deceptive; no heightened substantiation bar applies.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/legal-library/browse/statement-policy-regarding-comparative-advertising"
+    },
+    {
+      "id": "us-free-offer",
+      "region": "US",
+      "category": "free_offer",
+      "severity": "warn",
+      "check": "'Free' offers must state all terms clearly up front and rest on a 30-day regular-price basis.",
+      "requiredDisclosure": "Free-offer terms",
+      "sourceUrl": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-251"
+    }
+  ]
+}
