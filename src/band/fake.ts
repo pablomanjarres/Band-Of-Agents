@@ -183,7 +183,13 @@ export class FakeBandTransport implements BandTransport {
     try {
       while (this.queue.length > 0) {
         const task = this.queue.shift();
-        if (task) await task();
+        if (!task) continue;
+        try {
+          await task();
+        } catch (err) {
+          // A model/provider failure degrades one reviewer; it must not crash the run.
+          console.error('[board] agent handler error:', (err as Error)?.message ?? String(err));
+        }
       }
     } finally {
       this.running = false;

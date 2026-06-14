@@ -118,6 +118,12 @@ function makeOnEvent(record: ReviewRecord): (event: BoardEvent) => void {
   };
 }
 
+// A model/provider failure should degrade a single review, never take down the
+// portal (e.g. an expired Vertex token surfacing as an async rejection).
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandled rejection (continuing):', (reason as Error)?.message ?? String(reason));
+});
+
 const app = new Hono();
 app.use('/api/*', cors());
 
