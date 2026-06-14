@@ -24,3 +24,30 @@ Traced from the `band-review-board` branch:
 4. Escalation is not earned. The human is reached by a counter hitting a cap, not by a genuine, observed deadlock between agents.
 
 The proposals below each fix these four problems in a different way. They share a visual language (see the deck) and all build on the existing seams: `makeCoordinator` (fan-out), `makeRegionReviewer` (routing), `makeReconcile` / `decideRegion` (verdict logic), `makeRemediation` (loop closure).
+
+---
+
+## Proposal 1: The Negotiation Table
+
+Metaphor: a bargaining table. The asset draft is the object on the table, and it visibly mutates as deals are struck.
+
+### Shape
+Round-based, not a fan. The draft sits in the room as shared context. Each round:
+1. Every reviewer with an objection posts a directed challenge to the draft's owner (brand), and the objection must carry a concrete remedy (the price of clearance). Example: `@brand the span "boost your immune system" trips EU Art 10(2); I clear it if you (a) change to "contributes to normal immune function" and (b) add the balanced-diet statement.`
+2. The owner responds to each remedy directionally: ACCEPT (mutate the draft), COUNTER (`@eu I will take the wording change, but the disclosure kills the hook; can it live in the caption, not the headline?`), or HOLD (declare a red line).
+3. A Chair maintains an explicit conflict ledger: open conflicts are remedies not yet accepted. When the ledger drains, the converged draft publishes. When a conflict survives N rounds unchanged with both sides at a red line, that specific span escalates to the human as a stable deadlock.
+
+### Why it is not scatter-gather
+The negotiation is literal and directed: agents argue with each other, the artifact evolves in view, and deadlock is detected as "this exact conflict did not move," not "two verdicts differ." Conflict is the engine, not a boolean side effect.
+
+### Band primitives it leans on
+`sendMessage` + @mention is the offer / counteroffer channel, which is exactly what Band enforces. `sendEvent` posts each agent's private reasoning and the live ledger so the debate is legible to judges. `addParticipant` summons the human on deadlock.
+
+### Multi-model fit
+Brand on a fast model (Haiku) for many quick voice calls, EU on Gemini Pro, US on Sonnet, Chair on Opus (tracks the ledger and rules on deadlock). The cheap models do the back-and-forth; the expensive Chair is spent only on deadlock.
+
+### Build delta (medium)
+Replace `decideRegion()` flag-merge with a round loop in the Chair; add a `negotiateWith` option to `makeRegionReviewer` so an objection is directed at brand and carries a remedy; make brand able to ACCEPT / COUNTER / HOLD; turn remediation into "apply the accepted remedy to the draft" so the artifact mutates; add the ledger plus a stable-deadlock detector (same conflict id unchanged across rounds). Reuses every existing agent.
+
+### Tradeoffs
+Strongest direct hit on the win condition (genuine negotiation over a mutating artifact). Risk: rounds can wander, so the Chair needs a firm round cap and a crisp deadlock rule to stay demo-stable.
