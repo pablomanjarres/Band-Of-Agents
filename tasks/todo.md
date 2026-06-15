@@ -122,25 +122,41 @@ Baseline before work: tsc clean, 19/19 vitest pass. Keep both transports (local 
 Keep it NON-LINEAR: reconcile fires per material, rollup is observational (the one rule).
 
 ## Rung A: campaign model + per-material board + dossier cascade + UI + cleanup
-- [ ] Domain types: add `Campaign`, `Material` (kind + video + perception + attachments),
-      `CampaignDossier`, `MaterialPerception`; add `materialId` to `ReviewResult`/`RegionVerdict`.
-- [ ] Persistence: `data/campaigns.json` library; legacy single asset reads as a one-material
-      campaign; events carry `campaignId`/`materialId`.
-- [ ] Board: partition state by `(campaignId, materialId)`; `board.dossier()`,
-      `board.nextMaterial(campaignId)` cursor; `startReReview` scoped to a materialId.
-- [ ] Reconcile: per-material trigger (not a campaign-wide gate); observational worst-case rollup.
+- [x] Domain types: add `Campaign`, `Material` (kind + video + perception + attachments),
+      `CampaignDossier`, `MaterialPerception`; add `materialId` to `ReviewResult`/`RegionVerdict`. (Core1)
+- [x] Persistence: `data/campaigns.json` library; legacy single asset reads as a one-material
+      campaign; events carry `campaignId`/`materialId`. (Core1)
+- [x] Board: keyed per material `${roomId}::${materialId}` (drives reconcile/reviewer per material
+      with no decision-logic change); `board.dossier()`, `board.materialId()`. `startReReview` stays
+      per key. (Core1) The band-mode `nextMaterial` cursor is for the band coordinator path (later).
+- [x] Reconcile: per-material trigger (per-key gate, never campaign-wide); observational worst-case
+      rollup + material x region matrix in `src/board/campaign.ts` (computeRollup). (Core1+Core2)
 - [ ] Coordinator: recruit once, post each material as a follow-up task; reviewers pull current
       material from the cursor (works in BOARD_MODE=band, the product path).
-- [ ] Reviewer prompt: cascade the dossier (approved claims, substantiation, approved info) into
-      every region review via `buildReviewPrompt`.
-- [ ] Server: `GET/POST /api/campaigns`, `GET /api/campaigns/:id`,
-      `POST /api/campaigns/:id/materials`; `POST /api/reviews` accepts a campaign; SSE carries ids.
-- [ ] Web: `/campaigns` list + `/campaigns/:id` detail (dossier editor, nested materials tree,
+- [x] Reviewer prompt: cascade the dossier (approved claims, substantiation, approved info, source
+      excerpts) + material perception into every region review via `buildReviewPrompt`. (Core1)
+- [x] Server: `GET/POST /api/campaigns`, `GET /api/campaigns/:id`, `POST /api/campaigns/:id/materials`;
+      `POST /api/reviews` accepts a campaignId or inline campaign (runs concurrently); SSE carries ids;
+      `GET /api/campaign-reviews/:id` returns the rollup/matrix; `/decision` per material. Band mode
+      intact. (Core2)
+- [x] Web: `/campaigns` list + `/campaigns/:id` detail (dossier editor, nested materials tree,
       material x region matrix, drill into per-material Live Board).
-- [ ] Remove the "Lumavida" demo brand across code, tests, and sample data (generic placeholder);
-      keep tests green.
-- [ ] Tests: campaign load/validate; two materials negotiate without a shared gate; dossier present
-      in prompt; reconcile per-material; one local end-to-end 3-material run over SSE.
+- [x] Remove the fictional demo brand across code, tests, and sample data (replaced with the
+      generic placeholder "Northwind Wellness" / product "Immune+"); tests stay green. Added
+      a seed campaign (`data/campaigns.json`, `assets/sample-campaign.json`).
+- [x] Tests: campaign load/validate; two materials negotiate without a shared gate (gated-concurrency
+      proof); dossier present in prompt via the campaign run; reconcile per-material; worst-case rollup
+      correctness; 3-material campaign run. (Core1: campaigns-core, Core2: campaigns-orchestration; 38
+      tests green, tsc clean.) The over-SSE end-to-end run needs model creds; proven via `npm run local`.
+
+## Rung A review
+- 2026-06-15: Rung A GREEN and committed (ab4da28 engine, 174188b assets, bccd69a web). tsc clean,
+  39/39 vitest (was 19). `npm run local` runs the 3-material "Immune+ Q3 Launch" campaign end to end
+  on the fake transport: all 3 intakes fire before any verdict (concurrent, not a pipeline), the
+  dossier cascade drives US-publish vs EU-disclosure divergence, hero-video remediates, promo-banner
+  escalates to a human, and the rollup is observational (worst-case + 3x4 matrix). Web build green
+  (tsc + vite, 57 modules). Verified directly, not just via the workflow. Remaining for full Rung A:
+  the band-mode multi-material coordinator (the local/UI path is done via CampaignSession).
 
 ## Rung B: rulebook smart import + presets
 - [ ] `POST /api/rulebooks/:region/import` (json direct; md/text via LLM -> `Rule[]`, returned for

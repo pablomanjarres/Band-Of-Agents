@@ -22,7 +22,7 @@ ground every reviewer. We need:
 3. Multimodal perception: agents actually see images and video, and hear video audio
    (transcript), with a live "analyzing" visualization in the UI.
 4. Rulebook smart import (.md via LLM, .json direct) plus one-click presets.
-5. Removal of the "Lumavida" demo brand (the project is a system, not a product).
+5. Removal of the fictional demo brand (the project is a system, not a product).
 
 ## 2. The one rule (non-negotiable constraint)
 
@@ -85,7 +85,7 @@ Material = ContentAsset & {
 
 Campaign {
   id: string;
-  name: string;               // the product, e.g. "Aurial Q3"
+  name: string;               // the product, e.g. "Immune+ Q3"
   markets: string[];          // default markets; a material may narrow
   dossier: CampaignDossier;
   materials: Material[];
@@ -235,7 +235,7 @@ constrained set for the reviewer roles.
 Each rung is proven green (tests + a real run) before the next.
 
 - Rung A: Campaign model + per-material board partition + dossier cascade (text) + campaign UI
-  (list, detail, matrix) + Lumavida cleanup. End to end on text materials, both transports.
+  (list, detail, matrix) + demo-brand cleanup. End to end on text materials, both transports.
 - Rung B: Rulebook smart import (.md/.json) + presets, endpoint + UI.
 - Rung C: Multimodal perception (AIML vision + STT) + `Msg` content blocks + live "analyzing"
   panel + frames to vision-capable regions. Resumes the paused vision-review item.
