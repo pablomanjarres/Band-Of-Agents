@@ -7,6 +7,7 @@
 // case-insensitive substring on the model slug. They are NOT billing-accurate;
 // the widget labels the figure "(est.)".
 
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { CompleteRequest, CompleteResult, ImageRequest, ImageResult, ModelClient, TokenUsage } from './client';
 
 export interface ModelPrice {
@@ -61,6 +62,27 @@ export class SpendTracker {
   private totalUsd = 0;
   private calls = 0;
   private readonly perModel = new Map<string, ModelSpend>();
+  private readonly persistPath?: string;
+
+  // With a persistPath the running total is loaded on start and saved on every
+  // record, so spend accrued by a separate process (the pnpm agents runner) and
+  // the server's own reviews accumulate in one shared file and survive restarts.
+  constructor(persistPath?: string) {
+    if (persistPath) this.persistPath = persistPath;
+    if (persistPath && existsSync(persistPath)) {
+      try {
+        const snap = JSON.parse(readFileSync(persistPath, 'utf8')) as SpendSnapshot;
+        this.totalUsd = snap.totalUsd ?? 0;
+        this.calls = snap.calls ?? 0;
+        for (const m of snap.byModel ?? []) this.perModel.set(m.model, { ...m });
+      } catch { /* ignore a missing or corrupt file */ }
+    }
+  }
+
+  private persist(): void {
+    if (!this.persistPath) return;
+    try { writeFileSync(this.persistPath, JSON.stringify(this.snapshot())); } catch { /* best effort */ }
+  }
 
   private entry(model: string): ModelSpend {
     let e = this.perModel.get(model);
@@ -81,16 +103,20 @@ export class SpendTracker {
     e.usd += usd;
     this.calls += 1;
     this.totalUsd += usd;
+    this.persist();
   }
 
   recordImage(model: string): void {
-    const usd = priceFor(model).perImage ?? 0;
+    // Any generated image costs the per-image estimate, even when the slug does
+    // not contain "image" (the dev path generates via gemini-2.5-flash).
+    const usd = priceFor(model).perImage ?? 0.039;
     const e = this.entry(model);
     e.calls += 1;
     e.images += 1;
     e.usd += usd;
     this.calls += 1;
     this.totalUsd += usd;
+    this.persist();
   }
 
   snapshot(): SpendSnapshot {
@@ -102,11 +128,25 @@ export class SpendTracker {
     this.totalUsd = 0;
     this.calls = 0;
     this.perModel.clear();
+    this.persist();
   }
 }
 
+/** Read the shared spend snapshot from disk, or undefined when no file exists. */
+export function readSpendSnapshot(path: string): SpendSnapshot | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as SpendSnapshot;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Shared spend file: the runner and the server both accumulate here. */
+export const SPEND_FILE = new URL('../../data/spend.json', import.meta.url).pathname;
+
 /** Process-wide spend accumulator the server exposes over /api/spending. */
-export const spend = new SpendTracker();
+export const spend = new SpendTracker(SPEND_FILE);
 
 // Decorates any ModelClient so completions and generated images are metered
 // without the adapters or agents knowing. Preserves the optional generateImage

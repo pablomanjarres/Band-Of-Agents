@@ -31,7 +31,7 @@ import type { BoardEvent, BoardStatus } from '../board/events';
 import { Store } from '../store/store';
 import { makePublishArtifact } from '../store/artifacts';
 import { makeGcsMirror, restoreFromGcs } from '../store/gcs-backup';
-import { spend } from '../models/spend';
+import { spend, readSpendSnapshot, SPEND_FILE } from '../models/spend';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
 const WEB_DIST = new URL('../../web/dist/', import.meta.url).pathname;
@@ -356,7 +356,9 @@ app.get('/api/artifacts/:id', (c) => {
 app.get('/api/precedents', (c) => c.json({ precedents: store.listPrecedents() }));
 
 // Live, in-memory estimate of model spend since the server started.
-app.get('/api/spending', (c) => c.json(spend.snapshot()));
+// Read the shared file so the UI reflects spend from the pnpm agents runner too,
+// falling back to this process's own in-memory tally.
+app.get('/api/spending', (c) => c.json(readSpendSnapshot(SPEND_FILE) ?? spend.snapshot()));
 
 app.get('/api/assets', (c) => c.json({ assets: store.listAssets() }));
 
