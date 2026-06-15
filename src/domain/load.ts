@@ -35,3 +35,33 @@ export function toAsset(content: string): ContentAsset {
     }
   );
 }
+
+// Words that carry no campaign identity, dropped before matching.
+const CAMPAIGN_FILLER = new Set([
+  'review', 'campaign', 'the', 'please', 'for', 'a', 'an', 'conductor', 'check',
+  'run', 'my', 'asset', 'this', 'on', 'of', 'and', 'can', 'you', 'lets',
+]);
+
+/**
+ * Resolve a human's free-text reference (for example "@conductor review the
+ * VitaBoost Focus campaign") to a saved campaign. Matches on shared distinctive
+ * tokens, so a partial or reordered name still resolves; returns the best match
+ * (most tokens shared), or undefined when nothing meaningful overlaps.
+ */
+export function findCampaignByName(assets: ContentAsset[], query: string): ContentAsset | undefined {
+  const tokens = (s: string): string[] => s.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const queryTokens = tokens(query).filter((t) => !CAMPAIGN_FILLER.has(t));
+  if (queryTokens.length === 0) return undefined;
+  let best: ContentAsset | undefined;
+  let bestScore = 0;
+  for (const asset of assets) {
+    if (!asset.name) continue;
+    const nameTokens = new Set(tokens(asset.name));
+    const score = queryTokens.filter((t) => nameTokens.has(t)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = asset;
+    }
+  }
+  return bestScore > 0 ? best : undefined;
+}

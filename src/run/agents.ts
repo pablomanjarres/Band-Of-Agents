@@ -16,9 +16,11 @@ import { RealBandTransport } from '../band/real';
 import { connectPodBoardAgents, type PodBoardModels } from '../board/pod-board';
 import type { AgentConnection, BandTransport, ConnectOptions } from '../band/types';
 import { activeMode, describeRoutes, imageClientFor, modelFor } from '../models/route';
-import { loadBrandDna, loadRulebook } from '../domain/load';
+import { findCampaignByName, loadBrandDna, loadRulebook } from '../domain/load';
+import { Store } from '../store/store';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
+const DATA_DIR = new URL('../../data/', import.meta.url).pathname;
 
 // connectPodBoardAgents wires every agent with a fixed agentId. On real Band each
 // of those identities is a distinct registered agent, so map the fixed agentId to
@@ -76,11 +78,17 @@ async function main(): Promise<void> {
     mediator: modelFor('mediator'), remediationCopy: modelFor('remediation'), image: imageClientFor(),
   };
 
+  // Saved campaigns from the portal store, so a human can post
+  // "@conductor review <campaign name>" in the room instead of pasting JSON.
+  const store = new Store(DATA_DIR);
+  const lookupCampaign = (query: string) => findCampaignByName(store.listAssets(), query);
+
   const transport = new CredentialedTransport(new RealBandTransport());
   await connectPodBoardAgents(transport, {
     brand,
     rulebooks: { us: usRules, eu: euRules, latam: latamRules },
     models,
+    lookupCampaign,
   });
 
   console.log(

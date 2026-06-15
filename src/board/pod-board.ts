@@ -1,7 +1,7 @@
 // src/board/pod-board.ts
 import type { BandTransport } from '../band/types';
 import type { ModelClient } from '../models/client';
-import type { BrandDna, Rulebook } from '../domain/types';
+import type { BrandDna, ContentAsset, Rulebook } from '../domain/types';
 import { makeConductor } from '../agents/conductor';
 import { makePodLead } from '../agents/pod-lead';
 import { makeRegionReviewer } from '../agents/pod-region-reviewer';
@@ -34,13 +34,15 @@ export interface PodBoardConfig {
   models: PodBoardModels;
   hostImage?: (url: string) => string;
   logPrecedent?: (p: { claim: string; decision: string; note: string }) => void;
+  /** Resolve a human's free-text reference to a saved campaign (for the Conductor). */
+  lookupCampaign?: (query: string) => ContentAsset | undefined;
 }
 
 // Connects the full pods -> board -> spine cast to any transport (fake or real).
 export async function connectPodBoardAgents(t: BandTransport, cfg: PodBoardConfig): Promise<void> {
   const m = cfg.models;
 
-  await t.connectAgent({ agentId: 'cond', name: 'Conductor', handle: '@conductor', onMessage: makeConductor({ podLeadHandles: ['@claims-lead', '@reg-lead', '@brand-lead'], primeHandles: ['@remediation'] }) });
+  await t.connectAgent({ agentId: 'cond', name: 'Conductor', handle: '@conductor', onMessage: makeConductor({ podLeadHandles: ['@claims-lead', '@reg-lead', '@brand-lead'], primeHandles: ['@remediation'], ...(cfg.lookupCampaign ? { lookupCampaign: cfg.lookupCampaign } : {}) }) });
 
   // Claims pod
   await t.connectAgent({ agentId: 'claimslead', name: 'Claims Lead', handle: '@claims-lead', onMessage: makePodLead({ pod: 'claims', members: ['@scout', '@claim-evidence', '@precedent', '@disclosure'], memberKeys: ['scout', 'claim-evidence', 'precedent', 'disclosure'], reportToHandle: '@adjudicator', debate: false }) });

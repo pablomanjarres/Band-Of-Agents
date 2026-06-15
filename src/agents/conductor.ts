@@ -2,11 +2,17 @@
 import type { AgentHandler } from '../band/types';
 import type { ContentAsset } from '../domain/types';
 import { matchParticipant } from './handles';
-import { tryParseAsset } from '../domain/load';
+import { toAsset, tryParseAsset } from '../domain/load';
 
 export interface ConductorOptions {
   podLeadHandles: string[];   // ['@claims-lead', '@reg-lead', '@brand-lead']
   primeHandles?: string[];    // e.g. ['@remediation'] so it caches the asset for later rewrites
+  /**
+   * Resolve a human's free-text reference to a saved campaign (for example
+   * "@conductor review VitaBoost Focus") instead of pasting JSON. When set, a
+   * human message also accepts a matched campaign, or raw copy as a fallback.
+   */
+  lookupCampaign?: (query: string) => ContentAsset | undefined;
 }
 
 export function makeConductor(opts: ConductorOptions): AgentHandler {
@@ -18,6 +24,10 @@ export function makeConductor(opts: ConductorOptions): AgentHandler {
         const b = JSON.parse(message.content) as { kind?: string; revised?: ContentAsset };
         if (b?.kind === 'revised' && b.revised) asset = b.revised;
       } catch { /* not JSON */ }
+    }
+    // A human can name a saved campaign (or paste raw copy) instead of JSON.
+    if (!asset && message.senderType === 'user' && opts.lookupCampaign) {
+      asset = opts.lookupCampaign(message.content) ?? toAsset(message.content);
     }
     if (!asset) return;
 
