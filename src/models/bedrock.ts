@@ -40,11 +40,12 @@ export class BedrockModelClient implements ModelClient {
     for (const block of res.content) {
       if (block.type === 'text') text += block.text;
     }
-    if (!req.jsonSchema) return { text };
+    const usage = { usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens } };
+    if (!req.jsonSchema) return { text, ...usage };
     try {
-      return { text, json: JSON.parse(text) };
+      return { text, json: JSON.parse(text), ...usage };
     } catch {
-      return { text };
+      return { text, ...usage };
     }
   }
 }

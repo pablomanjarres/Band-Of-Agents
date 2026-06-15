@@ -13,6 +13,7 @@ import type {
   Rulebook,
   RulebookListResponse,
   RulebookResponse,
+  Spending,
 } from './types';
 
 async function asJson<T>(res: Response): Promise<T> {
@@ -101,6 +102,12 @@ export async function getArtifact(id: string): Promise<ArtifactResponse> {
 export async function listPrecedents(): Promise<PrecedentListResponse> {
   const res = await fetch('/api/precedents');
   return asJson<PrecedentListResponse>(res);
+}
+
+// Spending -----------------------------------------------------------------
+export async function fetchSpending(): Promise<Spending> {
+  const res = await fetch('/api/spending');
+  return asJson<Spending>(res);
 }
 
 export interface EventSubscription {
