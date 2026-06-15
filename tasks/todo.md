@@ -240,17 +240,53 @@ click material -> right slide-over detail). Fix uploads (md/json/image/video, re
 drop legacy Compose, material click shows the material (not the agent diagram).
 
 ### Rung D: Advertisement tier + orchestration + uploads + server + seed
-- [ ] Domain: add Advertisement; Campaign.advertisements[]; drop Material.attachments; advertisementId on ReviewResult/RegionVerdict.
-- [ ] Orchestration: CampaignSession iterates ads -> materials, per-material concurrent (key adId+materialId); rollup per ad + per campaign.
-- [ ] Persistence/seed: re-seed sample-campaign.json with 2-3 ads each with materials; legacy materials[] -> single "Default" ad (back-compat).
-- [ ] Server: advertisements + materials CRUD (add anytime); image upload endpoint; dossier source upload; SSE carries adId+materialId; rollup per ad + campaign.
-- [ ] demo-fixtures: re-key to the new seed material ids; keep the US/EU conflict.
-- [ ] Tests green (+ 3-tier load, concurrency across ads, per-ad + campaign rollup, upload endpoints).
+- [x] Domain: add Advertisement; Campaign.advertisements[] (replaces flat materials[]); drop Material.attachments;
+      advertisementId on ReviewResult/RegionVerdict; normalizeCampaign() back-compat (legacy materials[] -> single
+      "Default" advertisement), wired as the Campaign schema preprocess + exported.
+- [x] Orchestration: CampaignSession iterates ads -> materials, EVERY material concurrent (Promise.all over all
+      materials across all ads) under board key `${roomId}::${adId}::${materialId}`; reconcile stays per material;
+      rollup per advertisement (worst-case per region + that ad's matrix) AND per campaign; matrix cells carry
+      advertisementId. The one rule holds: no ad-wide or campaign-wide gate.
+- [x] Persistence/seed: re-seeded assets/sample-campaign.json + data/campaigns.json as 3 advertisements (Hero Launch,
+      Retargeting, Influencer) reusing the creatives; legacy materials[] loads as a single "Default" advertisement,
+      and the store normalizes stored campaigns on read (safeNormalize) so old data/campaigns.json still loads.
+- [x] Server: advertisements + materials CRUD (POST /api/campaigns/:id/advertisements, /materials targets an ad,
+      add-anytime); image upload (POST /api/images); dossier-source upload (POST /api/campaigns/:id/dossier-sources);
+      video upload attaches across ads; SSE carries adId+materialId; list returns advertisementCount + materialCount.
+- [x] Server (TASK-spec paths + tests): added POST /api/campaigns/:id/advertisements/:adId/materials (ad addressed in
+      the URL; 404 on an unknown adId) and POST /api/campaigns/:id/dossier/sources (multipart file OR JSON body
+      {name,kind,content}); the prior /materials (adId in body) and /dossier-sources (multipart) kept as aliases.
+      advertisements/materials add-anytime (no status gate, incl. after a completed review). Made the Hono app
+      import-safe (lazy bandBoard, main() runs only as the entrypoint) and exported { app, store } so HTTP tests drive
+      it via app.fetch with no port bound. New test/server-campaigns.test.ts (18 tests): ad/material CRUD via both
+      paths (incl. add-after-completed-review), image upload (+attach), dossier sources (file + JSON), list/detail
+      counts, and a campaign review whose SSE events all carry advertisementId+materialId with the per-ad + campaign
+      computeRollup. 89/89 vitest, tsc clean; live-verified over HTTP on a free port.
+- [x] demo-fixtures: keyed by stable material ids (hero-video, launch-post, promo-banner, ...); unknown ids default
+      to NO findings so the new materials never crash; the US=escalate (banner) / EU+LATAM=adapt (hero-video) conflict
+      is kept.
+- [x] Tests green (3-tier load/validate; legacy-normalize; concurrency across DIFFERENT ads with no shared gate;
+      per-ad + per-campaign rollup correctness). tsc clean, 71/71 vitest; `npm run local` shows 7 materials across
+      3 ads negotiated concurrently with a correct per-ad + campaign rollup.
+
+### Rung D review
+- 2026-06-15: Rung D GREEN. Three tiers (Campaign -> Advertisement -> Material). normalizeCampaign() gives full
+  back-compat (legacy flat materials[] -> a single "Default" advertisement) and is the Campaign schema's preprocess,
+  so old data, old seeds, and old tests load. CampaignSession runs every material across every advertisement
+  concurrently under `${roomId}::${adId}::${materialId}`; reconcile fires per material (the one rule); computeRollup
+  returns worstCaseByRegion + perAdvertisement[{advertisementId,name,worstCaseByRegion,matrix}] + a campaign-wide
+  matrix whose cells carry advertisementId. Seed re-grouped into Hero Launch / Retargeting / Influencer (7 materials).
+  Server gained advertisement + material CRUD, image upload, and dossier-source upload. tsc clean, 71/71 vitest,
+  `npm run local` verified. NOT done here (Rung E): the campaign-detail web UI still uses its own flat-materials
+  types; it must adopt advertisements (tabs + slide-over) and wire the new uploads.
 
 ### Rung E: campaign-detail UI redesign (2-pane + slide-over)
-- [ ] Full-width 2-pane layout; left rail = live perception (analyzing video) during review.
-- [ ] Main: advertisement tabs/pagination + selected ad's materials grid; prominent dropzones.
-- [ ] Click material -> right slide-over detail (media, copy, claim, perception, per-region verdicts, "View debate").
-- [ ] Real uploads wired (video/image for materials, .md/.json for rulebooks + dossier sources).
-- [ ] Add advertisements/materials anytime (incl. after completion).
-- [ ] Drop legacy Compose from nav; campaign-first nav. web build green.
+- [x] Full-width 2-pane layout; left rail = live perception (analyzing video) during review.
+- [x] Main: advertisement tabs/pagination + selected ad's materials grid; prominent dropzones.
+- [x] Click material -> right slide-over detail (media, copy, claim, perception, per-region verdicts, "View debate").
+- [x] Real uploads wired (video/image for materials, .md/.json for rulebooks + dossier sources).
+- [x] Add advertisements/materials anytime (incl. after completion).
+- [x] Drop legacy Compose from nav; campaign-first nav. web build green.
+
+## Rung D + E review (advertisement tier + UI redesign)
+- 2026-06-15: 3-tier model (Campaign -> Advertisement -> Material) shipped and committed (ea6508c backend, 18316b3 web). Backend 89/89 tests, tsc clean; web build green. Redesign: campaign-first nav (Compose removed), full-width 2-pane workspace (LEFT = live video-processing rail, MAIN = advertisement tabs + materials grid), clicking a material opens a slide-over of THE MATERIAL (media preview, copy, claim, perception, per-region verdicts) with "View debate" for the agent diagram, real drag-and-drop uploads (video/image for materials, .md/.json/.txt for dossier sources), add advertisements/materials anytime, New campaign creator. Live-verified on localhost:8791: campaigns API returns 3 ads / 7 materials; a campaign review runs concurrently with perceiving frames + a correct per-advertisement rollup (Retargeting = US escalate from the banner). Pushed; Vercel frontend deploy re-runs green.
