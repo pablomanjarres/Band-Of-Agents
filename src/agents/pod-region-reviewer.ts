@@ -64,9 +64,12 @@ const REVIEW_OUTPUT_JSON_SCHEMA = {
 // structured findings to the reconcile agent (or back to the requester).
 export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
   return async (message, tools) => {
-    // Debate branch: a pod lead relays a peer's argument; we hold or concede.
-    let challenge: { kind?: string; claim?: string; peerRegion?: string; peerRationale?: string } | null = null;
-    try { challenge = JSON.parse(message.content); } catch { challenge = null; }
+    // Debate branch: a challenge arrives as JSON (back-compat) or as prose with the
+    // details on the hub. We hold or concede.
+    let parsed: { kind?: string; claim?: string; peerRegion?: string; peerRationale?: string } | null = null;
+    try { parsed = JSON.parse(message.content); } catch { parsed = null; }
+    const hubChallenge = opts.hub?.challenge(message.roomId, opts.region);
+    const challenge = (parsed && parsed.kind === 'challenge') ? parsed : (hubChallenge ? { kind: 'challenge', ...hubChallenge } : null);
     if (challenge && challenge.kind === 'challenge') {
       const res = await opts.model.complete({
         system: `You are the ${opts.region} reviewer. A peer (${challenge.peerRegion}) argues: "${challenge.peerRationale}". Decide whether to hold your block on "${challenge.claim}" under the ${opts.region} rulebook, or concede. Answer JSON.`,
@@ -74,10 +77,21 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
         jsonSchema: REBUTTAL_JSON_SCHEMA,
       });
       const out = (res.json ?? {}) as { stance?: string; rationale?: string };
+      const stance = out.stance ?? 'hold';
       const target = matchParticipant(await tools.getParticipants(), opts.reportToHandle ?? '', 'agent') ?? null;
       const mention = target ? [{ id: target.id, handle: target.handle }] : [{ id: message.senderId }];
-      await tools.sendEvent(`${opts.reviewerName} rebuts on "${challenge.claim}": ${out.stance ?? 'hold'}`, 'debate', { region: opts.region });
-      await tools.sendMessage(JSON.stringify({ kind: 'rebuttal', region: opts.region, claim: challenge.claim, stance: out.stance ?? 'hold', rationale: out.rationale ?? '' }), mention);
+      await tools.sendEvent(`${opts.reviewerName} rebuts on "${challenge.claim}": ${stance}`, 'debate', { region: opts.region });
+      if (opts.hub) {
+        // On concede, downgrade the blocked finding on the hub; the lead re-reads it.
+        if (stance === 'concede') {
+          const updated = opts.hub.finding(message.roomId, opts.region).map((f) => (f.claim === challenge.claim && f.severity === 'block' ? { ...f, severity: 'warn' as const } : f));
+          opts.hub.setFinding(message.roomId, opts.region, updated);
+        }
+        opts.hub.clearChallenge(message.roomId, opts.region);
+        await tools.sendMessage(`${opts.reviewerName}: ${stance === 'concede' ? 'conceding' : 'holding the block'} on "${challenge.claim}".`, mention);
+      } else {
+        await tools.sendMessage(JSON.stringify({ kind: 'rebuttal', region: opts.region, claim: challenge.claim, stance, rationale: out.rationale ?? '' }), mention);
+      }
       return;
     }
     if (message.senderType !== 'agent') return;
@@ -103,7 +117,12 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
       'task',
     );
     const target = await resolveReportTarget(tools, opts.reportToHandle, message);
-    await tools.sendMessage(JSON.stringify(review), [target]);
+    if (opts.hub) {
+      opts.hub.setFinding(message.roomId, opts.region, review.findings);
+      await tools.sendMessage(`${opts.reviewerName}: ${review.findings.length} finding(s)${blocking ? `, ${blocking} blocking` : ''}.`, [target]);
+    } else {
+      await tools.sendMessage(JSON.stringify(review), [target]);
+    }
   };
 }
 

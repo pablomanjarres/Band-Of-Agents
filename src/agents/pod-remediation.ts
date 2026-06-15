@@ -37,7 +37,15 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
       return;
     }
     if (message.senderType !== 'agent') return;
-    const directive = tryParseDirective(message.content);
+    // The remediation directive arrives as JSON (back-compat) or, on a prose request,
+    // is derived from the conflict on the hub.
+    let directive = tryParseDirective(message.content);
+    // Only the adjudicator's prose request triggers a hub-derived directive (not the
+    // conductor's intake prime), otherwise priming would loop into endless rewrites.
+    if (!directive && opts.podHub && (message.senderName ?? '').toLowerCase().includes('adjudic')) {
+      const c = opts.podHub.conflicts(message.roomId)[0];
+      if (c) directive = { kind: 'remediation', region: c.blockedBy[0] ?? 'EU', findings: [{ category: 'claim', severity: 'block', claim: c.span, rationale: c.rationale }] };
+    }
     if (!directive) return;
     const base = assetByRoom.get(message.roomId) ?? opts.podHub?.asset(message.roomId);
     if (!base) return;

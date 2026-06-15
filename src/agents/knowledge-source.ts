@@ -1,7 +1,7 @@
 // src/agents/knowledge-source.ts
 import type { AgentHandler } from '../band/types';
 import type { ModelClient } from '../models/client';
-import type { ContentAsset } from '../domain/types';
+import type { ContentAsset, Finding } from '../domain/types';
 import type { PodHub } from '../board/pod-hub';
 import { matchParticipant } from './handles';
 import { tryParseAsset } from '../domain/load';
@@ -32,7 +32,17 @@ export function makeKnowledgeSource(opts: KnowledgeSourceOptions): AgentHandler 
     const payload = (res.json && typeof res.json === 'object') ? (res.json as Record<string, unknown>) : {};
     await tools.sendEvent(`${opts.reviewerName} reviewed ${asset.id}`, eventType, { role: opts.role });
     const target = matchParticipant(await tools.getParticipants(), opts.reportToHandle, 'agent');
-    if (target) {
+    if (!target) return;
+    if (opts.hub) {
+      // Keep the structured findings off-chat; report a short status in prose.
+      const findings = (Array.isArray(payload['findings']) ? payload['findings'] : []) as Finding[];
+      opts.hub.setFinding(message.roomId, opts.role, findings);
+      const workItems = Array.isArray(payload['workItems']) ? payload['workItems'] : null;
+      const summary = workItems
+        ? `mapped ${workItems.length} risky surface(s)`
+        : findings.length === 0 ? 'no issues found' : `flagged ${findings.length} issue${findings.length === 1 ? '' : 's'}`;
+      await tools.sendMessage(`${opts.reviewerName}: ${summary}.`, [{ id: target.id, handle: target.handle }]);
+    } else {
       await tools.sendMessage(JSON.stringify({ source: opts.role, asset: asset.id, ...payload }), [{ id: target.id, handle: target.handle }]);
     }
   };

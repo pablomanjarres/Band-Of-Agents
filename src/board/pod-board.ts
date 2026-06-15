@@ -72,9 +72,9 @@ export async function connectPodBoardAgents(t: BandTransport, cfg: PodBoardConfi
   await t.connectAgent({ agentId: 'vis', name: 'Visual', handle: '@visual', onMessage: makeVisual(m.visual, hub) });
 
   // Board resolvers
-  await t.connectAgent({ agentId: 'med', name: 'Mediator', handle: '@mediator', onMessage: makeMediator({ model: m.mediator, reportToHandle: '@adjudicator' }) });
+  await t.connectAgent({ agentId: 'med', name: 'Mediator', handle: '@mediator', onMessage: makeMediator({ model: m.mediator, reportToHandle: '@adjudicator', hub }) });
   await t.connectAgent({ agentId: 'rem', name: 'Remediation', handle: '@remediation', onMessage: makeRemediation({ brand: cfg.brand, copyModel: m.remediationCopy, imageModel: m.image, reportToHandle: '@conductor', podHub: hub, ...(cfg.hostImage ? { hostImage: cfg.hostImage } : {}) }) });
 
   // Decision spine
-  await t.connectAgent({ agentId: 'adj', name: 'Risk Adjudicator', handle: '@adjudicator', onMessage: makeRiskAdjudicator({ expectedPods: ['claims', 'regulatory', 'brand'], mediatorHandle: '@mediator', remediationHandle: '@remediation', humanHandle: '@compliance-lead', maxRecommits: 1, ...(cfg.logPrecedent ? { logPrecedent: cfg.logPrecedent } : {}) }) });
+  await t.connectAgent({ agentId: 'adj', name: 'Risk Adjudicator', handle: '@adjudicator', onMessage: makeRiskAdjudicator({ expectedPods: ['claims', 'regulatory', 'brand'], mediatorHandle: '@mediator', remediationHandle: '@remediation', humanHandle: '@compliance-lead', maxRecommits: 1, hub, ...(cfg.logPrecedent ? { logPrecedent: cfg.logPrecedent } : {}) }) });
 }
