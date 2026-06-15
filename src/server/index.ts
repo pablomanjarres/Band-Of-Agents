@@ -23,7 +23,8 @@ import { loadBrandDna, loadRulebook } from '../domain/load';
 import { Campaign as CampaignSchema, ContentAsset as ContentAssetSchema, Material as MaterialSchema, Rulebook as RulebookSchema } from '../domain/types';
 import type { Campaign, ContentAsset, Rulebook } from '../domain/types';
 import { BoardSession, realBoardModels, realPerceptionModels, type BoardModels } from '../board/session';
-import { StubModelClient, StubSttClient, type ModelClient, type SttClient } from '../models/client';
+import { type ModelClient, type SttClient } from '../models/client';
+import { demoCampaignModels, demoPerception } from '../run/demo-fixtures';
 import { CampaignSession, type CampaignRollup } from '../board/campaign';
 import { BandBoard } from '../board/band-session';
 import { modelFor } from '../models/route';
@@ -79,38 +80,15 @@ const store = new Store(DATA_DIR);
 // BOARD_MODE=band) are untouched: real models are used whenever they can be built.
 const KEY_FREE_LOCAL = BOARD_MODE === 'local' && process.env.MODEL_MODE !== 'dev' && !process.env.AIML_API_KEY;
 
-/** A deterministic reviewer model: a clear (no-findings) review for every region. */
-function stubReviewModel(): ModelClient {
-  return new StubModelClient(() => ({ text: '', json: { findings: [] } }));
-}
-
-/** Stub board models for the key-free demo (no network, deterministic). */
+// Rich key-free demo: the shared seeded-campaign scenario (real US/EU conflict),
+// so the portal runs a full review and the perception panel animates with no API
+// key. Same fixtures the console runner uses, keyed by material id.
 function stubBoardModels(): BoardModels {
-  return {
-    us: stubReviewModel(),
-    eu: stubReviewModel(),
-    latam: stubReviewModel(),
-    brand: stubReviewModel(),
-    remediationCopy: new StubModelClient(() => ({ text: 'Revised copy (demo).' })),
-    image: { model: 'stub-image', complete: async () => ({ text: '' }), generateImage: async () => ({}) },
-  };
+  return demoCampaignModels();
 }
 
-/** Stub perception (vision + STT) for the key-free demo: canned artifacts. */
 function stubPerceptionModels(): { vision: ModelClient; stt: SttClient } {
-  return {
-    vision: new StubModelClient(() => ({
-      text: '',
-      json: {
-        visualDescription: 'Warm flat-lay of the product with citrus and eucalyptus, then a close-up as on-screen text fades in.',
-        onScreenText: 'Feel your best, every day',
-        detectedClaims: ['Helps maintain your immune response'],
-      },
-    })),
-    stt: new StubSttClient(() => ({
-      text: 'Feeling run down? This helps maintain your immune response so you can feel your best, every day.',
-    })),
-  };
+  return demoPerception();
 }
 
 /** Reviewer models: real when constructible, else the key-free demo stubs. */

@@ -13,26 +13,13 @@
 
 import { BoardSession, type BoardModels } from '../board/session';
 import { CampaignSession } from '../board/campaign';
-import { StubModelClient, StubSttClient, type CompleteRequest, type ModelClient, type SttClient } from '../models/client';
+import { StubModelClient, type ModelClient } from '../models/client';
 import { loadAsset, loadBrandDna, loadRulebook } from '../domain/load';
-import { Campaign, type Finding } from '../domain/types';
+import { Campaign } from '../domain/types';
 import type { BoardEvent } from '../board/events';
+import { demoCampaignModels, demoPerception, findings } from './demo-fixtures';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
-
-type FindingsResult = { text: string; json: { findings: Finding[] } };
-
-function findings(...items: Finding[]): FindingsResult {
-  return { text: '', json: { findings: items } };
-}
-
-/** Which material a reviewer is looking at, read off the material JSON in the prompt. */
-function materialIdOf(req: CompleteRequest): string {
-  const first = req.messages[0];
-  const text = typeof first?.content === 'string' ? first.content : JSON.stringify(first?.content ?? '');
-  const m = /"id":\s*"([^"]+)"/.exec(text);
-  return m?.[1] ?? '';
-}
 
 function printEvent(e: BoardEvent): void {
   const tag = e.materialId ? `[${e.materialId}] ` : '';
@@ -69,70 +56,6 @@ function printEvent(e: BoardEvent): void {
   }
 }
 
-// Per-region stub findings keyed by material id. The dossier pre-clears
-// "clinically proven ... immunity" for the campaign, so a reviewer that trusts
-// the dossier (US here) lets the hero video run while EU still demands the
-// authorised wording, and the banner carries an unfixable US claim that escalates.
-const US_FINDINGS: Record<string, Finding[]> = {
-  'hero-video': [
-    { category: 'endorsement', severity: 'warn', claim: '9 out of 10 felt the difference', rationale: 'Add a typical-results note; substantiation is on file in the dossier.', ruleId: 'us-testimonial' },
-  ],
-  'launch-post': [],
-  'promo-banner': [
-    { category: 'pricing', severity: 'block', claim: 'free forever, no strings', rationale: 'Unqualified "free forever" is deceptive; not fixable by a disclosure.', ruleId: 'us-deceptive-pricing' },
-  ],
-};
-
-const EU_FINDINGS: Record<string, Finding[]> = {
-  'hero-video': [
-    { category: 'disclosure', severity: 'block', claim: 'whole material', rationale: 'Missing Article 10(2) accompanying statements.', ruleId: 'eu-mandatory-disclosure', requiredDisclosure: 'Article 10(2) accompanying statements' },
-  ],
-  'launch-post': [],
-  'promo-banner': [],
-};
-
-const LATAM_FINDINGS: Record<string, Finding[]> = {
-  'hero-video': [
-    { category: 'localization', severity: 'block', claim: 'whole material', rationale: 'Copy is not localized to Portuguese/Spanish.', ruleId: 'latam-localization', requiredDisclosure: 'Localized copy' },
-  ],
-  'launch-post': [],
-  'promo-banner': [],
-};
-
-function regionStub(table: Record<string, Finding[]>): ModelClient {
-  return new StubModelClient((req) => findings(...(table[materialIdOf(req)] ?? [])));
-}
-
-// Stub perception (vision + STT) for the key-free demo: the vision model returns a
-// canned description/OCR/claims and STT returns a canned transcript, so the
-// perception pass produces real artifacts and emits 'perceiving' ticks over the
-// seeded frames without any network or ffmpeg.
-function stubPerception(): { vision: ModelClient; stt: SttClient } {
-  const vision = new StubModelClient(() => ({
-    text: '',
-    json: {
-      visualDescription: 'Warm flat-lay of Northwind Immune+ bottles with citrus and eucalyptus, then a close-up as on-screen text fades in.',
-      onScreenText: 'Northwind Immune+ | Feel your best, every day | 9 out of 10 felt the difference',
-      detectedClaims: ['Helps maintain your immune response', '9 out of 10 users felt the difference in two weeks'],
-    },
-  }));
-  const stt: SttClient = new StubSttClient(() => ({
-    text: 'Feeling run down? Northwind Immune plus helps maintain your immune response so you can feel your best, every day. Nine out of ten users felt the difference in two weeks.',
-  }));
-  return { vision, stt };
-}
-
-function campaignModels(): BoardModels {
-  return {
-    us: regionStub(US_FINDINGS),
-    eu: regionStub(EU_FINDINGS),
-    latam: regionStub(LATAM_FINDINGS),
-    brand: new StubModelClient(() => findings()),
-    remediationCopy: new StubModelClient(() => ({ text: 'Apoia o seu bem-estar diario como parte de uma dieta variada e equilibrada e de um estilo de vida saudavel.' })),
-    image: { model: 'stub-image', complete: async () => ({ text: '' }), generateImage: async () => ({ url: 'https://cdn.aimlapi.com/campaign-latam.png' }) } satisfies ModelClient,
-  };
-}
-
 // One product, several materials, one shared dossier. The dossier is the
 // cascading source-of-truth that grounds every reviewer of every material.
 function demoCampaign(): Campaign {
@@ -149,7 +72,7 @@ function demoCampaign(): Campaign {
     materials: [
       { id: 'hero-video', name: 'Hero Video', kind: 'video', channel: 'instagram', markets: ['US', 'EU', 'LATAM'], copy: 'Feel your best. Northwind Immune+ helps maintain your immune response. 9 out of 10 felt the difference.', claim: 'helps maintain immune response', videoUrl: '/api/videos/immune-plus-hero.mp4', perception: { frames: ['/api/images/immune-plus-frame-01.png', '/api/images/immune-plus-frame-02.png', '/api/images/immune-plus-frame-03.png', '/api/images/immune-plus-frame-04.png'] } },
       { id: 'launch-post', name: 'Launch Post', kind: 'post', channel: 'x', markets: ['US', 'EU', 'LATAM'], copy: 'Northwind Immune+ supports everyday wellness as part of a balanced diet and healthy lifestyle.', claim: 'supports everyday wellness' },
-      { id: 'promo-banner', name: 'Promo Banner', kind: 'banner', channel: 'display', markets: ['US'], copy: 'Northwind Immune+: free forever, no strings. Claim yours now.', claim: 'free forever' },
+      { id: 'promo-banner', name: 'Promo Banner', kind: 'banner', channel: 'display', markets: ['US'], copy: 'Northwind Immune+: start your free trial today. Clinically supported immune support, delivered monthly.', claim: 'free trial; clinically supported immune support' },
     ],
   });
 }
@@ -172,8 +95,8 @@ async function runCampaignDemo(): Promise<void> {
     campaign,
     brand,
     rulebooks,
-    models: campaignModels(),
-    perception: stubPerception(),
+    models: demoCampaignModels(),
+    perception: demoPerception(),
     onEvent: printEvent,
     onPrecedent: (p) => console.log(`  [precedent] ${JSON.stringify(p)}`),
   });
@@ -185,7 +108,7 @@ async function runCampaignDemo(): Promise<void> {
   for (const m of rollup.perMaterial) {
     if (m.verdicts.some((v) => v.decision === 'escalate')) {
       console.log(`\n# Human rules on ${m.materialId}'s escalation:\n`);
-      await session.submitDecision(m.materialId, 'Hold this material: drop "free forever" and resubmit with qualified pricing.');
+      await session.submitDecision(m.materialId, 'Hold this material: drop the free-trial auto-renewal and resubmit with clear pricing terms.');
     }
   }
 
