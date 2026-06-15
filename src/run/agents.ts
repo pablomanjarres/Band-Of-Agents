@@ -83,12 +83,20 @@ async function main(): Promise<void> {
   const store = new Store(DATA_DIR);
   const lookupCampaign = (query: string) => findCampaignByName(store.listAssets(), query);
 
+  // Live rulebook overrides (UI edits) and recent human-ruling precedents, read
+  // per review so the long-lived runner picks them up between reviews.
+  const getRulebook = (region: string) =>
+    store.getRulebookOverride(region) ?? (region === 'US' ? usRules : region === 'EU' ? euRules : latamRules);
+  const getPrecedents = () => store.listPrecedents().slice(-6).map((p) => `${p.regions.join('/')}: ${p.decision}`);
+
   const transport = new CredentialedTransport(new RealBandTransport());
   await connectPodBoardAgents(transport, {
     brand,
     rulebooks: { us: usRules, eu: euRules, latam: latamRules },
     models,
     lookupCampaign,
+    getRulebook,
+    getPrecedents,
   });
 
   console.log(

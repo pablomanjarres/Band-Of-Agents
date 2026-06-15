@@ -15,6 +15,7 @@ export interface KnowledgeSourceOptions {
   eventType?: string;                            // sendEvent type, default 'review'
   buildUser?: (asset: ContentAsset) => string;   // default: pretty JSON of the asset
   ignoreFromHandle?: string;                     // optional: skip messages from this handle
+  images?: (asset: ContentAsset) => string[];    // vision input (image URLs); only image-capable models use them
 }
 
 export function makeKnowledgeSource(opts: KnowledgeSourceOptions): AgentHandler {
@@ -24,7 +25,8 @@ export function makeKnowledgeSource(opts: KnowledgeSourceOptions): AgentHandler 
     const asset = tryParseAsset(message.content);
     if (!asset) return;
     const user = opts.buildUser ? opts.buildUser(asset) : `Asset (JSON):\n${JSON.stringify(asset, null, 2)}`;
-    const res = await opts.model.complete({ system: opts.system, messages: [{ role: 'user', content: user }], jsonSchema: opts.jsonSchema });
+    const imgs = opts.images ? opts.images(asset) : [];
+    const res = await opts.model.complete({ system: opts.system, messages: [{ role: 'user', content: user }], jsonSchema: opts.jsonSchema, ...(imgs.length ? { images: imgs } : {}) });
     const payload = (res.json && typeof res.json === 'object') ? (res.json as Record<string, unknown>) : {};
     await tools.sendEvent(`${opts.reviewerName} reviewed ${asset.id}`, eventType, { role: opts.role });
     const target = matchParticipant(await tools.getParticipants(), opts.reportToHandle, 'agent');

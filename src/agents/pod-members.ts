@@ -76,5 +76,6 @@ export const makeVisual = (model: ModelClient, reportToHandle = '@brand-lead'): 
   makeKnowledgeSource({
     role: 'visual', reviewerName: 'Visual / Image', model, reportToHandle,
     jsonSchema: FINDINGS_JSON_SCHEMA,
-    system: 'You are the Visual reviewer. Check the image (imagePrompt / imageUrl) for brand fit and visual compliance. Flag issues as findings. Return JSON { findings: [...] }.',
+    images: (a) => (a.imageUrl ? [a.imageUrl] : []),
+    system: 'You are the Visual reviewer. When the campaign image is attached, review the actual image for brand fit and visual compliance; otherwise assess the intended image from imagePrompt. Flag issues as findings. Return JSON { findings: [...] }.',
   });

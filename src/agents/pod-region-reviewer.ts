@@ -82,6 +82,10 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
     const asset = tryParseAsset(message.content);
     if (!asset) return;
 
+    // Open the per-region review on Band's task channel (a 'task' lifecycle, not a
+    // thought), so per-region progress shows as task state rather than chatter.
+    await tools.sendEvent(`${opts.region} review: starting compliance review.`, 'task');
+
     const { system, user } = buildReviewPrompt(opts, asset);
     const res = await opts.model.complete({
       system,
@@ -93,7 +97,7 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
     const blocking = review.findings.filter((f) => f.severity === 'block').length;
     await tools.sendEvent(
       `${opts.region} review of "${asset.id}": ${review.findings.length} finding(s), ${blocking} blocking.`,
-      'review',
+      'task',
     );
     const target = await resolveReportTarget(tools, opts.reportToHandle, message);
     await tools.sendMessage(JSON.stringify(review), [target]);
