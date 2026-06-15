@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
-import type { CompleteRequest, CompleteResult, ImageRequest, ImageResult, ModelClient } from './client';
+import { toFile } from 'openai';
+import type { CompleteRequest, CompleteResult, ImageRequest, ImageResult, Msg, ModelClient, SttClient, SttRequest, SttResult } from './client';
 import { withRetry } from './retry';
 
 export interface AimlOptions {
@@ -11,6 +12,20 @@ export interface AimlOptions {
 
 const DEFAULT_BASE_URL = 'https://api.aimlapi.com/v1';
 const DEFAULT_IMAGE_MODEL = 'google/gemini-2.5-flash-image';
+
+// Map our provider-agnostic content to the OpenAI chat format. A plain string
+// stays a plain string (byte-identical to before the multimodal seam); an array
+// of blocks becomes OpenAI content parts (text + image_url).
+export function toOpenAIContent(
+  content: Msg['content'],
+): OpenAI.Chat.Completions.ChatCompletionContentPart[] | string {
+  if (typeof content === 'string') return content;
+  return content.map((b) =>
+    b.type === 'image'
+      ? ({ type: 'image_url' as const, image_url: { url: b.url } })
+      : ({ type: 'text' as const, text: b.text }),
+  );
+}
 
 // AI/ML API is OpenAI-compatible, so one openai client serves every chat agent;
 // only the model slug changes. This is the architectural main path. Image
@@ -34,7 +49,7 @@ export class AimlModelClient implements ModelClient {
   async complete(req: CompleteRequest): Promise<CompleteResult> {
     const messages = [
       ...(req.system ? [{ role: 'system', content: req.system }] : []),
-      ...req.messages.map((m) => ({ role: m.role, content: m.content })),
+      ...req.messages.map((m) => ({ role: m.role, content: toOpenAIContent(m.content) })),
     ] as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
 
     const res = await withRetry(() =>
@@ -79,3 +94,38 @@ export class AimlModelClient implements ModelClient {
     return out;
   }
 }
+
+
+export interface AimlSttOptions {
+  apiKey: string;
+  model: string;
+  baseURL?: string;
+}
+
+const DEFAULT_STT_MODEL = '#g1_whisper-large';
+
+// Speech-to-text on AIML's OpenAI-compatible audio endpoint. One openai client
+// serves it; only the model slug changes. The video container bytes are wrapped
+// as a file (the provider sniffs the audio track), so a video can be transcribed
+// directly without a separate audio extraction step.
+export class AimlSttClient implements SttClient {
+  readonly model: string;
+  private readonly client: OpenAI;
+
+  constructor(opts: AimlSttOptions) {
+    this.model = opts.model;
+    this.client = new OpenAI({ apiKey: opts.apiKey, baseURL: opts.baseURL ?? DEFAULT_BASE_URL });
+  }
+
+  async transcribe(req: SttRequest): Promise<SttResult> {
+    const file = await toFile(req.audio, req.filename ?? 'audio.mp4', {
+      ...(req.contentType ? { type: req.contentType } : {}),
+    });
+    const res = await withRetry(() =>
+      this.client.audio.transcriptions.create({ model: this.model, file }),
+    );
+    return { text: typeof res.text === 'string' ? res.text : '' };
+  }
+}
+
+export { DEFAULT_STT_MODEL };

@@ -1,6 +1,9 @@
-import { GoogleGenAI, Modality } from '@google/genai';
-import type { CompleteRequest, CompleteResult, ImageRequest, ImageResult, ModelClient } from './client';
+import { GoogleGenAI, Modality, type Content, type Part } from '@google/genai';
+import type { CompleteRequest, CompleteResult, ImageRequest, ImageResult, Msg, ModelClient } from './client';
+import { hasImage } from './client';
 import { withRetry } from './retry';
+
+const IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 export interface GeminiOptions {
   model: string;
@@ -10,7 +13,30 @@ export interface GeminiOptions {
   apiKey?: string;
 }
 
-const IMAGE_MODEL = 'gemini-2.5-flash-image';
+// Map one message's content to Gemini parts. Text becomes a text part; an image
+// url becomes a fileData part (Gemini's URI-based image input). Used only on the
+// vision path; the text-only path keeps joining strings exactly as before.
+export function toGeminiParts(content: Msg['content']): Part[] {
+  if (typeof content === 'string') return [{ text: content }];
+  return content.map((b): Part =>
+    b.type === 'image' ? { fileData: { fileUri: b.url } } : { text: b.text },
+  );
+}
+
+// Build the `contents` argument for generateContent. The text-only path is
+// byte-identical to before the multimodal seam: the message strings joined with
+// blank lines. Only when a message carries an image do we switch to role-tagged
+// Content[] (text + fileData parts) so the image actually reaches the model.
+export function buildGeminiContents(messages: Msg[]): string | Content[] {
+  const anyImage = messages.some((m) => hasImage(m.content));
+  if (!anyImage) {
+    return messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n\n');
+  }
+  return messages.map((m) => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: toGeminiParts(m.content),
+  }));
+}
 
 // Gemini via GCP Vertex (dev-time cost-saver) using the unified @google/genai SDK.
 // Vertex mode spends GCP credits and authenticates via Application Default
@@ -33,7 +59,10 @@ export class GeminiModelClient implements ModelClient {
   }
 
   async complete(req: CompleteRequest): Promise<CompleteResult> {
-    const contents = req.messages.map((m) => m.content).join('\n\n');
+    // Text-only path is unchanged; vision path uses role-tagged parts so the
+    // image actually reaches the model (see buildGeminiContents).
+    const contents = buildGeminiContents(req.messages);
+
     const res = await withRetry(() =>
       this.ai.models.generateContent({
         model: this.model,

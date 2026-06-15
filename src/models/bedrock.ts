@@ -1,11 +1,28 @@
 import AnthropicBedrock from '@anthropic-ai/bedrock-sdk';
-import type { CompleteRequest, CompleteResult, ModelClient } from './client';
+import type { CompleteRequest, CompleteResult, Msg, ModelClient } from './client';
 import { withRetry } from './retry';
 
 export interface BedrockOptions {
   model: string;
   region?: string;
   maxTokens?: number;
+}
+
+// Map our provider-agnostic content to the Anthropic message-content format. A
+// plain string stays a plain string (byte-identical to before the multimodal
+// seam); an array of blocks becomes Anthropic content blocks (text + a url image
+// source). Typed loosely at the boundary so it stays valid across SDK versions.
+type AnthropicContent =
+  | string
+  | Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'url'; url: string } }>;
+
+export function toAnthropicContent(content: Msg['content']): AnthropicContent {
+  if (typeof content === 'string') return content;
+  return content.map((b) =>
+    b.type === 'image'
+      ? ({ type: 'image' as const, source: { type: 'url' as const, url: b.url } })
+      : ({ type: 'text' as const, text: b.text }),
+  );
 }
 
 // Claude on AWS Bedrock via Anthropic's official Bedrock SDK. A dev-time
@@ -25,7 +42,10 @@ export class BedrockModelClient implements ModelClient {
   async complete(req: CompleteRequest): Promise<CompleteResult> {
     const messages = req.messages
       .filter((m) => m.role !== 'system')
-      .map((m) => ({ role: m.role === 'assistant' ? ('assistant' as const) : ('user' as const), content: m.content }));
+      .map((m) => ({
+        role: m.role === 'assistant' ? ('assistant' as const) : ('user' as const),
+        content: toAnthropicContent(m.content),
+      }));
 
     const res = await withRetry(() =>
       this.client.messages.create({
