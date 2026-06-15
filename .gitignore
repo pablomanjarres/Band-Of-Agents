@@ -151,3 +151,4 @@ vite.config.ts.timestamp-*
 # Orchestration proposal scratch artifacts (visual decks for review; not committed)
 orchestration-proposals.html
 /scratch/
+.vercel

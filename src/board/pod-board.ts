@@ -4,10 +4,10 @@ import type { ModelClient } from '../models/client';
 import type { BrandDna, Rulebook } from '../domain/types';
 import { makeConductor } from '../agents/conductor';
 import { makePodLead } from '../agents/pod-lead';
-import { makeRegionReviewer } from '../agents/region-reviewer';
+import { makeRegionReviewer } from '../agents/pod-region-reviewer';
 import { makeScout, makeClaimEvidence, makePrecedent, makeDisclosure, makeBrandVoice, makeChannel, makeVisual } from '../agents/pod-members';
 import { makeMediator } from '../agents/mediator';
-import { makeRemediation } from '../agents/remediation';
+import { makeRemediation } from '../agents/pod-remediation';
 import { makeRiskAdjudicator } from '../agents/risk-adjudicator';
 
 export interface PodBoardModels {

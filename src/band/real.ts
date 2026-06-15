@@ -22,6 +22,7 @@ import type {
   RoomMessage,
   RoomTools,
 } from './types';
+import { makeBandSharedContext, type ContextRest, type SharedContextStore } from './shared-context';
 
 const DEBUG = process.env.BAND_DEBUG === '1';
 function dbg(...args: unknown[]): void {
@@ -66,6 +67,38 @@ interface IntakeRest {
 
 type EmitActivity = (kind: 'message' | 'event', content: string, messageType: string) => void;
 
+/** A trace sink for the task binding: called with the new room id and the task (asset) id. */
+export type TaskBindNote = (roomId: string, taskId: string) => void;
+
+/**
+ * Build the intake control object from a band.ai REST facade. Extracted as a
+ * pure helper (no SDK or Agent dependency) so the task-id forwarding is testable
+ * without a live band.ai call. createRoom forwards the optional task id to
+ * createChat, so the room is bound to the asset as its Band task, and surfaces
+ * the binding through onTaskBind. Methods are invoked on the facade object so
+ * its `this` stays bound.
+ */
+export function buildIntakeControl(
+  api: IntakeRest,
+  onTaskBind?: TaskBindNote,
+  stop: () => Promise<void> = async () => {},
+): IntakeControl {
+  return {
+    createRoom: async (taskId) => {
+      const roomId = (await api.createChat!(taskId)).id;
+      if (taskId) onTaskBind?.(roomId, taskId);
+      return roomId;
+    },
+    addParticipant: async (roomId, agentId, role = 'member') => {
+      await api.addChatParticipant!(roomId, { participantId: agentId, role });
+    },
+    postMessage: async (roomId, content, mentions) => {
+      await api.createChatMessage!(roomId, { content, mentions });
+    },
+    stop,
+  };
+}
+
 export class RealBandTransport implements BandTransport {
   private readonly onActivity?: ActivityCallback;
   private seq = 0;
@@ -106,8 +139,67 @@ export class RealBandTransport implements BandTransport {
     const agent = Agent.create({ adapter, config });
     dbg(`${opts.name} connecting (${config.agentId})`);
     void agent.run({ signals: false });
+
+    // The SDK does not reliably auto-join rooms a human creates in app.band.ai
+    // after the agent connected, so re-subscribe to all of the agent's rooms on a
+    // short interval. This lets you add the agents to a room and post, and they
+    // pick it up within a few seconds without restarting the server.
+    const subscribeRooms = (): void => {
+      const link = (agent as { runtime?: { link?: { subscribeAgentRooms?: () => Promise<void> } } })?.runtime?.link;
+      dbg(`${opts.name} subscribeAgentRooms: link=${!!link} method=${typeof link?.subscribeAgentRooms}`);
+      try {
+        void link?.subscribeAgentRooms?.();
+      } catch (e) {
+        dbg(`${opts.name} subscribe error: ${(e as Error)?.message ?? String(e)}`);
+      }
+    };
+    const initial = setTimeout(subscribeRooms, 1500);
+    const interval = setInterval(subscribeRooms, 8000);
     return {
       stop: async () => {
+        clearTimeout(initial);
+        clearInterval(interval);
+        await agent.stop();
+      },
+    };
+  }
+
+  /**
+   * Connect an agent that runs on a DIFFERENT framework adapter than the
+   * GenericAdapter the other agents use (for example the SDK's OpenAI tool-calling
+   * adapter from buildCrossFrameworkAdapter). The caller builds the adapter; here
+   * we just create and run the Agent, so the room visibly spans frameworks. The
+   * adapter drives the room tools itself, so there is no onMessage handler.
+   */
+  async connectFrameworkAgent(opts: {
+    name: string;
+    adapter: Parameters<typeof Agent.create>[0]['adapter'];
+    envPrefix?: string;
+    apiKey?: string;
+    agentId?: string;
+  }): Promise<AgentConnection> {
+    const config = opts.envPrefix
+      ? loadAgentConfigFromEnv({ prefix: opts.envPrefix })
+      : opts.apiKey
+        ? { agentId: opts.agentId ?? '', apiKey: opts.apiKey }
+        : loadAgentConfigFromEnv();
+    const agent = Agent.create({ adapter: opts.adapter, config });
+    dbg(`${opts.name} (cross-framework) connecting (${config.agentId})`);
+    void agent.run({ signals: false });
+    const subscribeRooms = (): void => {
+      const link = (agent as { runtime?: { link?: { subscribeAgentRooms?: () => Promise<void> } } })?.runtime?.link;
+      try {
+        void link?.subscribeAgentRooms?.();
+      } catch (e) {
+        dbg(`${opts.name} subscribe error: ${(e as Error)?.message ?? String(e)}`);
+      }
+    };
+    const initial = setTimeout(subscribeRooms, 1500);
+    const interval = setInterval(subscribeRooms, 8000);
+    return {
+      stop: async () => {
+        clearTimeout(initial);
+        clearInterval(interval);
         await agent.stop();
       },
     };
@@ -136,14 +228,37 @@ export class RealBandTransport implements BandTransport {
     }
     // Call methods on the facade (not extracted) so `this` stays bound to it.
     const api = rest;
+    const onTaskBind: TaskBindNote = (roomId, taskId) => dbg(`room ${roomId} bound to task ${taskId}`);
+    return buildIntakeControl(api, onTaskBind, async () => {
+      await agent.stop();
+    });
+  }
+
+  /**
+   * Connect a lightweight agent and return a Band-native shared-context store for
+   * a room: publish the brand DNA and rulebooks into the room as a tagged message
+   * and rehydrate them via the /context endpoint (getChatContext), instead of a
+   * local store and without the gated Memory tools. Mirrors connectIntake.
+   */
+  async connectContext(opts: { envPrefix?: string; name?: string } = {}): Promise<SharedContextStore & { stop(): Promise<void> }> {
+    const config = opts.envPrefix ? loadAgentConfigFromEnv({ prefix: opts.envPrefix }) : loadAgentConfigFromEnv();
+    const agent = Agent.create({ adapter: new GenericAdapter(async () => {}), config });
+    dbg(`${opts.name ?? 'Context'} connecting (${config.agentId})`);
+    void agent.run({ signals: false });
+
+    let rest: ContextRest | undefined;
+    for (let i = 0; i < 20; i += 1) {
+      rest = (agent as { runtime?: { link?: { rest?: ContextRest } } })?.runtime?.link?.rest;
+      if (rest?.createChatMessage && rest.getChatContext) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!rest?.createChatMessage || !rest.getChatContext) {
+      throw new Error('Context REST facade unavailable (agent.runtime.link.rest getChatContext/createChatMessage)');
+    }
+    const store = makeBandSharedContext(rest);
     return {
-      createRoom: async () => (await api.createChat!()).id,
-      addParticipant: async (roomId, agentId, role = 'member') => {
-        await api.addChatParticipant!(roomId, { participantId: agentId, role });
-      },
-      postMessage: async (roomId, content, mentions) => {
-        await api.createChatMessage!(roomId, { content, mentions });
-      },
+      publish: (roomId, payload) => store.publish(roomId, payload),
+      rehydrate: (roomId) => store.rehydrate(roomId),
       stop: async () => {
         await agent.stop();
       },

@@ -2,14 +2,8 @@
 // transport is translated into typed BoardEvents that the server streams over
 // SSE; the React board derives region-card state and the timeline from them.
 
-import { z } from 'zod';
 import type { BoardActivity } from '../band/types';
 import type { ContentAsset, Finding, RegionVerdict } from '../domain/types';
-import {
-  ContentAsset as ContentAssetSchema,
-  RegionVerdict as RegionVerdictSchema,
-  ReviewResult as ReviewResultSchema,
-} from '../domain/types';
 
 export type BoardEvent =
   | { type: 'intake'; seq: number; fromName: string; asset: ContentAsset }
@@ -47,18 +41,6 @@ export type BoardEvent =
 
 export type BoardStatus = 'running' | 'awaiting-decision' | 'complete' | 'error';
 
-const VerdictMsg = z.object({ verdicts: z.array(RegionVerdictSchema), conflict: z.boolean() });
-const RevisedMsg = z.object({
-  kind: z.literal('revised'),
-  region: z.string(),
-  revised: z.object({
-    copy: z.string(),
-    imageUrl: z.string().optional(),
-    markets: z.array(z.string()),
-  }),
-});
-const RemediationMsg = z.object({ kind: z.literal('remediation') });
-
 function parseJson(content: string): unknown {
   try {
     return JSON.parse(content);
@@ -68,46 +50,17 @@ function parseJson(content: string): unknown {
 }
 
 /**
- * Map one unit of room activity to a UI event, or null to drop it (internal
- * routing messages, or events superseded by a structured message). The server
- * emits the initial `intake` itself, so asset forwards are dropped here.
+ * Map one unit of room activity to a UI timeline event, or null to drop it.
+ * Structured state (intake, reviews, verdicts, revisions) now lives on the
+ * SharedBoard and is emitted as typed events directly, so any raw JSON in chat
+ * (e.g. a dev asset post) is dropped here and prose becomes a log line. The room
+ * itself stays plain English.
  */
 export function translateActivity(a: BoardActivity): BoardEvent | null {
   const base = { seq: a.seq, fromName: a.fromName };
 
   if (a.kind === 'message') {
-    const json = parseJson(a.content);
-    if (json !== undefined) {
-      const assetParse = ContentAssetSchema.safeParse(json);
-      if (assetParse.success) return { type: 'intake', ...base, asset: assetParse.data };
-      const rev = RevisedMsg.safeParse(json);
-      if (rev.success) {
-        return {
-          type: 'revised',
-          ...base,
-          region: rev.data.region,
-          copy: rev.data.revised.copy,
-          ...(rev.data.revised.imageUrl ? { imageUrl: rev.data.revised.imageUrl } : {}),
-          markets: rev.data.revised.markets,
-        };
-      }
-      const rr = ReviewResultSchema.safeParse(json);
-      if (rr.success) {
-        const blocking = rr.data.findings.filter((f) => f.severity === 'block').length;
-        return {
-          type: 'review',
-          ...base,
-          region: rr.data.region,
-          reviewerName: rr.data.reviewer,
-          findings: rr.data.findings,
-          blocking,
-        };
-      }
-      const vm = VerdictMsg.safeParse(json);
-      if (vm.success) return { type: 'verdict', ...base, verdicts: vm.data.verdicts, conflict: vm.data.conflict };
-      if (RemediationMsg.safeParse(json).success) return null;
-      return { type: 'log', ...base, messageType: 'message', text: a.content };
-    }
+    if (parseJson(a.content) !== undefined) return null; // structured payloads come from the board
     if (a.content.startsWith('Escalation for')) return null;
     return { type: 'log', ...base, messageType: 'message', text: a.content };
   }

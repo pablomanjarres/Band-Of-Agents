@@ -10,6 +10,8 @@ export interface Msg {
 export interface CompleteRequest {
   system?: string;
   messages: Msg[];
+  /** Image URLs (http(s) or data URL) passed as vision INPUT; only image-capable adapters (AIML) use them. */
+  images?: string[];
   /** JSON schema for structured output; adapters shape it per provider. */
   jsonSchema?: unknown;
   effort?: 'low' | 'medium' | 'high';

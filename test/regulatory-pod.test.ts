@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { FakeBandTransport } from '../src/band/fake';
 import { makePodLead } from '../src/agents/pod-lead';
-import { makeRegionReviewer } from '../src/agents/region-reviewer';
+import { makeRegionReviewer } from '../src/agents/pod-region-reviewer';
 import { StubModelClient } from '../src/models/client';
 import { loadAsset, loadBrandDna, loadRulebook } from '../src/domain/load';
 

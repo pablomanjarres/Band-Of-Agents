@@ -1,4 +1,5 @@
 import type {
+  ArtifactResponse,
   AssetListResponse,
   AssetResponse,
   BoardEvent,
@@ -88,6 +89,12 @@ export async function createAsset(asset: NewContentAsset): Promise<AssetResponse
     body: JSON.stringify(asset),
   });
   return asJson<AssetResponse>(res);
+}
+
+// Artifacts ----------------------------------------------------------------
+export async function getArtifact(id: string): Promise<ArtifactResponse> {
+  const res = await fetch(`/api/artifacts/${encodeURIComponent(id)}`);
+  return asJson<ArtifactResponse>(res);
 }
 
 // Precedent log ------------------------------------------------------------

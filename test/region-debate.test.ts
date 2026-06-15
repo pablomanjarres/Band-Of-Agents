@@ -1,7 +1,7 @@
 // test/region-debate.test.ts
 import { describe, expect, it } from 'vitest';
 import { FakeBandTransport } from '../src/band/fake';
-import { makeRegionReviewer } from '../src/agents/region-reviewer';
+import { makeRegionReviewer } from '../src/agents/pod-region-reviewer';
 import { StubModelClient } from '../src/models/client';
 import { loadBrandDna, loadRulebook } from '../src/domain/load';
 

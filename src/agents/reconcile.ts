@@ -1,6 +1,7 @@
 import type { AgentHandler, Mention, Participant, RoomMessage, RoomTools } from '../band/types';
-import type { RegionVerdict, ReviewResult } from '../domain/types';
-import { ReviewResult as ReviewResultSchema } from '../domain/types';
+import type { Finding, RegionVerdict, ReviewResult } from '../domain/types';
+import type { NewArtifact } from '../domain/artifact';
+import type { SharedBoard } from '../board/shared';
 import { matchParticipant, nameMatchesHandle } from './handles';
 
 export interface Precedent {
@@ -10,8 +11,18 @@ export interface Precedent {
 }
 
 export interface ReconcileOptions {
+  /** In-process data hub. Reviews and verdicts live here; the room stays plain English. */
+  board: SharedBoard;
   /** Regions whose reviews to wait for before deciding, e.g. ['US','EU']. */
   expectedRegions: string[];
+  /**
+   * The subset of expectedRegions that are market-bound (US/EU/LATAM). When set,
+   * Reconcile waits only for the market-bound regions in the asset's markets,
+   * plus every non-market reviewer (Brand), so a targeted single-market asset
+   * does not block on regions that were never recruited. Omit to wait for every
+   * expected region (the prior behavior).
+   */
+  marketRegions?: string[];
   /** Handle of the coordinator to report the verdict to. */
   coordinatorHandle?: string;
   /** Handle of the human reviewer to escalate to (e.g. the compliance lead). */
@@ -22,28 +33,38 @@ export interface ReconcileOptions {
   logPrecedent?: (precedent: Precedent) => void;
   /** band.ai room mode: accept the human ruling relayed by this intake/proxy agent. */
   humanProxyHandle?: string;
+  /**
+   * Register a findings/verdict report and get back a dashboard viewer URL to
+   * paste into the room, since Band shows only plain text. Optional: when absent
+   * (tests/stubs) the verdict message just omits the report link.
+   */
+  publishArtifact?: (input: NewArtifact) => { id: string; url: string };
 }
 
-// The reconcile agent: collects each region reviewer's findings; once all
-// expected regions are in, it issues a per-region verdict, surfaces the
-// cross-region conflict, routes 'adapt' regions to remediation, and escalates an
-// unresolvable block to the human. When the human rules, it records precedent.
-export function makeReconcile(opts: ReconcileOptions): AgentHandler {
-  const reviewsByRoom = new Map<string, Map<string, ReviewResult>>();
-  const pendingByRoom = new Map<string, string[]>();
-  const remediationCountByRoom = new Map<string, number>();
-  const MAX_REMEDIATION_ROUNDS = 1;
+const MAX_REMEDIATION_ROUNDS = 1;
 
-  return async (message, tools) => {
+// The reconcile agent. As each reviewer reports, it reads the accumulated findings
+// off the SharedBoard; once all expected regions are in, it decides a per-region
+// verdict, records it on the board, and routes the room in plain English: it tells
+// the coordinator the outcome, asks remediation to adapt fixable regions, and
+// escalates unresolvable blocks to the human. When the human rules, it records
+// precedent. All structured data is read/written on the board, not the chat.
+export function makeReconcile(opts: ReconcileOptions): AgentHandler {
+  const pendingByRoom = new Map<string, string[]>();
+
+  return async (message, tools, ctx) => {
     const fromHumanProxy =
       opts.humanProxyHandle !== undefined &&
       message.senderType === 'agent' &&
       nameMatchesHandle(message.senderName, opts.humanProxyHandle);
+
+    // A human ruling on a pending escalation.
     if (message.senderType === 'user' || fromHumanProxy) {
-      const regions = pendingByRoom.get(message.roomId);
+      const regions = pendingByRoom.get(ctx.roomId);
       if (!regions) return;
-      pendingByRoom.delete(message.roomId);
-      opts.logPrecedent?.({ roomId: message.roomId, regions, decision: message.content });
+      pendingByRoom.delete(ctx.roomId);
+      opts.logPrecedent?.({ roomId: ctx.roomId, regions, decision: message.content });
+      opts.board.decided(ctx.roomId, message.content);
       await tools.sendEvent(
         `Human decision recorded for ${regions.join('/')}: "${message.content}". Logged as precedent.`,
         'decision',
@@ -52,24 +73,37 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
     }
 
     if (message.senderType !== 'agent') return;
-    const review = tryParseReview(message.content);
-    if (!review) return;
+    if (!opts.board.campaign(ctx.roomId)) return;
+    // Decide once per round: reconcile is pinged once per reviewer report plus the
+    // coordinator's recruit, so skip if this round's verdicts are already in. A
+    // re-review clears them (startReReview), reopening the decision for that round.
+    if (opts.board.hasVerdicts(ctx.roomId)) return;
 
-    const collected = reviewsByRoom.get(message.roomId) ?? new Map<string, ReviewResult>();
-    collected.set(review.region, review);
-    reviewsByRoom.set(message.roomId, collected);
-    await tools.sendEvent(
-      `Received ${review.region} review (${review.findings.length} finding(s)). ${collected.size}/${opts.expectedRegions.length} in.`,
-      'reconcile',
-    );
-    if (!opts.expectedRegions.every((r) => collected.has(r))) return;
+    // Wait only for the reviewers this asset actually recruited. With targeted
+    // recruitment a single-market asset engages a subset of the regions, so a
+    // market-bound region not in the asset's markets is dropped from the wait set
+    // (Reconcile would otherwise block on a reviewer that never joins). Non-market
+    // reviewers like Brand are always expected. With no marketRegions configured
+    // this is a no-op and Reconcile waits for every expected region, as before.
+    const markets = opts.board.campaign(ctx.roomId)?.markets ?? [];
+    const marketBound = new Set(opts.marketRegions ?? []);
+    const expected =
+      marketBound.size === 0
+        ? opts.expectedRegions
+        : opts.expectedRegions.filter((r) => !marketBound.has(r) || markets.includes(r));
 
-    const verdicts = opts.expectedRegions.map((r) => decideRegion(collected.get(r)!));
+    // A reviewer just reported. Read the running tally off the board.
+    const reviews = opts.board.reviews(ctx.roomId);
+    const have = new Set(reviews.map((r) => r.region));
+    await tools.sendEvent(`${have.size}/${expected.length} reviews in.`, 'reconcile');
+    if (!expected.every((r) => have.has(r))) return; // wait for the rest
+
+    const byRegion = new Map<string, ReviewResult>(reviews.map((r) => [r.region, r]));
+    const verdicts = expected.map((r) => decideRegion(byRegion.get(r)!));
 
     // Re-review cap: once a region has been remediated MAX_REMEDIATION_ROUNDS
     // times, a still-fixable 'adapt' escalates to the human instead of looping.
-    const priorRemediations = remediationCountByRoom.get(message.roomId) ?? 0;
-    if (priorRemediations >= MAX_REMEDIATION_ROUNDS) {
+    if (opts.board.remediationRounds(ctx.roomId) >= MAX_REMEDIATION_ROUNDS) {
       for (const v of verdicts) {
         if (v.decision === 'adapt') {
           v.decision = 'escalate';
@@ -83,6 +117,7 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
     const escalateRegions = verdicts.filter((v) => v.decision === 'escalate').map((v) => v.region);
     const blocked = verdicts.filter((v) => v.decision !== 'publish').map((v) => v.region);
     const conflict = canPublish.length > 0 && blocked.length > 0;
+    opts.board.setVerdicts(ctx.roomId, verdicts, conflict);
 
     await tools.sendEvent(
       `Verdicts: ${verdicts.map((v) => `${v.region}=${v.decision}`).join(', ')}.` +
@@ -90,46 +125,112 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
       'verdict',
     );
 
-    const coordTarget = await resolveByHandle(tools, opts.coordinatorHandle, message);
-    await tools.sendMessage(JSON.stringify({ verdicts, conflict }), [coordTarget]);
+    // Publish the full findings/verdict report and link it: Band shows only the
+    // plain-English summary, so the detail lives on our dashboard viewer.
+    let reportLink = '';
+    if (opts.publishArtifact) {
+      const { url } = opts.publishArtifact({
+        kind: 'markdown',
+        title: 'Review report',
+        content: buildReportMarkdown(verdicts, byRegion),
+        reviewId: ctx.roomId,
+        createdBy: ctx.agentName,
+      });
+      reportLink = ` Full report: ${url}`;
+    }
 
-    // Route fixable regions to remediation.
+    // Tell the coordinator the outcome in plain English.
+    const coordTarget = await resolveByHandle(tools, opts.coordinatorHandle, message);
+    await tools.sendMessage(verdictSummary(verdicts, conflict, canPublish, blocked) + reportLink, [coordTarget]);
+
+    // Route fixable regions to remediation. The findings live on the board, so the
+    // message just asks for the adaptation.
     if (adaptRegions.length > 0 && opts.remediationHandle) {
       const remediation = await findParticipant(tools, opts.remediationHandle, 'agent');
       if (remediation) {
-        for (const region of adaptRegions) {
-          const findings = collected.get(region)?.findings ?? [];
-          await tools.sendMessage(
-            JSON.stringify({ kind: 'remediation', region, findings }),
-            [{ id: remediation.id, handle: remediation.handle }],
-          );
-        }
+        opts.board.noteRemediation(ctx.roomId);
         await tools.sendEvent(`Requested remediation for ${adaptRegions.join('/')}.`, 'remediation');
-        remediationCountByRoom.set(message.roomId, priorRemediations + 1);
+        await tools.sendMessage(
+          `@${remediation.handle}, please adapt the copy for ${adaptRegions.join(', ')} to fix the compliance gaps, then re-submit.`,
+          [{ id: remediation.id, handle: remediation.handle }],
+        );
       }
     }
 
-    // Escalate unresolvable blocks to the human.
+    // Escalate unresolvable blocks to the human with a plain-language brief.
     if (escalateRegions.length > 0 && opts.humanHandle) {
       const human = await findParticipant(tools, opts.humanHandle, 'user');
       if (human) {
-        const reasons = verdicts
-          .filter((v) => escalateRegions.includes(v.region))
-          .map((v) => `${v.region}: ${v.rationale}`)
-          .join(' ');
+        const brief = escalateRegions
+          .map((region) => {
+            const blocks = (byRegion.get(region)?.findings ?? []).filter((f) => f.severity === 'block');
+            const issues = blocks.length
+              ? blocks.map((f) => f.rationale).join(' ')
+              : verdicts.find((v) => v.region === region)?.rationale ?? 'Unresolved compliance issue.';
+            return `In ${region}: ${issues}`;
+          })
+          .join('\n');
+        const passing = verdicts.filter((v) => v.decision === 'publish').map((v) => v.region);
+        const escalationMsg =
+          `I need your call on this campaign before it can publish.\n\n${brief}\n\n` +
+          (passing.length > 0 ? `It is clear to publish in ${passing.join(', ')}. ` : '') +
+          `Automated remediation could not resolve ${escalateRegions.join('/')}. ` +
+          `Your options: approve (publish as-is and accept the ${escalateRegions.join('/')} risk), ` +
+          `reject (hold ${escalateRegions.join('/')}), or request changes (send it back to the team). What is your call?`;
         await tools.sendEvent(`Escalating ${escalateRegions.join('/')} to ${human.handle} for a human decision.`, 'escalation');
-        await tools.sendMessage(
-          `Escalation for ${escalateRegions.join('/')}. ${reasons} Please rule: approve, reject, or request changes.`,
-          [{ id: human.id, handle: human.handle }],
-        );
-        pendingByRoom.set(message.roomId, escalateRegions);
+        await tools.sendMessage(escalationMsg, [{ id: human.id, handle: human.handle }]);
+        pendingByRoom.set(ctx.roomId, escalateRegions);
+        opts.board.escalate(ctx.roomId);
       } else {
         await tools.sendEvent(`Need to escalate ${escalateRegions.join('/')} but ${opts.humanHandle} is not in the room.`, 'escalation');
       }
     }
 
-    reviewsByRoom.delete(message.roomId);
+    // All clear: nothing to adapt or escalate.
+    if (adaptRegions.length === 0 && escalateRegions.length === 0) {
+      opts.board.complete(ctx.roomId);
+    }
   };
+}
+
+/** Render the findings + verdicts as a markdown report for the dashboard viewer. */
+function buildReportMarkdown(verdicts: RegionVerdict[], byRegion: Map<string, ReviewResult>): string {
+  const lines: string[] = ['# Review report', ''];
+  lines.push('## Verdicts', '');
+  for (const v of verdicts) lines.push(`- **${v.region}**: ${v.decision} - ${v.rationale}`);
+  lines.push('', '## Findings by region', '');
+  for (const v of verdicts) {
+    const findings = byRegion.get(v.region)?.findings ?? [];
+    lines.push(`### ${v.region}`, '');
+    if (findings.length === 0) {
+      lines.push('No findings.', '');
+      continue;
+    }
+    for (const f of findings) {
+      const disclosure = f.requiredDisclosure ? ` (add: ${f.requiredDisclosure})` : '';
+      lines.push(`- [${f.severity}] ${f.ruleId ?? f.category}: ${f.rationale}${disclosure}`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+/** Compose a plain-English verdict summary for the coordinator. */
+function verdictSummary(
+  verdicts: RegionVerdict[],
+  conflict: boolean,
+  canPublish: string[],
+  blocked: string[],
+): string {
+  const phrase = (v: RegionVerdict): string => {
+    if (v.region === 'BRAND') return v.decision === 'publish' ? 'on-brand' : 'off-brand';
+    if (v.decision === 'publish') return 'publish';
+    if (v.decision === 'adapt') return 'needs changes';
+    return 'needs a human call';
+  };
+  const lines = verdicts.map((v) => `${v.region}: ${phrase(v)}`).join('. ');
+  const tail = conflict ? ` ${canPublish.join('/')} can publish, but ${blocked.join('/')} cannot as-is.` : '';
+  return `Verdicts are in. ${lines}.${tail}`;
 }
 
 function decideRegion(review: ReviewResult): RegionVerdict {
@@ -137,7 +238,7 @@ function decideRegion(review: ReviewResult): RegionVerdict {
   if (blocks.length === 0) {
     return { region: review.region, decision: 'publish', rationale: 'No blocking findings.' };
   }
-  const fixable = (b: { requiredDisclosure?: string | null }) =>
+  const fixable = (b: Finding): boolean =>
     typeof b.requiredDisclosure === 'string' && b.requiredDisclosure.length > 0;
   if (blocks.every(fixable)) {
     return {
@@ -154,15 +255,6 @@ function decideRegion(review: ReviewResult): RegionVerdict {
       .map((b) => b.ruleId ?? b.category)
       .join(', ')}.`,
   };
-}
-
-function tryParseReview(content: string): ReviewResult | null {
-  try {
-    const parsed = ReviewResultSchema.safeParse(JSON.parse(content));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
 }
 
 async function findParticipant(

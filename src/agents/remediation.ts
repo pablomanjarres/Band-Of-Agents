@@ -1,11 +1,13 @@
 import type { AgentHandler, Mention, RoomMessage, RoomTools } from '../band/types';
 import type { ModelClient } from '../models/client';
-import type { BrandDna, ContentAsset, RemediationRequest } from '../domain/types';
-import { RemediationRequest as RemediationRequestSchema } from '../domain/types';
-import { tryParseAsset } from '../domain/load';
+import type { BrandDna, ContentAsset, Finding, ReviewResult } from '../domain/types';
+import type { NewArtifact } from '../domain/artifact';
+import type { SharedBoard } from '../board/shared';
 import { matchParticipant } from './handles';
 
 export interface RemediationOptions {
+  /** In-process data hub. The campaign and findings are read from here; the revision is written here. */
+  board: SharedBoard;
   brand: BrandDna;
   copyModel: ModelClient;
   imageModel: ModelClient;
@@ -13,41 +15,49 @@ export interface RemediationOptions {
   reportToHandle?: string;
   /**
    * Host a generated image (base64 data URL) and return a short URL. Keeps the
-   * revised message small enough for band.ai (a full data URL is rejected as too
+   * revised asset small enough for band.ai (a full data URL is rejected as too
    * large). When absent, the data URL is used as-is (fine for tests/stubs).
    */
   hostImage?: (url: string) => string;
+  /**
+   * Register an artifact and get back a dashboard viewer URL to paste into the
+   * room. Band cannot show the regenerated image inline, so we link to it.
+   * Optional: when absent (tests/stubs) the agent just skips the link.
+   */
+  publishArtifact?: (input: NewArtifact) => { id: string; url: string };
 }
 
-// The remediation agent: caches the asset as it goes round, and on a remediation
-// request (an 'adapt' verdict from reconcile) rewrites the copy to fix that
-// region's findings and regenerates a localized image (Nano Banana), then posts
-// the revised, region-specific asset back for re-review. This closes the
-// bidirectional loop, not a one-shot pass.
+// The remediation agent. On reconcile's plain-English request it reads the open
+// review off the SharedBoard, finds the region whose blocking finding is fixable
+// via a required disclosure, rewrites that region's copy to add it, regenerates a
+// localized image (Nano Banana), stores the revised asset on the board, opens a
+// re-review, and tells the coordinator in plain English. This closes the adapt ->
+// re-review loop. The findings and the revision live on the board, not in chat.
 export function makeRemediation(opts: RemediationOptions): AgentHandler {
-  const assetByRoom = new Map<string, ContentAsset>();
-
-  return async (message, tools) => {
-    const asset = tryParseAsset(message.content);
-    if (asset) {
-      assetByRoom.set(message.roomId, asset);
-      return;
-    }
+  return async (message, tools, ctx) => {
     if (message.senderType !== 'agent') return;
-    const directive = tryParseDirective(message.content);
-    if (!directive) return;
-    const base = assetByRoom.get(message.roomId);
+    const base = opts.board.campaign(ctx.roomId);
     if (!base) return;
 
-    const rewritten = await rewriteCopy(opts.copyModel, opts.brand, base, directive);
+    // Adapt the region(s) reconcile ruled 'adapt' (not every region with a
+    // fixable finding): a region can have a fixable block alongside an unfixable
+    // one, in which case reconcile escalates it rather than adapting. Respect that.
+    const adaptRegions = new Set(
+      opts.board.verdicts(ctx.roomId).filter((v) => v.decision === 'adapt').map((v) => v.region),
+    );
+    const target = opts.board.reviews(ctx.roomId).find((r) => adaptRegions.has(r.region));
+    if (!target) return;
+    const region = target.region;
+
+    const rewritten = await rewriteCopy(opts.copyModel, opts.brand, base, region, target.findings);
 
     let imageUrl: string | undefined;
     let imageNote = '';
     if (opts.imageModel.generateImage) {
       try {
-        const img = await opts.imageModel.generateImage({ prompt: localizedImagePrompt(base, directive.region) });
+        const img = await opts.imageModel.generateImage({ prompt: localizedImagePrompt(base, region) });
         // AIML returns a hosted URL; the Vertex dev path returns base64. Host the
-        // data URL so the revised message stays small (band.ai rejects large ones).
+        // data URL so the revised asset stays small (band.ai rejects large ones).
         const raw = img.url ?? (img.b64 ? `data:image/png;base64,${img.b64}` : undefined);
         imageUrl = raw && opts.hostImage ? opts.hostImage(raw) : raw;
         imageNote = imageUrl ? ' + regenerated image' : '';
@@ -58,40 +68,55 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
 
     const revised: ContentAsset = {
       ...base,
-      id: `${base.id}-${directive.region.toLowerCase()}`,
-      markets: [directive.region],
+      id: `${base.id}-${region.toLowerCase()}`,
+      markets: [region],
       copy: rewritten,
       ...(imageUrl ? { imageUrl } : {}),
     };
+    opts.board.setRevised(ctx.roomId, region, revised);
+    opts.board.startReReview(ctx.roomId, revised);
+
     await tools.sendEvent(
-      `Remediated ${directive.region}: rewrote copy${imageNote}. Re-submitting for review.`,
+      `Remediated ${region}: rewrote copy${imageNote}. Re-submitting for review.`,
       'remediation',
     );
-    const target = await resolveTarget(tools, opts.reportToHandle, message);
-    await tools.sendMessage(JSON.stringify({ kind: 'revised', region: directive.region, revised }), [target]);
-  };
-}
 
-function tryParseDirective(content: string): RemediationRequest | null {
-  try {
-    const parsed = RemediationRequestSchema.safeParse(JSON.parse(content));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
+    // Band cannot show the regenerated image inline, so publish it and paste a
+    // dashboard link the human can click. Only when we have both a hosted image
+    // and the publish capability (tests/stubs skip it).
+    let viewLink = '';
+    if (imageUrl && opts.publishArtifact) {
+      const { url } = opts.publishArtifact({
+        kind: 'image',
+        title: `${region} visual (revised)`,
+        src: imageUrl,
+        reviewId: ctx.roomId,
+        createdBy: ctx.agentName,
+      });
+      viewLink = ` View the regenerated visual: ${url}`;
+    }
+
+    const reportTo = await resolveTarget(tools, opts.reportToHandle, message);
+    const coordTag = reportTo.handle ? `@${reportTo.handle}` : '@Coordinator';
+    await tools.sendMessage(
+      `${coordTag}, I rewrote the ${region} copy to add the required disclosure and regenerated the image. Re-submitting for review.${viewLink}`,
+      [reportTo],
+    );
+  };
 }
 
 async function rewriteCopy(
   model: ModelClient,
   brand: BrandDna,
   asset: ContentAsset,
-  directive: RemediationRequest,
+  region: string,
+  findings: Finding[],
 ): Promise<string> {
-  const system = `You rewrite marketing copy to fix ${directive.region} compliance issues while staying on-brand. Voice: ${brand.voice.join(', ')}. Never use: ${brand.forbiddenPhrases.join(', ')}. This is a demo, NOT legal advice. Return ONLY the rewritten copy, no preamble.`;
-  const findingsText = directive.findings
+  const system = `You rewrite marketing copy to fix ${region} compliance issues while staying on-brand. Voice: ${brand.voice.join(', ')}. Never use: ${brand.forbiddenPhrases.join(', ')}. This is a demo, NOT legal advice. Return ONLY the rewritten copy, no preamble.`;
+  const findingsText = findings
     .map((f) => `- [${f.severity}] ${f.ruleId ?? f.category}: ${f.rationale}${f.requiredDisclosure ? ` (add: ${f.requiredDisclosure})` : ''}`)
     .join('\n');
-  const user = `Original copy:\n${asset.copy}\n\nFix these ${directive.region} findings:\n${findingsText}`;
+  const user = `Original copy:\n${asset.copy}\n\nFix these ${region} findings:\n${findingsText}`;
   const res = await model.complete({ system, messages: [{ role: 'user', content: user }] });
   return res.text.trim() || asset.copy;
 }
@@ -110,5 +135,5 @@ async function resolveTarget(
     const found = matchParticipant(await tools.getParticipants(), handle, 'agent');
     if (found) return { id: found.id, handle: found.handle };
   }
-  return { id: message.senderId };
+  return { id: message.senderId, ...(message.senderName ? { handle: message.senderName } : {}) };
 }

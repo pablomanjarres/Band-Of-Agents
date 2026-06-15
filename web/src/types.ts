@@ -149,3 +149,22 @@ export interface Precedent {
 export interface PrecedentListResponse {
   precedents: Precedent[];
 }
+
+// Artifacts: things an agent produced that Band cannot show inline, rendered by
+// the /a/:id viewer. Mirrors src/domain/artifact.ts.
+export type ArtifactKind = 'image' | 'markdown' | 'json' | 'text';
+
+export interface Artifact {
+  id: string;
+  kind: ArtifactKind;
+  title: string;
+  createdAt: number;
+  createdBy?: string;
+  reviewId?: string;
+  src?: string;
+  content?: string;
+}
+
+export interface ArtifactResponse {
+  artifact: Artifact;
+}

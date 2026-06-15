@@ -16,7 +16,9 @@ import { makeReconcile, type Precedent } from '../agents/reconcile';
 import type { ModelClient } from '../models/client';
 import { imageClientFor, modelFor } from '../models/route';
 import type { BrandDna, ContentAsset, Rulebook } from '../domain/types';
+import type { NewArtifact } from '../domain/artifact';
 import { translateActivity, type BoardEvent } from './events';
+import { SharedBoard } from './shared';
 
 /** The model client each model-calling role uses for one session. */
 export interface BoardModels {
@@ -50,18 +52,22 @@ export interface BoardSessionOptions {
   onPrecedent?: (precedent: Precedent) => void;
   /** Host generated images (base64 -> short URL) so messages stay small. */
   hostImage?: (url: string) => string;
+  /** Register an artifact and get a dashboard viewer URL agents paste into the room. */
+  publishArtifact?: (input: NewArtifact) => { id: string; url: string };
   /** Recent precedent lines fed into the region reviewers' shared context. */
   getPrecedents?: () => string[];
 }
 
 export class BoardSession {
   private readonly room: FakeBandTransport;
+  private readonly board: SharedBoard;
   private emitSeq = 0;
   private started = false;
-  private escalated = false;
-  private decided = false;
+  private terminal = false;
 
   constructor(private readonly opts: BoardSessionOptions) {
+    // The agents share structured data here; band messages stay plain English.
+    this.board = new SharedBoard((_roomId, event) => this.emit(event));
     this.room = new FakeBandTransport(opts.roomId, {
       onActivity: (activity) => {
         const event = translateActivity(activity);
@@ -72,8 +78,7 @@ export class BoardSession {
 
   /** Stamp a monotonic seq so the console can key/order events deterministically. */
   private emit(event: BoardEvent): void {
-    if (event.type === 'escalation') this.escalated = true;
-    if (event.type === 'decision') this.decided = true;
+    if (event.type === 'status' && event.status !== 'running') this.terminal = true;
     this.opts.onEvent({ ...event, seq: this.emitSeq++ } as BoardEvent);
   }
 
@@ -83,63 +88,67 @@ export class BoardSession {
     this.started = true;
     const { asset, brand, rulebooks, models } = this.opts;
     const room = this.room;
+    const board = this.board;
 
     room.addUser('lead', 'Compliance Lead', '@compliance-lead');
-    await room.connectAgent({ agentId: 'coord', name: 'Coordinator', handle: '@coordinator', onMessage: makeCoordinator({ remediationHandle: '@remediation' }) });
+    await room.connectAgent({ agentId: 'coord', name: 'Coordinator', handle: '@coordinator', onMessage: makeCoordinator({ board, remediationHandle: '@remediation', reconcileHandle: '@reconcile' }) });
     await room.connectAgent({
       agentId: 'us',
       name: 'US Reviewer',
       handle: '@us-reviewer',
-      onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: rulebooks.us, brand, model: models.us, reportToHandle: '@reconcile', precedents: this.opts.getPrecedents }),
+      onMessage: makeRegionReviewer({ board, region: 'US', reviewerName: 'US Reviewer', rulebook: rulebooks.us, brand, model: models.us, reportToHandle: '@reconcile', precedents: this.opts.getPrecedents }),
     });
     await room.connectAgent({
       agentId: 'eu',
       name: 'EU Reviewer',
       handle: '@eu-reviewer',
-      onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: rulebooks.eu, brand, model: models.eu, reportToHandle: '@reconcile', precedents: this.opts.getPrecedents }),
+      onMessage: makeRegionReviewer({ board, region: 'EU', reviewerName: 'EU Reviewer', rulebook: rulebooks.eu, brand, model: models.eu, reportToHandle: '@reconcile', precedents: this.opts.getPrecedents }),
     });
     await room.connectAgent({
       agentId: 'latam',
       name: 'LATAM Reviewer',
       handle: '@latam-reviewer',
-      onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: rulebooks.latam, brand, model: models.latam, reportToHandle: '@reconcile', precedents: this.opts.getPrecedents }),
+      onMessage: makeRegionReviewer({ board, region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: rulebooks.latam, brand, model: models.latam, reportToHandle: '@reconcile', precedents: this.opts.getPrecedents }),
     });
     await room.connectAgent({
       agentId: 'brand',
       name: 'Brand Reviewer',
       handle: '@brand-reviewer',
-      onMessage: makeBrandReviewer({ brand, model: models.brand, reportToHandle: '@reconcile' }),
+      onMessage: makeBrandReviewer({ board, brand, model: models.brand, reportToHandle: '@reconcile' }),
     });
     await room.connectAgent({
       agentId: 'rem',
       name: 'Remediation',
       handle: '@remediation',
-      onMessage: makeRemediation({ brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: '@coordinator', ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}) }),
+      onMessage: makeRemediation({ board, brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: '@coordinator', ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}), ...(this.opts.publishArtifact ? { publishArtifact: this.opts.publishArtifact } : {}) }),
     });
     await room.connectAgent({
       agentId: 'rec',
       name: 'Reconcile',
       handle: '@reconcile',
       onMessage: makeReconcile({
+        board,
         expectedRegions: ['US', 'EU', 'LATAM', 'BRAND'],
         coordinatorHandle: '@coordinator',
         remediationHandle: '@remediation',
         humanHandle: '@compliance-lead',
         ...(this.opts.onPrecedent ? { logPrecedent: this.opts.onPrecedent } : {}),
+        ...(this.opts.publishArtifact ? { publishArtifact: this.opts.publishArtifact } : {}),
       }),
     });
 
-    this.emit({ type: 'intake', seq: 0, fromName: 'You', asset });
-    this.emit({ type: 'status', seq: 0, fromName: 'system', status: 'running' });
+    // The human posts the campaign; the Coordinator stashes it on the board and the
+    // agents take it from there, emitting their own intake/review/verdict/status.
     room.post('lead', JSON.stringify(asset), [{ id: 'coord' }]);
     await room.drain();
-    this.emit({ type: 'status', seq: 0, fromName: 'system', status: this.escalated && !this.decided ? 'awaiting-decision' : 'complete' });
+    if (!this.terminal) this.emit({ type: 'status', seq: 0, fromName: 'system', status: 'complete' });
   }
 
   /** Record a human ruling on an escalation; logs precedent via Reconcile and completes. */
   async submitDecision(text: string): Promise<void> {
+    this.terminal = false;
     this.room.post('lead', text, [{ id: 'rec' }]);
     await this.room.drain();
-    this.emit({ type: 'status', seq: 0, fromName: 'system', status: 'complete' });
+    if (!this.terminal) this.emit({ type: 'status', seq: 0, fromName: 'system', status: 'complete' });
   }
 }

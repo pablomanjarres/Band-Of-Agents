@@ -109,10 +109,12 @@ export interface MentionRef {
 /**
  * Controls for driving a band.ai room proactively as the intake/relay agent:
  * create the room, add the reviewer agents, and post the campaign so band.ai
- * runs the review. Returned by RealBandTransport.connectIntake().
+ * runs the review. Returned by RealBandTransport.connectIntake(). createRoom
+ * optionally binds the room to a task id (the asset id), so the room carries
+ * Band task state for the review case.
  */
 export interface IntakeControl {
-  createRoom(): Promise<string>;
+  createRoom(taskId?: string): Promise<string>;
   addParticipant(roomId: string, agentId: string, role?: string): Promise<void>;
   postMessage(roomId: string, content: string, mentions: MentionRef[]): Promise<void>;
   stop(): Promise<void>;

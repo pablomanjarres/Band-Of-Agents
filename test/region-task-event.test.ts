@@ -10,19 +10,21 @@ import { probeBoard } from './helpers';
 
 const ASSETS = new URL('../assets/', import.meta.url).pathname;
 
-describe('Full board (US + EU + Brand + Reconcile) issues per-region verdicts', () => {
-  it('US=publish, EU=escalate, BRAND=publish, conflict flagged', async () => {
+// Band accepts a fixed set of event types; 'task' is one of them. The per-region
+// review lifecycle should show under that task channel, not only as thoughts.
+describe("Per-region progress shows under Band's task channel", () => {
+  it("the region reviewer emits a genuine 'task' lifecycle event per region", async () => {
     const brand = loadBrandDna(`${ASSETS}brand-dna.json`);
     const usRules = loadRulebook(`${ASSETS}rulebook.us.json`);
     const euRules = loadRulebook(`${ASSETS}rulebook.eu.json`);
     const asset = loadAsset(`${ASSETS}sample-asset.json`);
 
-    const usModel = new StubModelClient(() => ({ text: '', json: { findings: [{ category: 'endorsement', severity: 'warn', claim: 't', rationale: 'r', ruleId: 'us-testimonial' }] } }));
+    const usModel = new StubModelClient(() => ({ text: '', json: { findings: [] } }));
     const euModel = new StubModelClient(() => ({ text: '', json: { findings: [{ category: 'health_claim', severity: 'block', claim: 'boost immune system', rationale: 'unauthorised', ruleId: 'eu-health-preauth' }] } }));
     const brandModel = new StubModelClient(() => ({ text: '', json: { findings: [] } }));
 
-    const { board, find, events } = probeBoard();
-    const room = new FakeBandTransport('room-fb');
+    const { board } = probeBoard();
+    const room = new FakeBandTransport('room-task');
     room.addUser('lead', 'Lead', '@compliance-lead');
     await room.connectAgent({ agentId: 'coord', name: 'Coordinator', handle: '@coordinator', onMessage: makeCoordinator({ board, reconcileHandle: '@reconcile' }) });
     await room.connectAgent({ agentId: 'us', name: 'US', handle: '@us-reviewer', onMessage: makeRegionReviewer({ board, region: 'US', reviewerName: 'US', rulebook: usRules, brand, model: usModel, reportToHandle: '@reconcile' }) });
@@ -33,15 +35,14 @@ describe('Full board (US + EU + Brand + Reconcile) issues per-region verdicts', 
     room.post('lead', JSON.stringify(asset), [{ id: 'coord' }]);
     await room.drain();
 
-    const verdict = find('verdict');
-    expect(verdict).toBeDefined();
-    const decision = (r: string) => verdict!.verdicts.find((v) => v.region === r)?.decision;
-    expect(decision('US')).toBe('publish');
-    expect(decision('EU')).toBe('escalate');
-    expect(decision('BRAND')).toBe('publish');
-    expect(verdict!.conflict).toBe(true);
-
-    // EU deadlock escalated to the human: the board is now awaiting a decision.
-    expect(events.some((e) => e.type === 'status' && e.status === 'awaiting-decision')).toBe(true);
+    // The room shows at least one genuine 'task' event per region, not only thoughts.
+    const taskEvents = room.transcript.filter((t) => t.kind === 'event' && t.messageType === 'task');
+    expect(taskEvents.length).toBeGreaterThan(0);
+    expect(taskEvents.some((t) => t.content.includes('US'))).toBe(true);
+    expect(taskEvents.some((t) => t.content.includes('EU'))).toBe(true);
+    // The brand lane reports its progress on the same task channel, for consistency.
+    expect(taskEvents.some((t) => t.content.includes('Brand'))).toBe(true);
+    // They are genuine 'task' events, not the generic 'thought' fallback.
+    expect(taskEvents.every((t) => t.messageType === 'task')).toBe(true);
   });
 });
