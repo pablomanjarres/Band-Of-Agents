@@ -17,7 +17,7 @@ export function BoardView({ state }: BoardViewProps) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Lumavida Compliance Board</h1>
+          <h1 className="text-xl font-bold text-slate-900">Compliance Board</h1>
           {state.asset ? (
             <p className="text-sm text-slate-500">
               {state.asset.channel} - {state.asset.markets.join(', ') || 'no markets'}

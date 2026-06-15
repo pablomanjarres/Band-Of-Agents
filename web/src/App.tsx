@@ -1,4 +1,6 @@
 import { NavLink, Route, Routes } from 'react-router-dom';
+import { CampaignDetailPage } from './pages/CampaignDetailPage';
+import { CampaignsPage } from './pages/CampaignsPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { LiveBoardPage } from './pages/LiveBoardPage';
@@ -10,6 +12,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Compose', end: true },
+  { to: '/campaigns', label: 'Campaigns', end: false },
   { to: '/history', label: 'Reviews', end: false },
   { to: '/rulebooks', label: 'Rulebooks', end: false },
   { to: '/library', label: 'Library', end: false },
@@ -21,9 +24,9 @@ function Nav() {
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
-            L
+            B
           </span>
-          <span className="text-sm font-semibold text-slate-800">Lumavida Compliance Console</span>
+          <span className="text-sm font-semibold text-slate-800">Band Review Board</span>
         </div>
         <nav className="flex items-center gap-1">
           {NAV_ITEMS.map((item) => (
@@ -56,6 +59,8 @@ export default function App() {
         <ErrorBoundary>
         <Routes>
           <Route path="/" element={<NewReviewPage />} />
+          <Route path="/campaigns" element={<CampaignsPage />} />
+          <Route path="/campaigns/:id" element={<CampaignDetailPage />} />
           <Route path="/reviews/:id" element={<LiveBoardPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/history/:id" element={<ReplayBoardPage />} />
