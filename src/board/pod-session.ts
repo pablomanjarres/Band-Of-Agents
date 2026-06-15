@@ -33,6 +33,9 @@ export class PodBoardSession {
   private emitSeq = 0;
   private started = false;
   private terminal = false;
+  private imgSeq = 0;
+  /** Short placeholder URLs mapped to the hosted data URL, so base64 never enters prompts. */
+  readonly hostedImages = new Map<string, string>();
 
   constructor(private readonly opts: PodBoardSessionOptions) {
     this.room = new FakeBandTransport(opts.roomId, {
@@ -51,6 +54,16 @@ export class PodBoardSession {
     this.opts.onEvent({ ...event, seq: this.emitSeq++ } as BoardEvent);
   }
 
+  // Real image models (Nano Banana) return base64 data URLs hundreds of KB long.
+  // If one lands in the revised asset, every re-review prompt embeds it and blows
+  // past the model context limit. Swap it for a short URL before it propagates.
+  private defaultHostImage = (dataUrl: string): string => {
+    if (!dataUrl.startsWith('data:')) return dataUrl;
+    const shortUrl = `https://images.local/${this.opts.roomId}/${++this.imgSeq}.png`;
+    this.hostedImages.set(shortUrl, dataUrl);
+    return shortUrl;
+  };
+
   /** Connect the cast, post the asset, and run to the first resting point. */
   async run(): Promise<void> {
     if (this.started) return;
@@ -63,7 +76,8 @@ export class PodBoardSession {
       brand,
       rulebooks,
       models,
-      ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}),
+      // Always host images so a regenerated base64 image cannot explode re-review prompts.
+      hostImage: this.opts.hostImage ?? this.defaultHostImage,
       ...(this.opts.onPrecedent ? { logPrecedent: this.opts.onPrecedent } : {}),
     });
 
