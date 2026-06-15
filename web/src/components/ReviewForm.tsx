@@ -108,9 +108,9 @@ export function ReviewForm({ onSave, initial }: ReviewFormProps) {
     }
   }
 
-  const labelClass = 'block text-sm font-medium text-slate-700';
+  const labelClass = 'block text-sm font-medium text-muted';
   const inputClass =
-    'mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm text-slate-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400';
+    'mt-1.5 w-full rounded-xl border border-border-strong bg-bg-soft/70 p-2.5 text-sm text-fg placeholder:text-faint transition-colors focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/25';
 
   if (saved) {
     const savedName = saved.name ?? currentValues().name;
@@ -134,12 +134,8 @@ export function ReviewForm({ onSave, initial }: ReviewFormProps) {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-900">Compose campaign</h1>
-        <button
-          type="button"
-          onClick={loadSample}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
-        >
+        <h2 className="font-display text-2xl text-fg">Campaign details</h2>
+        <button type="button" onClick={loadSample} className="btn btn-ghost">
           Load sample
         </button>
       </div>
@@ -203,27 +199,35 @@ export function ReviewForm({ onSave, initial }: ReviewFormProps) {
         <div>
           <span className={labelClass}>Markets</span>
           <div className="mt-2 flex flex-wrap gap-3">
-            {MARKET_OPTIONS.map((market) => (
-              <label
-                key={market}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm"
-              >
-                <input
-                  type="checkbox"
-                  checked={markets.includes(market)}
-                  onChange={() => toggleMarket(market)}
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-400"
-                />
-                {market}
-              </label>
-            ))}
+            {MARKET_OPTIONS.map((market) => {
+              const checked = markets.includes(market);
+              return (
+                <label
+                  key={market}
+                  className={[
+                    'inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-medium transition-all',
+                    checked
+                      ? 'border-accent/50 bg-accent/10 text-accent'
+                      : 'border-border-strong bg-bg-soft/60 text-muted hover:border-border-strong hover:text-fg',
+                  ].join(' ')}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleMarket(market)}
+                    className="h-4 w-4 rounded border-border-strong bg-bg-soft text-accent-strong focus:ring-accent/40 focus:ring-offset-0"
+                  />
+                  {market}
+                </label>
+              );
+            })}
           </div>
         </div>
       </div>
 
       <div>
         <label className={labelClass} htmlFor="imagePrompt">
-          Image prompt <span className="font-normal text-slate-400">(optional)</span>
+          Image prompt <span className="font-normal text-faint">(optional)</span>
         </label>
         <textarea
           id="imagePrompt"
@@ -237,7 +241,7 @@ export function ReviewForm({ onSave, initial }: ReviewFormProps) {
 
       <div>
         <label className={labelClass} htmlFor="substantiation">
-          Substantiation <span className="font-normal text-slate-400">(optional)</span>
+          Substantiation <span className="font-normal text-faint">(optional)</span>
         </label>
         <textarea
           id="substantiation"
@@ -249,15 +253,11 @@ export function ReviewForm({ onSave, initial }: ReviewFormProps) {
         />
       </div>
 
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {error ? <p className="text-sm text-danger">{error}</p> : null}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="submit"
-          disabled={saving}
-          className="inline-flex items-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {saving ? 'Saving.' : 'Save campaign'}
+      <div className="flex flex-wrap items-center gap-3 pt-1">
+        <button type="submit" disabled={saving} className="btn btn-primary px-5 py-2.5">
+          {saving ? 'Saving…' : 'Save campaign'}
         </button>
       </div>
     </form>
@@ -285,44 +285,44 @@ function SuccessPanel({ name, onComposeAnother }: SuccessPanelProps) {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-sm">
-        <h1 className="text-lg font-bold text-emerald-900">
-          Campaign "{name}" saved to the library.
-        </h1>
-        <p className="mt-2 text-sm text-emerald-800">
+      <div className="rounded-2xl border border-human/30 bg-human/[0.07] p-5 shadow-[inset_0_1px_0_rgb(255_255_255/0.04),0_0_32px_-14px_rgb(52_211_153/0.5)]">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-human/15 text-human ring-1 ring-inset ring-human/30">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden>
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          </span>
+          <h2 className="font-display text-xl text-fg">
+            Campaign “{name}” saved to the library.
+          </h2>
+        </div>
+        <p className="mt-3 text-sm text-muted">
           To run the review, hand it to the agents in band.ai. Open the room, then post to the
           Coordinator:
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <code className="flex-1 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm text-slate-800">
-            "{instruction}"
+          <code className="flex-1 rounded-xl border border-human/25 bg-bg-soft/70 px-3 py-2 font-mono text-sm text-fg">
+            “{instruction}”
           </code>
           <button
             type="button"
             onClick={copyInstruction}
-            className="inline-flex items-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500"
+            className="btn border border-human/40 bg-human/10 text-human hover:bg-human/15"
           >
-            {copied ? 'Copied.' : 'Copy'}
+            {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
-        <p className="mt-3 text-xs text-emerald-700">
+        <p className="mt-3 text-xs text-faint">
           The agents collaborate in band.ai. The review then appears under Reviews here
           automatically.
         </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={onComposeAnother}
-          className="inline-flex items-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
-        >
+        <button type="button" onClick={onComposeAnother} className="btn btn-primary px-5 py-2.5">
           Compose another
         </button>
-        <Link
-          to="/library"
-          className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50"
-        >
+        <Link to="/library" className="btn btn-ghost px-5 py-2.5">
           View Library
         </Link>
       </div>
