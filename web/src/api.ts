@@ -17,7 +17,9 @@ import type {
   ReviewListResponse,
   ReviewReplayResponse,
   Rulebook,
+  RulebookImportRequest,
   RulebookListResponse,
+  RulebookPresetListResponse,
   RulebookResponse,
 } from './types';
 
@@ -78,6 +80,29 @@ export async function saveRulebook(
     body: JSON.stringify(rulebook),
   });
   return asJson<RulebookResponse>(res);
+}
+
+// Smart import: send a raw rulebook (.md / .json / plain text) and get back a
+// validated Rulebook PROPOSAL. Nothing is persisted server-side; the caller
+// reviews the returned rules and saves them via saveRulebook (PUT). md/text go
+// through the AIML-default model; json validates directly.
+export async function importRulebook(
+  region: string,
+  body: RulebookImportRequest,
+): Promise<RulebookResponse> {
+  const res = await fetch(`/api/rulebooks/${encodeURIComponent(region)}/import`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return asJson<RulebookResponse>(res);
+}
+
+// List the curated one-click rulebook presets (US-FTC, EU health claims, LATAM).
+// Each carries a full Rulebook the user can review and then save via saveRulebook.
+export async function listRulebookPresets(): Promise<RulebookPresetListResponse> {
+  const res = await fetch('/api/rulebooks/presets');
+  return asJson<RulebookPresetListResponse>(res);
 }
 
 // Asset library ------------------------------------------------------------

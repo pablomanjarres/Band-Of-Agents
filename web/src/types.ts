@@ -155,6 +155,25 @@ export interface RulebookResponse {
   rulebook: Rulebook;
 }
 
+/** Body for POST /api/rulebooks/:region/import. md/text parse via an LLM; json validates directly. */
+export interface RulebookImportRequest {
+  format: 'md' | 'json' | 'text';
+  content: string;
+  label?: string;
+}
+
+/** One curated, ready-to-apply rulebook returned by GET /api/rulebooks/presets. */
+export interface RulebookPreset {
+  id: string;
+  label: string;
+  region: string;
+  rulebook: Rulebook;
+}
+
+export interface RulebookPresetListResponse {
+  presets: RulebookPreset[];
+}
+
 // Asset library ------------------------------------------------------------
 export interface AssetListResponse {
   assets: ContentAsset[];
