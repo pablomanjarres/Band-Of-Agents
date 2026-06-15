@@ -6,48 +6,48 @@ export function RegionCard({ region }: { region: RegionState }) {
   const isReviewing = region.status === 'reviewing';
 
   return (
-    <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="surface flex flex-col rounded-2xl p-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">
+          <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-fg">
             {region.region}
           </h3>
           {region.reviewerName ? (
-            <p className="text-xs text-slate-400">{region.reviewerName}</p>
+            <p className="mt-0.5 text-xs text-faint">{region.reviewerName}</p>
           ) : null}
         </div>
         <StatusChip status={region.status} />
       </div>
 
-      <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+      <div className="mt-3 flex items-center gap-2 text-xs text-muted">
         {isReviewing ? (
-          <span className="text-slate-400">Reviewing.</span>
+          <span className="text-faint">Reviewing…</span>
         ) : (
           <span>
             {region.blocking > 0 ? (
-              <span className="font-semibold text-red-600">{region.blocking} blocking</span>
+              <span className="font-semibold text-danger">{region.blocking} blocking</span>
             ) : (
-              <span className="text-emerald-600">No blocking findings</span>
+              <span className="text-human">No blocking findings</span>
             )}
           </span>
         )}
       </div>
 
       {region.rationale ? (
-        <p className="mt-2 text-xs leading-relaxed text-slate-500">{region.rationale}</p>
+        <p className="mt-2 text-xs leading-relaxed text-muted">{region.rationale}</p>
       ) : null}
 
       {region.findings.length > 0 ? (
-        <ul className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+        <ul className="mt-3 space-y-2 border-t border-border pt-3">
           {region.findings.map((finding, index) => (
             <li key={`${finding.category}-${index}`} className="text-xs">
               <div className="flex items-center gap-2">
                 <SeverityChip severity={finding.severity} />
-                <span className="font-medium text-slate-700">{finding.category}</span>
+                <span className="font-medium text-fg">{finding.category}</span>
               </div>
-              <p className="mt-1 text-slate-500">{finding.rationale}</p>
+              <p className="mt-1 text-muted">{finding.rationale}</p>
               {finding.requiredDisclosure ? (
-                <p className="mt-1 italic text-slate-400">
+                <p className="mt-1 italic text-faint">
                   Required disclosure: {finding.requiredDisclosure}
                 </p>
               ) : null}
