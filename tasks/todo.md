@@ -112,3 +112,65 @@ send/recv/event -> BoardActivity -> BoardEvent -> SSE per review.
   editor/asset library, persistence across restart. 16 vitest tests pass, tsc clean. The board uses
   the exact same agents as band.ai; only the message transport differs. Live-room mode (band.ai)
   is the remaining piece and needs one more agent created in app.band.ai.
+
+---
+
+# 2026-06-15: Campaigns + cascading dossier + multimodal review
+
+Spec: `docs/superpowers/specs/2026-06-15-campaigns-multimodal-design.md`. Branch: `campaigns-multimodal`.
+Baseline before work: tsc clean, 19/19 vitest pass. Keep both transports (local + band) working.
+Keep it NON-LINEAR: reconcile fires per material, rollup is observational (the one rule).
+
+## Rung A: campaign model + per-material board + dossier cascade + UI + cleanup
+- [ ] Domain types: add `Campaign`, `Material` (kind + video + perception + attachments),
+      `CampaignDossier`, `MaterialPerception`; add `materialId` to `ReviewResult`/`RegionVerdict`.
+- [ ] Persistence: `data/campaigns.json` library; legacy single asset reads as a one-material
+      campaign; events carry `campaignId`/`materialId`.
+- [ ] Board: partition state by `(campaignId, materialId)`; `board.dossier()`,
+      `board.nextMaterial(campaignId)` cursor; `startReReview` scoped to a materialId.
+- [ ] Reconcile: per-material trigger (not a campaign-wide gate); observational worst-case rollup.
+- [ ] Coordinator: recruit once, post each material as a follow-up task; reviewers pull current
+      material from the cursor (works in BOARD_MODE=band, the product path).
+- [ ] Reviewer prompt: cascade the dossier (approved claims, substantiation, approved info) into
+      every region review via `buildReviewPrompt`.
+- [ ] Server: `GET/POST /api/campaigns`, `GET /api/campaigns/:id`,
+      `POST /api/campaigns/:id/materials`; `POST /api/reviews` accepts a campaign; SSE carries ids.
+- [ ] Web: `/campaigns` list + `/campaigns/:id` detail (dossier editor, nested materials tree,
+      material x region matrix, drill into per-material Live Board).
+- [ ] Remove the "Lumavida" demo brand across code, tests, and sample data (generic placeholder);
+      keep tests green.
+- [ ] Tests: campaign load/validate; two materials negotiate without a shared gate; dossier present
+      in prompt; reconcile per-material; one local end-to-end 3-material run over SSE.
+
+## Rung B: rulebook smart import + presets
+- [ ] `POST /api/rulebooks/:region/import` (json direct; md/text via LLM -> `Rule[]`, returned for
+      confirmation, not auto-saved).
+- [ ] Curated presets under `assets/presets/rulebook.*.json`; `GET /api/rulebooks/presets`.
+- [ ] Web: Rulebooks page dropzone (.md/.json) + preset picker + editable preview table; manual
+      edit stays.
+- [ ] Tests: json import validates; md-to-rules via a stubbed model; preset apply.
+
+## Rung C: multimodal perception + live "analyzing" UI
+- [ ] `Msg.content` becomes `string | ContentBlock[]`; update all four adapters (text passthrough
+      unchanged); adapter tests.
+- [ ] Perception pass: ffmpeg keyframes (host via Store), AIML vision (description/OCR/claims),
+      AIML Whisper STT (transcript); attach `MaterialPerception`; cascade text + frames to
+      vision-capable region models. Add `perception-vision`/`perception-stt` roles (AIML default,
+      `MODEL_MODE` fallback, documented in AIML_SWITCHOVER.md).
+- [ ] Video upload endpoint (`data/videos/`); frames under `data/images/`.
+- [ ] SSE `perceiving` events; web side panel: cycling keyframe thumbnail + progress + transcript
+      typing in + per-region "watching" badge, campaign matrix stays visible.
+- [ ] Fallback: paste-transcript + skip-vision so a material always reviews if perception is down.
+- [ ] Tests: perception artifacts cascade into the prompt; content-block adapter shapes.
+
+## Documentation (required, per the user)
+- [ ] `docs/CAMPAIGNS.md`: what was built and how it works (model, cascade, perception, import,
+      non-linear negotiation, how to run).
+- [ ] Update `README.md`: campaign + multimodal flow; AIML multi-model + three-modalities visible.
+- [ ] Update this `tasks/todo.md` as items complete; add a Review section at the end.
+- [ ] Append new correction patterns to `tasks/lessons.md`.
+
+## Verification gates
+- [ ] tsc clean + all tests green after each rung.
+- [ ] A real local end-to-end run shown (not just unit tests) before claiming a rung done.
+- [ ] Confirm the campaign negotiates per material concurrently (diff vs. baseline single-asset).
