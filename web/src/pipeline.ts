@@ -97,7 +97,7 @@ export function buildPipelineModel(state: BoardState): PipelineModel {
   const recruitEvents = events.filter(
     (event): event is Extract<typeof event, { type: 'recruited' }> => event.type === 'recruited',
   );
-  const lastRecruit = recruitEvents.at(-1);
+  const lastRecruit = recruitEvents[recruitEvents.length - 1];
   const recruitCount = lastRecruit ? parseRecruitCount(lastRecruit.text) : undefined;
   const reReview = recruitEvents.some((event) => /re-?review/i.test(event.text));
   const intakeSeen = has('intake') || has('recruited');
