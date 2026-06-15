@@ -28,6 +28,8 @@ export function makeConductor(opts: ConductorOptions): AgentHandler {
         if (b?.kind === 'revised' && b.revised) asset = b.revised;
       } catch { /* not JSON */ }
     }
+    // A prose recommit from remediation: the revised asset is on the hub.
+    if (!asset && message.senderType === 'agent') asset = opts.hub?.revised(message.roomId) ?? null;
     // A human can name a saved campaign (or paste raw copy) instead of JSON.
     if (!asset && message.senderType === 'user' && opts.lookupCampaign) {
       asset = opts.lookupCampaign(message.content) ?? toAsset(message.content);

@@ -71,7 +71,13 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
       'remediation',
     );
     const target = await resolveTarget(tools, opts.reportToHandle, message);
-    await tools.sendMessage(JSON.stringify({ kind: 'revised', region: directive.region, revised }), [target]);
+    if (opts.podHub) {
+      // Keep the revised asset off-chat; tell the conductor in plain English.
+      opts.podHub.setRevised(message.roomId, revised);
+      await tools.sendMessage(`Revised the ${directive.region} copy${imageNote}. Re-submitting "${revised.name ?? revised.id}" for review.`, [target]);
+    } else {
+      await tools.sendMessage(JSON.stringify({ kind: 'revised', region: directive.region, revised }), [target]);
+    }
   };
 }
 
