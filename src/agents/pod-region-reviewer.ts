@@ -1,6 +1,7 @@
 import type { AgentHandler, Mention, RoomMessage, RoomTools } from '../band/types';
 import type { CompleteResult, ModelClient } from '../models/client';
 import type { BrandDna, ContentAsset, ReviewResult, Rulebook } from '../domain/types';
+import type { PodHub } from '../board/pod-hub';
 import { ReviewOutput } from '../domain/types';
 import { tryParseAsset } from '../domain/load';
 import { matchParticipant, nameMatchesHandle } from './handles';
@@ -19,6 +20,8 @@ export interface RegionReviewerOptions {
   getRulebook?: () => Rulebook;
   /** Recent human-decision precedents (gray-area rulings) to weigh on borderline calls. Read per review. */
   precedents?: () => string[];
+  /** When set, read the asset from the hub (the lead dispatches plain English). */
+  hub?: PodHub;
 }
 
 const REBUTTAL_JSON_SCHEMA = {
@@ -79,7 +82,7 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
     }
     if (message.senderType !== 'agent') return;
     if (opts.ignoreFromHandle && nameMatchesHandle(message.senderName, opts.ignoreFromHandle)) return;
-    const asset = tryParseAsset(message.content);
+    const asset = tryParseAsset(message.content) ?? opts.hub?.asset(message.roomId);
     if (!asset) return;
 
     // Open the per-region review on Band's task channel (a 'task' lifecycle, not a

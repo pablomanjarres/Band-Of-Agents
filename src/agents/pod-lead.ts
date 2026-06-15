@@ -2,6 +2,7 @@
 import type { AgentHandler, RoomTools } from '../band/types';
 import type { Finding } from '../domain/types';
 import type { ConflictItem, PodFinding } from '../domain/board';
+import type { PodHub } from '../board/pod-hub';
 import { findParticipant, matchParticipant } from './handles';
 import { tryParseAsset } from '../domain/load';
 
@@ -11,6 +12,7 @@ export interface PodLeadOptions {
   memberKeys: string[];     // expected reply keys (region or source) to wait for
   reportToHandle: string;   // '@adjudicator'
   debate?: boolean;         // run a one-round rebuttal when a conflict is detected
+  hub?: PodHub;             // when set, read the asset from the hub and dispatch plain English
 }
 
 interface MemberReply { key: string; findings: Finding[] }
@@ -75,17 +77,26 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
   return async (message, tools) => {
     const roomId = message.roomId;
 
-    // 1) Asset from the conductor: dispatch to members.
-    const asset = tryParseAsset(message.content);
-    if (asset) {
+    // Parse the message: a member reply is JSON carrying findings or a rebuttal;
+    // a start is a fresh asset (JSON, or plain English with the asset on the hub).
+    let body: Record<string, unknown> | null = null;
+    try { body = JSON.parse(message.content); } catch { body = null; }
+    // A member reply is keyed by its source/region (the asset carries neither).
+    const isMemberReply = !!body && (typeof body.source === 'string' || typeof body.region === 'string' || body.kind === 'rebuttal');
+
+    // 1) Start: dispatch the asset to the members present in the room.
+    if (!isMemberReply) {
+      const asset = tryParseAsset(message.content) ?? opts.hub?.asset(roomId);
+      if (!asset) return;
       replies.set(roomId, new Map());
       const participants = await tools.getParticipants();
       const present: string[] = [];
+      const dispatch = opts.hub ? `Please review the "${asset.name ?? asset.id}" campaign.` : JSON.stringify(asset);
       for (let i = 0; i < opts.members.length; i++) {
         const t = findParticipant(participants, opts.members[i]!, 'agent');
         if (!t) continue;
         present.push(opts.memberKeys[i]!);
-        await tools.sendMessage(JSON.stringify(asset), [{ id: t.id, handle: t.handle }]);
+        await tools.sendMessage(dispatch, [{ id: t.id, handle: t.handle }]);
       }
       expectedKeys.set(roomId, present);
       await tools.sendEvent(`${opts.pod} pod deliberating (${present.length} members)`, 'recruited', { pod: opts.pod });
@@ -94,25 +105,22 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
       return;
     }
 
-    // 2) A member reply (review result, rebuttal) or noise.
-    let body: Record<string, unknown> | null = null;
-    try { body = JSON.parse(message.content); } catch { return; }
-    if (!body) return;
-
+    // 2) A member reply (review result or rebuttal).
+    const b = body as Record<string, unknown>;
     const map = replies.get(roomId) ?? new Map<string, MemberReply>();
     replies.set(roomId, map);
 
-    if (body.kind === 'rebuttal') {
-      const key = String(body.region ?? '');
+    if (b.kind === 'rebuttal') {
+      const key = String(b.region ?? '');
       const prev = map.get(key);
       // concede drops the block to a warn so it no longer conflicts.
-      if (prev && body.stance === 'concede') {
-        prev.findings = prev.findings.map((f) => (f.claim === body.claim && f.severity === 'block' ? { ...f, severity: 'warn' as const } : f));
+      if (prev && b.stance === 'concede') {
+        prev.findings = prev.findings.map((f) => (f.claim === b.claim && f.severity === 'block' ? { ...f, severity: 'warn' as const } : f));
       }
       map.set(`${key}:rebut`, { key: `${key}:rebut`, findings: [] }); // mark received
     } else {
-      const key = String(body.region ?? body.source ?? '');
-      const findings = (Array.isArray(body.findings) ? body.findings : []) as Finding[];
+      const key = String(b.region ?? b.source ?? '');
+      const findings = (Array.isArray(b.findings) ? b.findings : []) as Finding[];
       map.set(key, { key, findings });
     }
 

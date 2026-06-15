@@ -1,6 +1,7 @@
 // src/agents/conductor.ts
 import type { AgentHandler } from '../band/types';
 import type { ContentAsset } from '../domain/types';
+import type { PodHub } from '../board/pod-hub';
 import { matchParticipant } from './handles';
 import { toAsset, tryParseAsset } from '../domain/load';
 
@@ -13,6 +14,8 @@ export interface ConductorOptions {
    * human message also accepts a matched campaign, or raw copy as a fallback.
    */
   lookupCampaign?: (query: string) => ContentAsset | undefined;
+  /** When set, stash the asset here and dispatch plain English (keeps the room readable). */
+  hub?: PodHub;
 }
 
 export function makeConductor(opts: ConductorOptions): AgentHandler {
@@ -31,11 +34,16 @@ export function makeConductor(opts: ConductorOptions): AgentHandler {
     }
     if (!asset) return;
 
+    opts.hub?.setAsset(message.roomId, asset);
     await tools.sendEvent(`Intake: dispatching ${asset.id} to ${opts.podLeadHandles.length} pods`, 'intake', { asset: asset.id });
     const participants = await tools.getParticipants();
+    // With a hub the structured asset lives off-chat; dispatch plain English.
+    const dispatch = opts.hub
+      ? `Reviewing the "${asset.name ?? asset.id}" campaign for ${asset.markets.join(', ')} plus brand. Pods, please run your reviews.`
+      : JSON.stringify(asset);
     for (const handle of [...opts.podLeadHandles, ...(opts.primeHandles ?? [])]) {
       const t = matchParticipant(participants, handle, 'agent');
-      if (t) await tools.sendMessage(JSON.stringify(asset), [{ id: t.id, handle: t.handle }]);
+      if (t) await tools.sendMessage(dispatch, [{ id: t.id, handle: t.handle }]);
     }
   };
 }

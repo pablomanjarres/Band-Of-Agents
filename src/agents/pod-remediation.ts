@@ -1,6 +1,7 @@
 import type { AgentHandler, Mention, RoomMessage, RoomTools } from '../band/types';
 import type { ModelClient } from '../models/client';
 import type { BrandDna, ContentAsset, RemediationRequest } from '../domain/types';
+import type { PodHub } from '../board/pod-hub';
 import { RemediationRequest as RemediationRequestSchema } from '../domain/types';
 import { tryParseAsset } from '../domain/load';
 import { matchParticipant } from './handles';
@@ -17,6 +18,8 @@ export interface RemediationOptions {
    * large). When absent, the data URL is used as-is (fine for tests/stubs).
    */
   hostImage?: (url: string) => string;
+  /** Shared pod hub: read the asset from here when the conductor primes in prose. */
+  podHub?: PodHub;
 }
 
 // The remediation agent: caches the asset as it goes round, and on a remediation
@@ -36,7 +39,7 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
     if (message.senderType !== 'agent') return;
     const directive = tryParseDirective(message.content);
     if (!directive) return;
-    const base = assetByRoom.get(message.roomId);
+    const base = assetByRoom.get(message.roomId) ?? opts.podHub?.asset(message.roomId);
     if (!base) return;
 
     const rewritten = await rewriteCopy(opts.copyModel, opts.brand, base, directive);

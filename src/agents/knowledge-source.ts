@@ -2,6 +2,7 @@
 import type { AgentHandler } from '../band/types';
 import type { ModelClient } from '../models/client';
 import type { ContentAsset } from '../domain/types';
+import type { PodHub } from '../board/pod-hub';
 import { matchParticipant } from './handles';
 import { tryParseAsset } from '../domain/load';
 
@@ -16,13 +17,14 @@ export interface KnowledgeSourceOptions {
   buildUser?: (asset: ContentAsset) => string;   // default: pretty JSON of the asset
   ignoreFromHandle?: string;                     // optional: skip messages from this handle
   images?: (asset: ContentAsset) => string[];    // vision input (image URLs); only image-capable models use them
+  hub?: PodHub;                                  // when set, read the asset from the hub (prose on the wire)
 }
 
 export function makeKnowledgeSource(opts: KnowledgeSourceOptions): AgentHandler {
   const eventType = opts.eventType ?? 'review';
   return async (message, tools) => {
     if (opts.ignoreFromHandle && message.senderName && message.senderName.includes(opts.ignoreFromHandle.replace('@', ''))) return;
-    const asset = tryParseAsset(message.content);
+    const asset = tryParseAsset(message.content) ?? opts.hub?.asset(message.roomId);
     if (!asset) return;
     const user = opts.buildUser ? opts.buildUser(asset) : `Asset (JSON):\n${JSON.stringify(asset, null, 2)}`;
     const imgs = opts.images ? opts.images(asset) : [];
