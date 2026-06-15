@@ -16,12 +16,27 @@ export function matchParticipant(
   target: string,
   type?: 'agent' | 'user',
 ): Participant | undefined {
+  const hit = findParticipant(participants, target, type);
+  if (hit) return hit;
+  if (!type) return undefined;
+  return participants.filter((p) => p.type === type)[0];
+}
+
+/**
+ * Strict match: resolve a participant by a handle's last segment against the
+ * participant name/handle, or undefined when none matches (no first-of-type
+ * fallback). Use this to detect whether an optional participant is present.
+ */
+export function findParticipant(
+  participants: Participant[],
+  target: string,
+  type?: 'agent' | 'user',
+): Participant | undefined {
   const segment = target.replace(/^@/, '').split('/').pop() ?? target;
   const key = norm(segment);
+  if (key.length === 0) return undefined;
   const pool = type ? participants.filter((p) => p.type === type) : participants;
-  const hit = pool.find((p) => norm(p.name).includes(key) || norm(p.handle).includes(key));
-  if (hit) return hit;
-  return type ? pool[0] : undefined;
+  return pool.find((p) => norm(p.name).includes(key) || norm(p.handle).includes(key));
 }
 
 /**

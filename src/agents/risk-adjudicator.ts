@@ -1,6 +1,7 @@
 // src/agents/risk-adjudicator.ts
 import type { AgentHandler, RoomTools } from '../band/types';
 import type { PodFinding, ConflictItem, MediationResult } from '../domain/board';
+import type { PodHub } from '../board/pod-hub';
 import { matchParticipant } from './handles';
 
 export interface RiskAdjudicatorOptions {
@@ -10,6 +11,7 @@ export interface RiskAdjudicatorOptions {
   humanHandle: string;        // '@compliance-lead'
   maxRecommits?: number;      // default 1
   logPrecedent?: (p: { claim: string; decision: string; note: string }) => void;
+  hub?: PodHub;               // when set, read pod findings/mediation from the hub (prose on the wire)
 }
 
 interface RoomState {
@@ -37,7 +39,8 @@ export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler 
       s.mediateRequested = true;
       const t = matchParticipant(await tools.getParticipants(), opts.mediatorHandle, 'agent');
       await tools.sendEvent(`Adjudicator: ${conflicts.length} conflict(s), consulting mediator`, 'adjudication', { decision: 'mediate' });
-      if (t) await tools.sendMessage(JSON.stringify({ kind: 'mediate', conflicts }), [{ id: t.id, handle: t.handle }]);
+      opts.hub?.setConflicts(roomId, conflicts);
+      if (t) await tools.sendMessage(opts.hub ? `${conflicts.length} cross-pod conflict(s). Mediator, can these be resolved?` : JSON.stringify({ kind: 'mediate', conflicts }), [{ id: t.id, handle: t.handle }]);
       return;
     }
 
@@ -57,8 +60,9 @@ export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler 
     if (s.recommits < max) {
       s.recommits += 1;
       await tools.sendEvent(`Adjudicator: remediate (attempt ${s.recommits})`, 'adjudication', { decision: 'remediate', score: 0.5 });
+      opts.hub?.setConflicts(roomId, conflicts);
       const t = matchParticipant(await tools.getParticipants(), opts.remediationHandle, 'agent');
-      if (t) await tools.sendMessage(JSON.stringify({ kind: 'remediation', region: c.blockedBy[0] ?? 'EU', findings: [{ category: 'claim', severity: 'block', claim: c.span, rationale: c.rationale }] }), [{ id: t.id, handle: t.handle }]);
+      if (t) await tools.sendMessage(opts.hub ? `Remediation, please revise the ${c.blockedBy[0] ?? 'EU'} copy for the block on "${c.span}" and re-submit.` : JSON.stringify({ kind: 'remediation', region: c.blockedBy[0] ?? 'EU', findings: [{ category: 'claim', severity: 'block', claim: c.span, rationale: c.rationale }] }), [{ id: t.id, handle: t.handle }]);
       s.pods.clear(); s.mediation = undefined; s.mediateRequested = false;
       return;
     }
@@ -89,13 +93,25 @@ export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler 
       return;
     }
 
-    if (body?.kind === 'pod-finding') {
-      s.pods.set(String(body.pod), body as unknown as PodFinding);
+    // A pod filed its finding: JSON (back-compat) or prose from a lead (read the hub).
+    let pod = body?.kind === 'pod-finding' ? String(body.pod) : '';
+    let pf: PodFinding | undefined = body?.kind === 'pod-finding' ? (body as unknown as PodFinding) : undefined;
+    if (!pf && opts.hub && message.senderType === 'agent') {
+      const sn = (message.senderName ?? '').toLowerCase();
+      const resolved = sn.includes('claim') ? 'claims' : sn.includes('reg') ? 'regulatory' : sn.includes('brand') ? 'brand' : '';
+      if (resolved) { pf = opts.hub.podFinding(roomId, resolved); pod = resolved; }
+    }
+    if (pf) {
+      s.pods.set(pod, pf);
       if (opts.expectedPods.every((p) => s.pods.has(p))) await decide(roomId, tools);
       return;
     }
-    if (body?.kind === 'mediation') {
-      s.mediation = body as unknown as MediationResult;
+
+    // The mediator reported back: JSON or prose (read the hub).
+    let mediation: MediationResult | undefined = body?.kind === 'mediation' ? (body as unknown as MediationResult) : undefined;
+    if (!mediation && opts.hub && (message.senderName ?? '').toLowerCase().includes('mediator')) mediation = opts.hub.mediation(roomId);
+    if (mediation) {
+      s.mediation = mediation;
       await decide(roomId, tools);
     }
   };

@@ -1,6 +1,7 @@
 import type { AgentHandler, Mention, RoomMessage, RoomTools } from '../band/types';
 import type { ModelClient } from '../models/client';
 import type { BrandDna, ContentAsset, RemediationRequest } from '../domain/types';
+import type { PodHub } from '../board/pod-hub';
 import { RemediationRequest as RemediationRequestSchema } from '../domain/types';
 import { tryParseAsset } from '../domain/load';
 import { matchParticipant } from './handles';
@@ -17,6 +18,8 @@ export interface RemediationOptions {
    * large). When absent, the data URL is used as-is (fine for tests/stubs).
    */
   hostImage?: (url: string) => string;
+  /** Shared pod hub: read the asset from here when the conductor primes in prose. */
+  podHub?: PodHub;
 }
 
 // The remediation agent: caches the asset as it goes round, and on a remediation
@@ -34,9 +37,17 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
       return;
     }
     if (message.senderType !== 'agent') return;
-    const directive = tryParseDirective(message.content);
+    // The remediation directive arrives as JSON (back-compat) or, on a prose request,
+    // is derived from the conflict on the hub.
+    let directive = tryParseDirective(message.content);
+    // Only the adjudicator's prose request triggers a hub-derived directive (not the
+    // conductor's intake prime), otherwise priming would loop into endless rewrites.
+    if (!directive && opts.podHub && (message.senderName ?? '').toLowerCase().includes('adjudic')) {
+      const c = opts.podHub.conflicts(message.roomId)[0];
+      if (c) directive = { kind: 'remediation', region: c.blockedBy[0] ?? 'EU', findings: [{ category: 'claim', severity: 'block', claim: c.span, rationale: c.rationale }] };
+    }
     if (!directive) return;
-    const base = assetByRoom.get(message.roomId);
+    const base = assetByRoom.get(message.roomId) ?? opts.podHub?.asset(message.roomId);
     if (!base) return;
 
     const rewritten = await rewriteCopy(opts.copyModel, opts.brand, base, directive);
@@ -68,7 +79,13 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
       'remediation',
     );
     const target = await resolveTarget(tools, opts.reportToHandle, message);
-    await tools.sendMessage(JSON.stringify({ kind: 'revised', region: directive.region, revised }), [target]);
+    if (opts.podHub) {
+      // Keep the revised asset off-chat; tell the conductor in plain English.
+      opts.podHub.setRevised(message.roomId, revised);
+      await tools.sendMessage(`Revised the ${directive.region} copy${imageNote}. Re-submitting "${revised.name ?? revised.id}" for review.`, [target]);
+    } else {
+      await tools.sendMessage(JSON.stringify({ kind: 'revised', region: directive.region, revised }), [target]);
+    }
   };
 }
 

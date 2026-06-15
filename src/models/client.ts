@@ -18,10 +18,18 @@ export interface CompleteRequest {
   maxTokens?: number;
 }
 
+/** Approximate token counts a provider reports for one completion, used to estimate spend. */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface CompleteResult {
   text: string;
   /** Present when jsonSchema was supplied and the output parsed as JSON. */
   json?: unknown;
+  /** Provider-reported token usage when available; omitted by the stub and any adapter that lacks counts. */
+  usage?: TokenUsage;
 }
 
 export interface ImageRequest {

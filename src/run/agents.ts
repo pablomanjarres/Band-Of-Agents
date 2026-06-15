@@ -18,6 +18,7 @@ import type { AgentConnection, BandTransport, ConnectOptions } from '../band/typ
 import { activeMode, describeRoutes, imageClientFor, modelFor } from '../models/route';
 import { findCampaignByName, loadBrandDna, loadRulebook } from '../domain/load';
 import { Store } from '../store/store';
+import { spend } from '../models/spend';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
 const DATA_DIR = new URL('../../data/', import.meta.url).pathname;
@@ -102,6 +103,18 @@ async function main(): Promise<void> {
   console.log(
     'Agents connected to band.ai. In the room, @mention the Conductor with a marketing asset. Ctrl+C to stop.',
   );
+
+  // Live spend readout: print the running estimate (Bedrock + Vertex + Featherless
+  // calls cost real money) whenever it moves. Also persisted to data/spend.json,
+  // which the web console reads.
+  let lastUsd = -1;
+  setInterval(() => {
+    const s = spend.snapshot();
+    if (s.totalUsd === lastUsd) return;
+    lastUsd = s.totalUsd;
+    const top = s.byModel.slice(0, 3).map((m) => `${m.model.split('/').pop()}: $${m.usd.toFixed(4)}`).join(', ');
+    console.log(`[spend] est. $${s.totalUsd.toFixed(4)} over ${s.calls} call(s)${top ? ` | ${top}` : ''}`);
+  }, 12000);
 }
 
 main().catch((err: unknown) => {

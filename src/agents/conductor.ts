@@ -1,6 +1,7 @@
 // src/agents/conductor.ts
 import type { AgentHandler } from '../band/types';
 import type { ContentAsset } from '../domain/types';
+import type { PodHub } from '../board/pod-hub';
 import { matchParticipant } from './handles';
 import { toAsset, tryParseAsset } from '../domain/load';
 
@@ -13,6 +14,8 @@ export interface ConductorOptions {
    * human message also accepts a matched campaign, or raw copy as a fallback.
    */
   lookupCampaign?: (query: string) => ContentAsset | undefined;
+  /** When set, stash the asset here and dispatch plain English (keeps the room readable). */
+  hub?: PodHub;
 }
 
 export function makeConductor(opts: ConductorOptions): AgentHandler {
@@ -25,17 +28,26 @@ export function makeConductor(opts: ConductorOptions): AgentHandler {
         if (b?.kind === 'revised' && b.revised) asset = b.revised;
       } catch { /* not JSON */ }
     }
+    // A prose recommit from remediation: the revised asset is on the hub.
+    if (!asset && message.senderType === 'agent') asset = opts.hub?.revised(message.roomId) ?? null;
     // A human can name a saved campaign (or paste raw copy) instead of JSON.
     if (!asset && message.senderType === 'user' && opts.lookupCampaign) {
       asset = opts.lookupCampaign(message.content) ?? toAsset(message.content);
     }
     if (!asset) return;
 
+    opts.hub?.setAsset(message.roomId, asset);
     await tools.sendEvent(`Intake: dispatching ${asset.id} to ${opts.podLeadHandles.length} pods`, 'intake', { asset: asset.id });
     const participants = await tools.getParticipants();
-    for (const handle of [...opts.podLeadHandles, ...(opts.primeHandles ?? [])]) {
-      const t = matchParticipant(participants, handle, 'agent');
-      if (t) await tools.sendMessage(JSON.stringify(asset), [{ id: t.id, handle: t.handle }]);
-    }
+    // With a hub the structured asset lives off-chat; dispatch plain English.
+    const dispatch = opts.hub
+      ? `Reviewing the "${asset.name ?? asset.id}" campaign for ${asset.markets.join(', ')} plus brand. Pods, please run your reviews.`
+      : JSON.stringify(asset);
+    // One message mentioning every pod lead (plus prime handles), not one each.
+    const targets = [...opts.podLeadHandles, ...(opts.primeHandles ?? [])]
+      .map((h) => matchParticipant(participants, h, 'agent'))
+      .filter((p): p is NonNullable<typeof p> => !!p)
+      .map((p) => ({ id: p.id, handle: p.handle }));
+    if (targets.length) await tools.sendMessage(dispatch, targets);
   };
 }

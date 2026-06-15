@@ -150,6 +150,22 @@ export interface PrecedentListResponse {
   precedents: Precedent[];
 }
 
+// Spending: live estimate of model cost, mirrors SpendSnapshot in src/models/spend.ts.
+export interface ModelSpend {
+  model: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  images: number;
+  usd: number;
+}
+
+export interface Spending {
+  totalUsd: number;
+  calls: number;
+  byModel: ModelSpend[];
+}
+
 // Artifacts: things an agent produced that Band cannot show inline, rendered by
 // the /a/:id viewer. Mirrors src/domain/artifact.ts.
 export type ArtifactKind = 'image' | 'markdown' | 'json' | 'text';

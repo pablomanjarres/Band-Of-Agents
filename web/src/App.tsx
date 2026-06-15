@@ -8,6 +8,7 @@ import { PlaceholderPage } from './pages/PlaceholderPage';
 import { ReplayBoardPage } from './pages/ReplayBoardPage';
 import { RulebooksPage } from './pages/RulebooksPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { SpendTracker } from './components/SpendTracker';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Compose', end: true },
@@ -26,24 +27,27 @@ function Nav() {
           </span>
           <span className="text-sm font-semibold text-slate-800">Lumavida Compliance Console</span>
         </div>
-        <nav className="flex items-center gap-1">
-          {NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                `rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                  isActive
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
-                }`
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
+        <div className="flex items-center gap-3">
+          <nav className="flex items-center gap-1">
+            {NAV_ITEMS.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  `rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    isActive
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                  }`
+                }
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
+          <SpendTracker />
+        </div>
       </div>
     </header>
   );
