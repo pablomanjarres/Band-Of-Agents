@@ -13,6 +13,7 @@
 import { BoardSession, type BoardModels } from './session';
 import type { BoardEvent } from './events';
 import type { Precedent } from '../agents/reconcile';
+import type { ModelClient, SttClient } from '../models/client';
 import type { BrandDna, Campaign, Material, RegionVerdict, Rulebook } from '../domain/types';
 
 export interface CampaignSessionOptions {
@@ -27,6 +28,18 @@ export interface CampaignSessionOptions {
   onPrecedent?: (precedent: Precedent) => void;
   hostImage?: (url: string) => string;
   getPrecedents?: () => string[];
+  /**
+   * Multimodal perception clients applied per material (concurrently): each
+   * material's BoardSession "sees"/"hears" it once before its reviewers run. Both
+   * optional; when omitted, materials review text-only (no regression). Concurrency
+   * is preserved: perception happens inside each material's own BoardSession.run.
+   */
+  perception?: {
+    vision?: ModelClient;
+    stt?: SttClient;
+    resolveVideoPath?: (videoUrl: string) => string | undefined;
+    maxFrames?: number;
+  };
 }
 
 /** Worst-case decision per region across all materials, for the campaign badge. */
@@ -130,6 +143,7 @@ export class CampaignSession {
       ...(this.opts.onPrecedent ? { onPrecedent: this.opts.onPrecedent } : {}),
       ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}),
       ...(this.opts.getPrecedents ? { getPrecedents: this.opts.getPrecedents } : {}),
+      ...(this.opts.perception ? { perception: this.opts.perception } : {}),
       campaign: { campaignId: campaign.id, materialId: material.id, dossier: campaign.dossier },
     });
     this.sessions.set(material.id, session);

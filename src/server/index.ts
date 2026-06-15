@@ -22,7 +22,8 @@ import { z } from 'zod';
 import { loadBrandDna, loadRulebook } from '../domain/load';
 import { Campaign as CampaignSchema, ContentAsset as ContentAssetSchema, Material as MaterialSchema, Rulebook as RulebookSchema } from '../domain/types';
 import type { Campaign, ContentAsset, Rulebook } from '../domain/types';
-import { BoardSession, realBoardModels } from '../board/session';
+import { BoardSession, realBoardModels, realPerceptionModels, type BoardModels } from '../board/session';
+import { StubModelClient, StubSttClient, type ModelClient, type SttClient } from '../models/client';
 import { CampaignSession, type CampaignRollup } from '../board/campaign';
 import { BandBoard } from '../board/band-session';
 import { modelFor } from '../models/route';
@@ -69,6 +70,72 @@ interface CampaignReviewRecord {
 const reviews = new Map<string, ReviewRecord>();
 const campaignReviews = new Map<string, CampaignReviewRecord>();
 const store = new Store(DATA_DIR);
+
+// Key-free local demo fallback. In local mode with no AIML key (and not dev mode),
+// the real model clients cannot be constructed (modelFor throws). Rather than fail
+// the portal, we fall back to deterministic STUB models so the campaign still
+// reviews and the perception panel still animates over the seeded frames, exactly
+// like `npm run local`. The product paths (an AIML key set, MODEL_MODE=dev, or
+// BOARD_MODE=band) are untouched: real models are used whenever they can be built.
+const KEY_FREE_LOCAL = BOARD_MODE === 'local' && process.env.MODEL_MODE !== 'dev' && !process.env.AIML_API_KEY;
+
+/** A deterministic reviewer model: a clear (no-findings) review for every region. */
+function stubReviewModel(): ModelClient {
+  return new StubModelClient(() => ({ text: '', json: { findings: [] } }));
+}
+
+/** Stub board models for the key-free demo (no network, deterministic). */
+function stubBoardModels(): BoardModels {
+  return {
+    us: stubReviewModel(),
+    eu: stubReviewModel(),
+    latam: stubReviewModel(),
+    brand: stubReviewModel(),
+    remediationCopy: new StubModelClient(() => ({ text: 'Revised copy (demo).' })),
+    image: { model: 'stub-image', complete: async () => ({ text: '' }), generateImage: async () => ({}) },
+  };
+}
+
+/** Stub perception (vision + STT) for the key-free demo: canned artifacts. */
+function stubPerceptionModels(): { vision: ModelClient; stt: SttClient } {
+  return {
+    vision: new StubModelClient(() => ({
+      text: '',
+      json: {
+        visualDescription: 'Warm flat-lay of the product with citrus and eucalyptus, then a close-up as on-screen text fades in.',
+        onScreenText: 'Feel your best, every day',
+        detectedClaims: ['Helps maintain your immune response'],
+      },
+    })),
+    stt: new StubSttClient(() => ({
+      text: 'Feeling run down? This helps maintain your immune response so you can feel your best, every day.',
+    })),
+  };
+}
+
+/** Reviewer models: real when constructible, else the key-free demo stubs. */
+function boardModelsOrStub(): BoardModels {
+  if (KEY_FREE_LOCAL) return stubBoardModels();
+  try {
+    return realBoardModels();
+  } catch {
+    return stubBoardModels();
+  }
+}
+
+/** Perception clients: real when available, else demo stubs (so the UI animates). */
+function perceptionOrStub(): { vision?: ModelClient; stt?: SttClient } {
+  if (KEY_FREE_LOCAL) return stubPerceptionModels();
+  return realPerceptionModels();
+}
+
+// Multimodal perception config (vision + STT) plus the video-path resolver. Absent
+// clients => that modality is skipped (graceful). The store resolves a hosted
+// /api/videos/<name> url back to its local file so ffmpeg/STT can read the bytes.
+const perceptionConfig = {
+  ...perceptionOrStub(),
+  resolveVideoPath: (videoUrl: string) => store.videoPath(videoUrl),
+};
 
 // Feed recent human-decision precedents back into the reviewers' shared context.
 const recentPrecedents = (): string[] =>
@@ -158,6 +225,18 @@ function imageContentType(name: string): string {
   return 'application/octet-stream';
 }
 
+function videoContentType(name: string): string {
+  if (name.endsWith('.mp4') || name.endsWith('.m4v')) return 'video/mp4';
+  if (name.endsWith('.webm')) return 'video/webm';
+  if (name.endsWith('.mov')) return 'video/quicktime';
+  return 'application/octet-stream';
+}
+
+function extOf(filename: string, fallback = 'mp4'): string {
+  const m = /\.([a-z0-9]+)$/i.exec(filename);
+  return m && m[1] ? m[1].toLowerCase() : fallback;
+}
+
 function makeOnEvent(record: ReviewRecord): (event: BoardEvent) => void {
   return (event) => {
     let e = event;
@@ -229,7 +308,7 @@ function runCampaignReview(campaign: Campaign): string {
         campaign,
         brand,
         rulebooks: currentRulebooks(),
-        models: realBoardModels(),
+        models: boardModelsOrStub(),
         onEvent: (e) => {
           onEvent(e);
           record.rollup = session.rollup();
@@ -237,6 +316,7 @@ function runCampaignReview(campaign: Campaign): string {
         onPrecedent: (precedent) => store.appendPrecedent(precedent),
         hostImage: (u) => store.hostImage(u) ?? u,
         getPrecedents: recentPrecedents,
+        perception: perceptionConfig,
       });
       record.submitDecision = (materialId, text) => session.submitDecision(materialId, text);
       const rollup = await session.run();
@@ -321,11 +401,12 @@ app.post('/api/reviews', async (c) => {
     asset,
     brand,
     rulebooks: currentRulebooks(),
-    models: realBoardModels(),
+    models: boardModelsOrStub(),
     onEvent,
     onPrecedent: (p) => store.appendPrecedent(p),
     hostImage: (u) => store.hostImage(u) ?? u,
     getPrecedents: recentPrecedents,
+    perception: perceptionConfig,
   });
   record.submitDecision = (text) => session.submitDecision(text);
   reviews.set(id, record);
@@ -409,6 +490,42 @@ app.get('/api/images/:name', (c) => {
   const buf = store.readImage(c.req.param('name'));
   if (!buf) return c.json({ error: 'not found' }, 404);
   return c.body(new Uint8Array(buf), 200, { 'content-type': imageContentType(c.req.param('name')), 'cache-control': 'public, max-age=31536000, immutable' });
+});
+
+app.get('/api/videos/:name', (c) => {
+  const buf = store.readVideo(c.req.param('name'));
+  if (!buf) return c.json({ error: 'not found' }, 404);
+  return c.body(new Uint8Array(buf), 200, { 'content-type': videoContentType(c.req.param('name')), 'cache-control': 'public, max-age=31536000, immutable' });
+});
+
+// Multipart video upload. Hosts the file under data/videos/ and returns its served
+// url. When campaignId + materialId are included (form fields), the uploaded url is
+// also attached to that material's videoUrl so the next campaign review perceives
+// it. The actual perception (frames + vision + STT) runs server-side when a review
+// is started and streams 'perceiving' over the existing SSE.
+app.post('/api/videos', async (c) => {
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.json({ error: 'expected multipart/form-data with a "video" file' }, 400);
+  }
+  const file = form.get('video');
+  if (!(file instanceof File)) return c.json({ error: 'missing "video" file field' }, 400);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.byteLength === 0) return c.json({ error: 'empty video file' }, 400);
+  const videoUrl = store.hostVideo(bytes, extOf(file.name));
+
+  const campaignId = typeof form.get('campaignId') === 'string' ? (form.get('campaignId') as string) : '';
+  const materialId = typeof form.get('materialId') === 'string' ? (form.get('materialId') as string) : '';
+  if (campaignId && materialId) {
+    const camp = store.getCampaign(campaignId);
+    if (camp) {
+      const materials = camp.materials.map((m) => (m.id === materialId ? { ...m, videoUrl } : m));
+      store.saveCampaign({ ...camp, materials });
+    }
+  }
+  return c.json({ videoUrl, ...(campaignId ? { campaignId } : {}), ...(materialId ? { materialId } : {}) });
 });
 
 app.get('/api/precedents', (c) => c.json({ precedents: store.listPrecedents() }));

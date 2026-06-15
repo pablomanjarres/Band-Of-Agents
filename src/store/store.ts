@@ -6,7 +6,7 @@
 // Deliberately dependency-free (node:fs) and behind a small interface so it can
 // become SQLite later without touching the server.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { BoardEvent, BoardStatus } from '../board/events';
@@ -30,12 +30,14 @@ export class Store {
   private readonly dir: string;
   private readonly imagesDir: string;
   private readonly rulebooksDir: string;
+  private readonly videosDir: string;
 
   constructor(dir: string) {
     this.dir = dir;
     this.imagesDir = join(dir, 'images');
     this.rulebooksDir = join(dir, 'rulebooks');
-    for (const d of [this.dir, this.imagesDir, this.rulebooksDir]) {
+    this.videosDir = join(dir, 'videos');
+    for (const d of [this.dir, this.imagesDir, this.rulebooksDir, this.videosDir]) {
       if (!existsSync(d)) mkdirSync(d, { recursive: true });
     }
   }
@@ -71,6 +73,36 @@ export class Store {
   readImage(name: string): Buffer | null {
     const safe = name.replace(/[^a-zA-Z0-9._-]/g, '');
     const p = join(this.imagesDir, safe);
+    if (!existsSync(p)) return null;
+    return readFileSync(p);
+  }
+
+  // --- Videos --------------------------------------------------------------
+  // Uploaded videos are hosted under data/videos/ and served via /api/videos/.
+  // The perception pass resolves a /api/videos/<name> url back to its local file
+  // (videoPath) so ffmpeg/STT can read the bytes without a network fetch.
+
+  /** Save raw video bytes, returning the served url (/api/videos/<name>). */
+  hostVideo(bytes: Uint8Array, ext = 'mp4'): string {
+    const safeExt = /^[a-z0-9]+$/i.test(ext) ? ext.toLowerCase() : 'mp4';
+    const name = `${randomUUID()}.${safeExt}`;
+    writeFileSync(join(this.videosDir, name), Buffer.from(bytes));
+    return `/api/videos/${name}`;
+  }
+
+  /** Local file path for a hosted video url (/api/videos/<name>), or undefined. */
+  videoPath(videoUrl: string): string | undefined {
+    const m = /^\/api\/videos\/(.+)$/.exec(videoUrl);
+    if (!m) return undefined;
+    const safe = (m[1] ?? '').replace(/[^a-zA-Z0-9._-]/g, '');
+    if (!safe) return undefined;
+    const p = join(this.videosDir, safe);
+    return existsSync(p) ? p : undefined;
+  }
+
+  readVideo(name: string): Buffer | null {
+    const safe = name.replace(/[^a-zA-Z0-9._-]/g, '');
+    const p = join(this.videosDir, safe);
     if (!existsSync(p)) return null;
     return readFileSync(p);
   }
@@ -130,6 +162,9 @@ export class Store {
 
   /** The bundled demo campaign (assets/sample-campaign.json), used only when the library is empty. */
   private seedCampaigns(): Campaign[] {
+    // Mirror the bundled seed keyframes into data/images so the sample campaign's
+    // /api/images/<name> frame URLs resolve on a fresh clone (data/ is gitignored).
+    this.mirrorSeedFrames();
     const p = join(this.dir, '..', 'assets', 'sample-campaign.json');
     if (!existsSync(p)) return [];
     try {
@@ -138,6 +173,21 @@ export class Store {
       return list.map((c) => CampaignSchema.parse(c));
     } catch {
       return [];
+    }
+  }
+
+  /** Copy any bundled assets/frames/*.{png,jpg} into data/images (missing only). */
+  private mirrorSeedFrames(): void {
+    const src = join(this.dir, '..', 'assets', 'frames');
+    if (!existsSync(src)) return;
+    try {
+      for (const f of readdirSync(src)) {
+        if (!/\.(png|jpe?g)$/i.test(f)) continue;
+        const dest = join(this.imagesDir, f);
+        if (!existsSync(dest)) copyFileSync(join(src, f), dest);
+      }
+    } catch {
+      /* best-effort: the demo just shows no frame thumbnails if this fails */
     }
   }
 

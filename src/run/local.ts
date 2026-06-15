@@ -13,7 +13,7 @@
 
 import { BoardSession, type BoardModels } from '../board/session';
 import { CampaignSession } from '../board/campaign';
-import { StubModelClient, type CompleteRequest, type ModelClient } from '../models/client';
+import { StubModelClient, StubSttClient, type CompleteRequest, type ModelClient, type SttClient } from '../models/client';
 import { loadAsset, loadBrandDna, loadRulebook } from '../domain/load';
 import { Campaign, type Finding } from '../domain/types';
 import type { BoardEvent } from '../board/events';
@@ -63,6 +63,9 @@ function printEvent(e: BoardEvent): void {
     case 'status':
       console.log(`  ${tag}[status: ${e.status}]`);
       break;
+    case 'perceiving':
+      console.log(`  ${tag}perceiving [${e.stage}] frame ${e.index + 1}/${e.total}${e.frameUrl ? ` ${e.frameUrl}` : ''}`);
+      break;
   }
 }
 
@@ -100,6 +103,25 @@ function regionStub(table: Record<string, Finding[]>): ModelClient {
   return new StubModelClient((req) => findings(...(table[materialIdOf(req)] ?? [])));
 }
 
+// Stub perception (vision + STT) for the key-free demo: the vision model returns a
+// canned description/OCR/claims and STT returns a canned transcript, so the
+// perception pass produces real artifacts and emits 'perceiving' ticks over the
+// seeded frames without any network or ffmpeg.
+function stubPerception(): { vision: ModelClient; stt: SttClient } {
+  const vision = new StubModelClient(() => ({
+    text: '',
+    json: {
+      visualDescription: 'Warm flat-lay of Northwind Immune+ bottles with citrus and eucalyptus, then a close-up as on-screen text fades in.',
+      onScreenText: 'Northwind Immune+ | Feel your best, every day | 9 out of 10 felt the difference',
+      detectedClaims: ['Helps maintain your immune response', '9 out of 10 users felt the difference in two weeks'],
+    },
+  }));
+  const stt: SttClient = new StubSttClient(() => ({
+    text: 'Feeling run down? Northwind Immune plus helps maintain your immune response so you can feel your best, every day. Nine out of ten users felt the difference in two weeks.',
+  }));
+  return { vision, stt };
+}
+
 function campaignModels(): BoardModels {
   return {
     us: regionStub(US_FINDINGS),
@@ -125,7 +147,7 @@ function demoCampaign(): Campaign {
       sources: [{ name: 'trial-summary', kind: 'text', content: 'Double-blind, placebo-controlled; primary immune-response endpoint met.' }],
     },
     materials: [
-      { id: 'hero-video', name: 'Hero Video', kind: 'video', channel: 'instagram', markets: ['US', 'EU', 'LATAM'], copy: 'Feel your best. Northwind Immune+ helps maintain your immune response. 9 out of 10 felt the difference.', claim: 'helps maintain immune response', videoUrl: 'https://example/hero.mp4' },
+      { id: 'hero-video', name: 'Hero Video', kind: 'video', channel: 'instagram', markets: ['US', 'EU', 'LATAM'], copy: 'Feel your best. Northwind Immune+ helps maintain your immune response. 9 out of 10 felt the difference.', claim: 'helps maintain immune response', videoUrl: '/api/videos/immune-plus-hero.mp4', perception: { frames: ['/api/images/immune-plus-frame-01.png', '/api/images/immune-plus-frame-02.png', '/api/images/immune-plus-frame-03.png', '/api/images/immune-plus-frame-04.png'] } },
       { id: 'launch-post', name: 'Launch Post', kind: 'post', channel: 'x', markets: ['US', 'EU', 'LATAM'], copy: 'Northwind Immune+ supports everyday wellness as part of a balanced diet and healthy lifestyle.', claim: 'supports everyday wellness' },
       { id: 'promo-banner', name: 'Promo Banner', kind: 'banner', channel: 'display', markets: ['US'], copy: 'Northwind Immune+: free forever, no strings. Claim yours now.', claim: 'free forever' },
     ],
@@ -151,6 +173,7 @@ async function runCampaignDemo(): Promise<void> {
     brand,
     rulebooks,
     models: campaignModels(),
+    perception: stubPerception(),
     onEvent: printEvent,
     onPrecedent: (p) => console.log(`  [precedent] ${JSON.stringify(p)}`),
   });

@@ -42,6 +42,21 @@ export type BoardEvent = (
   | { type: 'decision'; seq: number; fromName: string; text: string }
   | { type: 'log'; seq: number; fromName: string; messageType: string; text: string }
   | { type: 'status'; seq: number; fromName: string; status: BoardStatus }
+  | {
+      // A live keyframe-analysis tick from the multimodal perception pre-pass: the
+      // server emits these per frame (and once with stage 'done') so the UI can
+      // cycle the frame being read, fill a progress bar, and type the transcript
+      // in. It carries campaignId/materialId via BoardEventCampaignRef so it lanes
+      // to the right material; it gates nothing.
+      type: 'perceiving';
+      seq: number;
+      fromName: string;
+      frameUrl?: string;
+      index: number;
+      total: number;
+      stage: 'vision' | 'stt' | 'done';
+      transcript?: string;
+    }
 ) &
   BoardEventCampaignRef;
 
