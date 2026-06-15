@@ -20,9 +20,10 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { z } from 'zod';
 import { loadBrandDna, loadRulebook } from '../domain/load';
-import { ContentAsset as ContentAssetSchema, Rulebook as RulebookSchema } from '../domain/types';
-import type { ContentAsset, Rulebook } from '../domain/types';
+import { Campaign as CampaignSchema, ContentAsset as ContentAssetSchema, Material as MaterialSchema, Rulebook as RulebookSchema } from '../domain/types';
+import type { Campaign, ContentAsset, Rulebook } from '../domain/types';
 import { BoardSession, realBoardModels } from '../board/session';
+import { CampaignSession, type CampaignRollup } from '../board/campaign';
 import { BandBoard } from '../board/band-session';
 import type { BoardEvent, BoardStatus } from '../board/events';
 import { Store } from '../store/store';
@@ -46,7 +47,23 @@ interface ReviewRecord {
   submitDecision: (text: string) => Promise<void>;
 }
 
+// A campaign review is ONE id under which every material's events stream (each
+// event carries materialId, so the UI lanes them). The rollup is recomputed as
+// verdicts arrive; it is observational and gates nothing (the one rule).
+interface CampaignReviewRecord {
+  id: string;
+  createdAt: number;
+  campaign: Campaign;
+  events: BoardEvent[];
+  status: BoardStatus;
+  conflict: boolean;
+  rollup: CampaignRollup | null;
+  subscribers: Set<(event: BoardEvent) => void>;
+  submitDecision: (materialId: string, text: string) => Promise<void>;
+}
+
 const reviews = new Map<string, ReviewRecord>();
+const campaignReviews = new Map<string, CampaignReviewRecord>();
 const store = new Store(DATA_DIR);
 
 // Feed recent human-decision precedents back into the reviewers' shared context.
@@ -72,7 +89,7 @@ function normalizeName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-// Resolve a human's free-text reference ("review campaign Lumavida-Q3") to a saved campaign.
+// Resolve a human's free-text reference ("review campaign Immune+ Q3") to a saved campaign.
 function findCampaign(query: string): ContentAsset | undefined {
   const q = normalizeName(query);
   if (!q) return undefined;
@@ -152,6 +169,79 @@ function makeOnEvent(record: ReviewRecord): (event: BoardEvent) => void {
   };
 }
 
+// Campaign event sink: every per-material event is image-hosted, seq-stamped, and
+// fanned out under the single campaign-review id. Per-material status events keep
+// their materialId so the UI lanes them and the campaign SSE does NOT close on
+// them; the campaign-level terminal is a separate status event with no materialId.
+function makeCampaignOnEvent(record: CampaignReviewRecord): (event: BoardEvent) => void {
+  return (event) => {
+    let e = event;
+    if (e.type === 'revised' && e.imageUrl) {
+      const hosted = store.hostImage(e.imageUrl);
+      if (hosted) e = { ...e, imageUrl: hosted };
+    }
+    e = { ...e, seq: record.events.length } as BoardEvent;
+    record.events.push(e);
+    if (e.type === 'verdict' && e.conflict) record.conflict = true;
+    for (const sub of record.subscribers) sub(e);
+  };
+}
+
+// Run a campaign as concurrent per-material reviews. Returns the record id; the
+// caller streams events over SSE. The campaign status stays 'running' until every
+// material is terminal (CampaignSession.run resolves), then becomes 'complete' or
+// 'awaiting-decision' (any material escalated) and a campaign-level status event
+// is emitted (no materialId) so the SSE consumer knows the whole campaign rested.
+function runCampaignReview(campaign: Campaign): string {
+  const id = randomUUID();
+  const record: CampaignReviewRecord = {
+    id,
+    createdAt: Date.now(),
+    campaign,
+    events: [],
+    status: 'running',
+    conflict: false,
+    rollup: null,
+    subscribers: new Set(),
+    submitDecision: async () => {},
+  };
+  const onEvent = makeCampaignOnEvent(record);
+  campaignReviews.set(id, record);
+
+  // Build the models and run inside the async flow so a missing key / provider
+  // failure degrades THIS review to a status:error event (mirroring the single-
+  // asset path that returns {id} then fails async), never a 500 or a dead portal.
+  void (async () => {
+    try {
+      const session = new CampaignSession({
+        roomId: `campaign-${id}`,
+        campaign,
+        brand,
+        rulebooks: currentRulebooks(),
+        models: realBoardModels(),
+        onEvent: (e) => {
+          onEvent(e);
+          record.rollup = session.rollup();
+        },
+        onPrecedent: (precedent) => store.appendPrecedent(precedent),
+        hostImage: (u) => store.hostImage(u) ?? u,
+        getPrecedents: recentPrecedents,
+      });
+      record.submitDecision = (materialId, text) => session.submitDecision(materialId, text);
+      const rollup = await session.run();
+      record.rollup = rollup;
+      const escalated = rollup.worstCaseByRegion.some((r) => r.decision === 'escalate');
+      record.status = escalated ? 'awaiting-decision' : 'complete';
+      onEvent({ type: 'status', seq: 0, fromName: 'system', status: record.status });
+    } catch (err: unknown) {
+      record.status = 'error';
+      onEvent({ type: 'log', seq: 0, fromName: 'system', messageType: 'error', text: `Campaign review failed: ${(err as Error)?.message ?? String(err)}` });
+      onEvent({ type: 'status', seq: 0, fromName: 'system', status: 'error' });
+    }
+  })();
+  return id;
+}
+
 // A model/provider failure should degrade a single review, never take down the
 // portal (e.g. an expired Vertex token surfacing as an async rejection).
 process.on('unhandledRejection', (reason) => {
@@ -169,6 +259,25 @@ app.post('/api/reviews', async (c) => {
     );
   }
   const body: unknown = await c.req.json().catch(() => ({}));
+
+  // Campaign mode: a saved campaignId or an inline campaign runs every material
+  // concurrently. The single-asset payload below is unchanged (no regression).
+  const b = (body ?? {}) as { campaignId?: unknown; campaign?: unknown };
+  if (typeof b.campaignId === 'string' || (b.campaign && typeof b.campaign === 'object')) {
+    let campaign: Campaign | undefined;
+    if (typeof b.campaignId === 'string') {
+      campaign = store.getCampaign(b.campaignId);
+      if (!campaign) return c.json({ error: `campaign ${b.campaignId} not found` }, 404);
+    } else {
+      const parsedCampaign = CampaignSchema.safeParse(b.campaign);
+      if (!parsedCampaign.success) return c.json({ error: parsedCampaign.error.flatten() }, 400);
+      campaign = parsedCampaign.data;
+    }
+    if (campaign.materials.length === 0) return c.json({ error: 'campaign has no materials' }, 400);
+    const id = runCampaignReview(campaign);
+    return c.json({ id, kind: 'campaign', materials: campaign.materials.map((m) => m.id) });
+  }
+
   const parsed = CreateReview.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
   const d = parsed.data;
@@ -302,6 +411,106 @@ app.post('/api/assets', async (c) => {
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
   store.saveAsset(parsed.data);
   return c.json({ asset: parsed.data });
+});
+
+// --- Campaigns -----------------------------------------------------------
+// The saved campaign library. listCampaigns also surfaces legacy single assets
+// as one-material campaigns, so existing data still appears (store back-compat).
+
+app.get('/api/campaigns', (c) => {
+  const list = store
+    .listCampaigns()
+    .map((camp) => ({ id: camp.id, name: camp.name, markets: camp.markets, materialCount: camp.materials.length }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return c.json({ campaigns: list });
+});
+
+app.get('/api/campaigns/:id', (c) => {
+  const camp = store.getCampaign(c.req.param('id'));
+  if (!camp) return c.json({ error: 'not found' }, 404);
+  return c.json({ campaign: camp });
+});
+
+app.post('/api/campaigns', async (c) => {
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const candidate = (body as { id?: unknown })?.id ? body : { ...(body as object), id: `camp-${randomUUID().slice(0, 8)}` };
+  const parsed = CampaignSchema.safeParse(candidate);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  store.saveCampaign(parsed.data);
+  return c.json({ campaign: parsed.data });
+});
+
+// Add a material to an existing campaign (id auto-assigned when absent).
+app.post('/api/campaigns/:id/materials', async (c) => {
+  const camp = store.getCampaign(c.req.param('id'));
+  if (!camp) return c.json({ error: 'not found' }, 404);
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const candidate = (body as { id?: unknown })?.id ? body : { ...(body as object), id: `mat-${randomUUID().slice(0, 8)}` };
+  const parsed = MaterialSchema.safeParse(candidate);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const next = { ...camp, materials: [...camp.materials.filter((m) => m.id !== parsed.data.id), parsed.data] };
+  store.saveCampaign(next);
+  return c.json({ campaign: next, material: parsed.data });
+});
+
+// Campaign review state for the UI: status, the observational rollup (worst-case
+// per region + the material x region matrix), and the full event stream.
+app.get('/api/campaign-reviews/:id', (c) => {
+  const record = campaignReviews.get(c.req.param('id'));
+  if (!record) return c.json({ error: 'not found' }, 404);
+  return c.json({
+    id: record.id,
+    status: record.status,
+    campaign: record.campaign,
+    rollup: record.rollup,
+    events: record.events,
+  });
+});
+
+app.get('/api/campaign-reviews/:id/events', (c) => {
+  const id = c.req.param('id');
+  const record = campaignReviews.get(id);
+  if (!record) return c.json({ error: 'not found' }, 404);
+  return streamSSE(c, async (stream) => {
+    for (const event of record.events) await stream.writeSSE({ data: JSON.stringify(event) });
+    if (record.status === 'complete' || record.status === 'error') return;
+
+    const queue: BoardEvent[] = [];
+    let wake: (() => void) | null = null;
+    const sub = (event: BoardEvent): void => {
+      queue.push(event);
+      if (wake) {
+        wake();
+        wake = null;
+      }
+    };
+    record.subscribers.add(sub);
+    try {
+      for (;;) {
+        if (queue.length === 0) await new Promise<void>((resolve) => (wake = resolve));
+        const event = queue.shift();
+        if (!event) continue;
+        await stream.writeSSE({ data: JSON.stringify(event) });
+        // Only a campaign-level terminal (no materialId) closes the stream; a
+        // per-material status event keeps it open so the other lanes keep flowing.
+        if (event.type === 'status' && event.materialId === undefined && (event.status === 'complete' || event.status === 'error')) break;
+      }
+    } finally {
+      record.subscribers.delete(sub);
+    }
+  });
+});
+
+// A human ruling on one material's escalation inside a campaign review.
+app.post('/api/campaign-reviews/:id/decision', async (c) => {
+  const record = campaignReviews.get(c.req.param('id'));
+  if (!record) return c.json({ error: 'not found' }, 404);
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const materialId = typeof (body as { materialId?: unknown })?.materialId === 'string' ? (body as { materialId: string }).materialId : '';
+  const decision = typeof (body as { decision?: unknown })?.decision === 'string' ? (body as { decision: string }).decision : '';
+  if (!materialId || !decision) return c.json({ error: 'materialId and decision required' }, 400);
+  void record.submitDecision(materialId, decision).catch(() => {});
+  return c.json({ ok: true });
 });
 
 app.get('/api/rulebooks', (c) => {

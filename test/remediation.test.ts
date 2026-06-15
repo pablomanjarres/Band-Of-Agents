@@ -33,7 +33,7 @@ describe('Remediation loop: an adapt verdict triggers a rewrite + regenerated im
       },
     }));
     const copyModel = new StubModelClient(() => ({
-      text: 'Lumavida Immune+ supports your everyday wellness as part of a varied, balanced diet and healthy lifestyle.',
+      text: 'Northwind Immune+ supports your everyday wellness as part of a varied, balanced diet and healthy lifestyle.',
     }));
     const imageModel: ModelClient = {
       model: 'stub-image',

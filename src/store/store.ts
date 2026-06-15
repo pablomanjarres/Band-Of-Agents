@@ -10,7 +10,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { BoardEvent, BoardStatus } from '../board/events';
-import type { ContentAsset, Rulebook } from '../domain/types';
+import type { Campaign, ContentAsset, Material, Rulebook } from '../domain/types';
+import { Campaign as CampaignSchema } from '../domain/types';
 import type { Precedent } from '../agents/reconcile';
 
 export interface StoredReview {
@@ -20,6 +21,9 @@ export interface StoredReview {
   events: BoardEvent[];
   status: BoardStatus;
   conflict: boolean;
+  /** Campaign coordinates when the review is one material of a campaign (absent for single-asset reviews). */
+  campaignId?: string;
+  materialId?: string;
 }
 
 export class Store {
@@ -105,6 +109,48 @@ export class Store {
     this.writeJson('assets.json', all);
   }
 
+  // --- Campaigns -----------------------------------------------------------
+  // The saved campaign library lives in data/campaigns.json. For back-compat,
+  // any legacy single ContentAsset in data/assets.json is also surfaced as a
+  // one-material campaign, so existing saved assets still appear and review.
+
+  /** Saved campaigns plus legacy single assets read as one-material campaigns (saved ones win on id collision). */
+  listCampaigns(): Campaign[] {
+    const saved = this.readJson<Campaign[]>('campaigns.json', []);
+    const savedIds = new Set(saved.map((c) => c.id));
+    const legacy = this.listAssets()
+      .map((a) => assetToCampaign(a))
+      .filter((c) => !savedIds.has(c.id));
+    const combined = [...saved, ...legacy];
+    // First-run demo seed: when nothing has been saved yet, surface the bundled
+    // sample campaign (data/ is gitignored, so the durable seed ships in assets/).
+    if (combined.length === 0) return this.seedCampaigns();
+    return combined;
+  }
+
+  /** The bundled demo campaign (assets/sample-campaign.json), used only when the library is empty. */
+  private seedCampaigns(): Campaign[] {
+    const p = join(this.dir, '..', 'assets', 'sample-campaign.json');
+    if (!existsSync(p)) return [];
+    try {
+      const raw: unknown = JSON.parse(readFileSync(p, 'utf8'));
+      const list = Array.isArray(raw) ? raw : [raw];
+      return list.map((c) => CampaignSchema.parse(c));
+    } catch {
+      return [];
+    }
+  }
+
+  getCampaign(id: string): Campaign | undefined {
+    return this.listCampaigns().find((c) => c.id === id);
+  }
+
+  saveCampaign(campaign: Campaign): void {
+    const all = this.readJson<Campaign[]>('campaigns.json', []).filter((c) => c.id !== campaign.id);
+    all.push(campaign);
+    this.writeJson('campaigns.json', all);
+  }
+
   getRulebookOverride(region: string): Rulebook | undefined {
     const p = join(this.rulebooksDir, `${region.toLowerCase()}.json`);
     if (!existsSync(p)) return undefined;
@@ -118,4 +164,27 @@ export class Store {
   saveRulebookOverride(region: string, rulebook: Rulebook): void {
     writeFileSync(join(this.rulebooksDir, `${region.toLowerCase()}.json`), JSON.stringify(rulebook, null, 2));
   }
+}
+
+/**
+ * Read a legacy single ContentAsset as a one-material campaign so existing saved
+ * assets (and old reviews) still load under the campaign model. The material
+ * reuses every asset field and is typed as a post (the default channel kind); the
+ * dossier starts empty (the asset's own substantiation is carried into it so the
+ * cascade still has the one fact the single-asset flow had).
+ */
+export function assetToCampaign(asset: ContentAsset): Campaign {
+  const material: Material = { ...asset, kind: 'post' };
+  return {
+    id: asset.id,
+    name: asset.name ?? asset.id,
+    markets: asset.markets,
+    dossier: {
+      approvedClaims: [],
+      substantiation: asset.substantiation ?? '',
+      approvedInfo: '',
+      sources: [],
+    },
+    materials: [material],
+  };
 }

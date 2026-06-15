@@ -1,6 +1,14 @@
 import type { AgentHandler, Mention, RoomMessage, RoomTools } from '../band/types';
 import type { CompleteResult, ModelClient } from '../models/client';
-import type { BrandDna, ContentAsset, Finding, ReviewResult, Rulebook } from '../domain/types';
+import type {
+  BrandDna,
+  CampaignDossier,
+  ContentAsset,
+  Finding,
+  MaterialPerception,
+  ReviewResult,
+  Rulebook,
+} from '../domain/types';
 import { ReviewOutput } from '../domain/types';
 import type { SharedBoard } from '../board/shared';
 import { matchParticipant, nameMatchesHandle } from './handles';
@@ -61,13 +69,18 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
     if (!asset) return;
     if (opts.board.reviewFor(ctx.roomId, opts.region)) return; // already reviewed this round
 
-    const { system, user } = buildReviewPrompt(opts, asset);
+    // Campaign context cascades into the prompt: the dossier (authoritative for
+    // the whole campaign) and this material's perception artifacts (if a prior
+    // pass produced them). Both are absent for a plain single-asset review.
+    const dossier = opts.board.dossier(ctx.roomId);
+    const materialId = opts.board.materialId(ctx.roomId);
+    const { system, user } = buildReviewPrompt(opts, asset, dossier, perceptionOf(asset));
     const res = await opts.model.complete({
       system,
       messages: [{ role: 'user', content: user }],
       jsonSchema: REVIEW_OUTPUT_JSON_SCHEMA,
     });
-    const review = toReviewResult(res, opts);
+    const review = toReviewResult(res, opts, materialId);
     opts.board.addReview(ctx.roomId, review);
 
     const blocking = review.findings.filter((f) => f.severity === 'block').length;
@@ -97,6 +110,8 @@ function reviewMessage(region: string, findings: Finding[]): string {
 function buildReviewPrompt(
   opts: RegionReviewerOptions,
   asset: ContentAsset,
+  dossier?: CampaignDossier,
+  perception?: MaterialPerception,
 ): { system: string; user: string } {
   const rulebook = opts.getRulebook?.() ?? opts.rulebook;
   const rules = rulebook.rules
@@ -110,25 +125,107 @@ function buildReviewPrompt(
   const precedentBlock = precedents.length
     ? `Precedent (past human rulings on gray areas); weigh these for borderline calls:\n${precedents.map((p) => `- ${p}`).join('\n')}`
     : '';
+  // The campaign dossier is the authoritative, pre-cleared source-of-truth. A
+  // claim backed here (e.g. "clinically proven" with substantiation on file) is
+  // judged against that backing, so one region may publish while another still
+  // demands a disclosure. Editing the dossier once re-grounds every material.
+  const dossierBlock = dossierPrompt(dossier);
   const system = [
     `You are the ${opts.region} marketing-compliance reviewer (${rulebook.label}). This is a demo, NOT legal advice.`,
-    `Mandate: flag every claim in the asset that violates a ${opts.region} rule below. Quote the exact offending claim span.`,
+    `Mandate: flag every claim in the material that violates a ${opts.region} rule below. Quote the exact offending claim span.`,
     `Brand voice: ${opts.brand.voice.join(', ')}. Forbidden phrases: ${opts.brand.forbiddenPhrases.join(', ')}.`,
     `${opts.region} rulebook:\n${rules}`,
+    dossierBlock,
     precedentBlock,
     `Return JSON {"findings":[{"category","severity":"block"|"warn"|"info","claim","rationale","ruleId"?,"requiredDisclosure"?,"confidence"?}]}. If fully compliant, return {"findings":[]}.`,
   ]
     .filter(Boolean)
     .join('\n\n');
-  const user = `Asset under review (JSON):\n${JSON.stringify(asset, null, 2)}`;
+  const perceptionBlock = perceptionPrompt(perception);
+  const user = [
+    `Material under review (JSON):\n${JSON.stringify(asset, null, 2)}`,
+    perceptionBlock,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
   return { system, user };
 }
 
-function toReviewResult(res: CompleteResult, opts: RegionReviewerOptions): ReviewResult {
+/**
+ * Render the campaign dossier as authoritative context. Clearly labeled so the
+ * reviewer treats approved claims and substantiation as pre-cleared backing, not
+ * as part of the material's own copy. Returns '' when there is no dossier.
+ */
+function dossierPrompt(dossier?: CampaignDossier): string {
+  if (!dossier) return '';
+  const parts: string[] = [];
+  if (dossier.approvedClaims.length > 0) {
+    parts.push(`Pre-approved claims (cleared for this campaign, treat as substantiated):\n${dossier.approvedClaims.map((c) => `- ${c}`).join('\n')}`);
+  }
+  if (dossier.substantiation.trim()) {
+    parts.push(`Substantiation (trials, data on file, regulatory facts):\n${dossier.substantiation.trim()}`);
+  }
+  if (dossier.approvedInfo.trim()) {
+    parts.push(`Approved messaging and mandatory information:\n${dossier.approvedInfo.trim()}`);
+  }
+  if (dossier.sources.length > 0) {
+    const excerpts = dossier.sources
+      .map((s) => `- ${s.name} (${s.kind}): ${excerpt(s.content)}`)
+      .join('\n');
+    parts.push(`Reference source excerpts:\n${excerpts}`);
+  }
+  if (parts.length === 0) return '';
+  return `Campaign dossier (AUTHORITATIVE shared source-of-truth; judge the material's claims against this):\n\n${parts.join('\n\n')}`;
+}
+
+/**
+ * Render the material's perception artifacts (transcript, on-screen text, visual
+ * description, detected claims) so even a text-only region model reviews what the
+ * material actually shows and says. Returns '' when there is no perception.
+ */
+function perceptionPrompt(perception?: MaterialPerception): string {
+  if (!perception) return '';
+  const parts: string[] = [];
+  if (perception.transcript?.trim()) parts.push(`Audio transcript:\n${perception.transcript.trim()}`);
+  if (perception.onScreenText?.trim()) parts.push(`On-screen text (OCR):\n${perception.onScreenText.trim()}`);
+  if (perception.visualDescription?.trim()) parts.push(`Visual description:\n${perception.visualDescription.trim()}`);
+  if (perception.detectedClaims && perception.detectedClaims.length > 0) {
+    parts.push(`Claims read off the material:\n${perception.detectedClaims.map((c) => `- ${c}`).join('\n')}`);
+  }
+  if (parts.length === 0) return '';
+  return `Perception (what the material's video/image actually shows and says; review these too):\n\n${parts.join('\n\n')}`;
+}
+
+/** Trim a long source body so a dossier excerpt stays readable in the prompt. */
+function excerpt(content: string, max = 600): string {
+  const trimmed = content.trim();
+  return trimmed.length > max ? `${trimmed.slice(0, max)}...` : trimmed;
+}
+
+/**
+ * A Material is structurally a ContentAsset with an optional perception field, so
+ * at runtime board.campaign(key) may carry one. Read it defensively without
+ * widening the board's ContentAsset typing.
+ */
+function perceptionOf(asset: ContentAsset): MaterialPerception | undefined {
+  const maybe = (asset as { perception?: MaterialPerception }).perception;
+  return maybe;
+}
+
+function toReviewResult(
+  res: CompleteResult,
+  opts: RegionReviewerOptions,
+  materialId?: string,
+): ReviewResult {
   const raw = res.json ?? safeJsonParse(res.text);
   const parsed = ReviewOutput.safeParse(raw);
   const findings = parsed.success ? parsed.data.findings : [];
-  return { region: opts.region, reviewer: opts.reviewerName, findings };
+  return {
+    region: opts.region,
+    reviewer: opts.reviewerName,
+    findings,
+    ...(materialId !== undefined ? { materialId } : {}),
+  };
 }
 
 function safeJsonParse(text: string): unknown {

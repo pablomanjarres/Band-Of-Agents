@@ -5,7 +5,17 @@
 import type { BoardActivity } from '../band/types';
 import type { ContentAsset, Finding, RegionVerdict } from '../domain/types';
 
-export type BoardEvent =
+/**
+ * Campaign coordinates carried on every event when the review is part of a
+ * campaign. Optional so single-asset reviews (no campaign) and old stored
+ * events keep the exact same shape: the ids are simply absent.
+ */
+export interface BoardEventCampaignRef {
+  campaignId?: string;
+  materialId?: string;
+}
+
+export type BoardEvent = (
   | { type: 'intake'; seq: number; fromName: string; asset: ContentAsset }
   | { type: 'recruited'; seq: number; fromName: string; text: string }
   | {
@@ -31,7 +41,9 @@ export type BoardEvent =
   | { type: 'escalation'; seq: number; fromName: string; text: string }
   | { type: 'decision'; seq: number; fromName: string; text: string }
   | { type: 'log'; seq: number; fromName: string; messageType: string; text: string }
-  | { type: 'status'; seq: number; fromName: string; status: BoardStatus };
+  | { type: 'status'; seq: number; fromName: string; status: BoardStatus }
+) &
+  BoardEventCampaignRef;
 
 export type BoardStatus = 'running' | 'awaiting-decision' | 'complete' | 'error';
 

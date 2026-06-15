@@ -1,6 +1,6 @@
 import type { AgentHandler } from '../band/types';
 import type { ContentAsset } from '../domain/types';
-import type { SharedBoard } from '../board/shared';
+import type { SharedBoard, StartReviewOptions } from '../board/shared';
 import { toAsset } from '../domain/load';
 import { matchParticipant, nameMatchesHandle } from './handles';
 
@@ -23,11 +23,18 @@ export interface CoordinatorOptions {
   reconcileHandle?: string;
   /**
    * Resolve a human's free-text reference to a saved campaign (e.g. "Coordinator,
-   * review campaign Lumavida-Q3") by fetching it from the store. This is the
+   * review campaign Immune+ Q3") by fetching it from the store. This is the
    * band.ai app flow: the human references a campaign stored in the UI and the
    * coordinator pulls it. Returns undefined to fall back to an inline campaign.
    */
   lookupCampaign?: (query: string) => ContentAsset | undefined;
+  /**
+   * Campaign cascade for this review: the dossier and the campaign/material ids.
+   * When set, the coordinator stashes them with the campaign so the per-key board,
+   * reviewer (dossier in the prompt), and reconcile (per-material gate) operate on
+   * this one material. Omitted for a plain single-asset review (no change).
+   */
+  startOptions?: StartReviewOptions;
 }
 
 // The coordinator/chair. It accepts an intake (from a human or the configured
@@ -89,7 +96,7 @@ export function makeCoordinator(opts: CoordinatorOptions): AgentHandler {
 
     // Human/intake: resolve and stash the campaign, then recruit.
     const campaign = opts.lookupCampaign?.(message.content) ?? toAsset(message.content);
-    opts.board.startReview(ctx.roomId, campaign);
+    opts.board.startReview(ctx.roomId, campaign, opts.startOptions);
     await tools.sendEvent(
       `Intake: "${campaignLabel(campaign)}" for ${campaign.markets.join(', ')}. Recruiting ${reviewers.length} reviewer(s).`,
       'intake',

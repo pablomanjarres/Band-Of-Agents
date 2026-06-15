@@ -40,7 +40,7 @@ describe('BoardSession: the adapt -> remediation -> re-review loop closes', () =
       }),
       latam: new StubModelClient(() => findings()),
       brand: new StubModelClient(() => findings()),
-      remediationCopy: new StubModelClient(() => ({ text: 'Lumavida Immune+ supports everyday wellness as part of a varied, balanced diet and healthy lifestyle.' })),
+      remediationCopy: new StubModelClient(() => ({ text: 'Northwind Immune+ supports everyday wellness as part of a varied, balanced diet and healthy lifestyle.' })),
       image: {
         model: 'stub-image',
         complete: async () => ({ text: '' }),

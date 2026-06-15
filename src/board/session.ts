@@ -15,7 +15,7 @@ import { makeRemediation } from '../agents/remediation';
 import { makeReconcile, type Precedent } from '../agents/reconcile';
 import type { ModelClient } from '../models/client';
 import { imageClientFor, modelFor } from '../models/route';
-import type { BrandDna, ContentAsset, Rulebook } from '../domain/types';
+import type { BrandDna, CampaignDossier, ContentAsset, Rulebook } from '../domain/types';
 import { translateActivity, type BoardEvent } from './events';
 import { SharedBoard } from './shared';
 
@@ -53,6 +53,18 @@ export interface BoardSessionOptions {
   hostImage?: (url: string) => string;
   /** Recent precedent lines fed into the region reviewers' shared context. */
   getPrecedents?: () => string[];
+  /**
+   * Campaign cascade for this review. When set, this BoardSession reviews ONE
+   * material of a campaign: the dossier and the campaign/material ids are stashed
+   * on the board (so the dossier shows up in every reviewer prompt) and the
+   * material object is handed to the coordinator verbatim (so kind/perception are
+   * not stripped). Omitting this is the unchanged single-asset path.
+   */
+  campaign?: {
+    campaignId: string;
+    materialId: string;
+    dossier: CampaignDossier;
+  };
 }
 
 export class BoardSession {
@@ -88,7 +100,27 @@ export class BoardSession {
     const board = this.board;
 
     room.addUser('lead', 'Compliance Lead', '@compliance-lead');
-    await room.connectAgent({ agentId: 'coord', name: 'Coordinator', handle: '@coordinator', onMessage: makeCoordinator({ board, remediationHandle: '@remediation', reconcileHandle: '@reconcile' }) });
+    const campaignCtx = this.opts.campaign;
+    await room.connectAgent({
+      agentId: 'coord',
+      name: 'Coordinator',
+      handle: '@coordinator',
+      onMessage: makeCoordinator({
+        board,
+        remediationHandle: '@remediation',
+        reconcileHandle: '@reconcile',
+        // Campaign mode: hand the material to the coordinator verbatim (a Material
+        // is structurally a ContentAsset, so kind/perception survive) and stash the
+        // dossier + ids so the cascade and per-material gate engage. Single-asset
+        // mode leaves both unset, so the coordinator parses the posted asset as today.
+        ...(campaignCtx
+          ? {
+              lookupCampaign: () => asset,
+              startOptions: { dossier: campaignCtx.dossier, campaignId: campaignCtx.campaignId, materialId: campaignCtx.materialId },
+            }
+          : {}),
+      }),
+    });
     await room.connectAgent({
       agentId: 'us',
       name: 'US Reviewer',
