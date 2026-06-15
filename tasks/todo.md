@@ -180,26 +180,54 @@ Keep it NON-LINEAR: reconcile fires per material, rollup is observational (the o
   add/edit preserved); nothing persists until Save (PUT). Backend curl-verified live; web build green.
 
 ## Rung C: multimodal perception + live "analyzing" UI
-- [ ] `Msg.content` becomes `string | ContentBlock[]`; update all four adapters (text passthrough
-      unchanged); adapter tests.
-- [ ] Perception pass: ffmpeg keyframes (host via Store), AIML vision (description/OCR/claims),
-      AIML Whisper STT (transcript); attach `MaterialPerception`; cascade text + frames to
-      vision-capable region models. Add `perception-vision`/`perception-stt` roles (AIML default,
-      `MODEL_MODE` fallback, documented in AIML_SWITCHOVER.md).
-- [ ] Video upload endpoint (`data/videos/`); frames under `data/images/`.
-- [ ] SSE `perceiving` events; web side panel: cycling keyframe thumbnail + progress + transcript
-      typing in + per-region "watching" badge, campaign matrix stays visible.
-- [ ] Fallback: paste-transcript + skip-vision so a material always reviews if perception is down.
-- [ ] Tests: perception artifacts cascade into the prompt; content-block adapter shapes.
+- [x] `Msg.content` becomes `string | ContentBlock[]`; update all four adapters (text passthrough
+      unchanged); adapter tests. (Seam slice; test/model-content-blocks.test.ts, 14 tests.)
+- [x] Perception pass (`src/perception/perceive.ts`, `perceiveMaterial`): ffmpeg keyframes (spawn,
+      hosted via Store) -> seeded frames -> single image -> []; vision (one content-block call ->
+      description/OCR/claims); STT (transcript) -> pasted transcript fallback; attach
+      `MaterialPerception`; cascade text into every reviewer prompt (Rung A cascade) and frames to
+      the vision call. Added `perception-vision`/`perception-stt` roles (AIML default, env-overridable
+      `AIML_VISION_MODEL`/`AIML_STT_MODEL`, `MODEL_MODE` fallback, documented in AIML_SWITCHOVER.md).
+      Wired BEFORE the region reviewers per material via BoardSession/CampaignSession, concurrent (no
+      campaign serialization).
+- [x] Video upload endpoint (`POST /api/videos`, multipart -> `data/videos/`, optional attach to a
+      material) + `GET /api/videos/:name`; extracted frames hosted under `data/images/`. Server-side
+      perception streams `perceiving` over the existing SSE.
+- [x] SSE `perceiving` events (`src/board/events.ts` + web types/reducer): frameUrl + index/total +
+      stage (vision|stt|done), tagged with campaignId/materialId; web `boardState` tracks a live
+      `perceiving` snapshot (frame, progress, stage, transcript) per material lane; Timeline renders it.
+- [x] Fallback: graceful at EVERY step (no ffmpeg, no vision, no STT, no AIML key) so a material
+      always still reviews; key-free local server falls back to stub vision/STT + stub reviewers so
+      the UI animates exactly like `npm run local`.
+- [x] Tests: `test/perception.test.ts` (6) perception artifacts cascade into the prompt + the
+      no-ffmpeg/no-model fallback returns a usable result and the material still reviews;
+      `test/route.test.ts` (+3) perception routing (AIML defaults, env override, dev keeps STT on AIML);
+      content-block adapter shapes (seam). 71 tests green, tsc clean, web build green.
 
 ## Documentation (required, per the user)
-- [ ] `docs/CAMPAIGNS.md`: what was built and how it works (model, cascade, perception, import,
+- [x] `docs/CAMPAIGNS.md`: what was built and how it works (model, cascade, perception, import,
       non-linear negotiation, how to run).
-- [ ] Update `README.md`: campaign + multimodal flow; AIML multi-model + three-modalities visible.
-- [ ] Update this `tasks/todo.md` as items complete; add a Review section at the end.
-- [ ] Append new correction patterns to `tasks/lessons.md`.
+- [x] Update `README.md`: campaign + multimodal flow; AIML multi-model + three-modalities visible.
+- [x] Update this `tasks/todo.md` as items complete; add a Review section at the end.
+- [x] Append new correction patterns to `tasks/lessons.md`.
 
 ## Verification gates
-- [ ] tsc clean + all tests green after each rung.
-- [ ] A real local end-to-end run shown (not just unit tests) before claiming a rung done.
-- [ ] Confirm the campaign negotiates per material concurrently (diff vs. baseline single-asset).
+- [x] tsc clean + all tests green after each rung.
+- [x] A real local end-to-end run shown (not just unit tests) before claiming a rung done.
+- [x] Confirm the campaign negotiates per material concurrently (diff vs. baseline single-asset).
+
+## Rung C review
+- 2026-06-15: Rung C GREEN and committed (d6b0c75 seam, 3bd1eab perception, ce9604f seed+docs, 92356ab web).
+  tsc clean, 71/71 vitest. Msg.content is string|ContentBlock[] across all four adapters (string path
+  byte-identical). Perception pre-pass (AIML vision + Whisper STT) runs per material before the reviewers with
+  graceful fallback (no ffmpeg/key never crashes); artifacts cascade via the Rung A prompt path. `npm run local`
+  shows hero-video perceiving [vision] 1/4..4/4 -> [stt] -> [done], all materials concurrent, rollup correct.
+  Live PerceptionPanel cycles the keyframe while the matrix stays visible.
+
+## Final review (Rungs A + B + C)
+- 2026-06-15: All three rungs done, verified directly, committed on branch campaigns-multimodal (not pushed).
+  19 -> 71 tests, tsc clean, web build green. Campaigns (nested materials) negotiated concurrently per material
+  with an observational rollup (the one rule holds), a cascading dossier grounding every reviewer, smart rulebook
+  import + presets, and real multimodal perception with a live analyzing panel. Demo brand removed. Docs:
+  docs/CAMPAIGNS.md + updated README. Follow-ups: band-mode multi-material coordinator (local/server campaign
+  path is done); confirm the real AIML vision/STT slugs (env-overridable).
