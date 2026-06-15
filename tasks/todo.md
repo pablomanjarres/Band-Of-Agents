@@ -30,6 +30,22 @@ no co-author trailers, no em dashes). Built on a worktree branched off `orchestr
   concurrently (the genuine debate is the Regulatory rebuttal round); the demo exercises the HOLD
   branch, the CONCEDE-downgrade branch exists in code but is not hit by the default run.
 
+### Update (2026-06-15): merged to main + wired into the app on real models
+- Merged to `main` via PR #5. Reconciled with main's SharedBoard refactor: kept main's board-mode
+  region-reviewer/remediation, split the pods' message-passing copies into pod-region-reviewer.ts and
+  pod-remediation.ts. Combined suite green.
+- Real models verified (dev: Bedrock + Vertex + Featherless + Nano Banana). The full pods flow runs
+  end to end on live LLMs to a terminal (EU holds, 3 conflicts, mediate, remediate, escalate, spiked).
+- Fixed a bug only a live run surfaced: regenerated base64 images flowed unhosted into the recommit
+  round and blew past the model context (~1.9M tokens). PodBoardSession now always hosts images.
+- Wired into the product: PodBoardSession + realPodBoardModels; the server runs the pods topology with
+  BOARD_TOPOLOGY=pods over the same SSE path; web UI built and served.
+- README rewritten for the pods topology + risk-shield framing; .env.example carries the pods cast.
+- Tests: 54 passing across 31 files; typecheck clean (root + web).
+- Open: live band.ai pods needs the 13 new agents registered (+ keys in .env); optional AIML key for
+  the aiml path; pod-reviewer parity with main (vision, shared context, task binding, live rulebook,
+  precedent) is a follow-up.
+
 ## Phase 0: Scaffolding -- DONE
 - [x] pnpm + TypeScript ESM project (package.json, tsconfig, vitest, MIT LICENSE, README).
 - [x] Domain types + zod schemas.

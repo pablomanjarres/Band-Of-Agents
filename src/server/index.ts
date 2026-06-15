@@ -24,6 +24,8 @@ import { ContentAsset as ContentAssetSchema, Rulebook as RulebookSchema } from '
 import type { ContentAsset, Rulebook } from '../domain/types';
 import { NewArtifact as NewArtifactSchema } from '../domain/artifact';
 import { BoardSession, realBoardModels } from '../board/session';
+import { PodBoardSession } from '../board/pod-session';
+import { realPodBoardModels } from '../board/pod-board';
 import { BandBoard } from '../board/band-session';
 import type { BoardEvent, BoardStatus } from '../board/events';
 import { Store } from '../store/store';
@@ -46,6 +48,9 @@ function resolvePublicBaseUrl(): string {
 }
 const PUBLIC_BASE_URL = resolvePublicBaseUrl();
 const BOARD_MODE = process.env.BOARD_MODE === 'local' ? 'local' : 'band';
+// Orchestration topology: 'pods' runs the blackboard pods + decision spine
+// (PodBoardSession); 'classic' runs the original coordinator/reconcile board.
+const BOARD_TOPOLOGY = process.env.BOARD_TOPOLOGY === 'pods' ? 'pods' : 'classic';
 const REGIONS = ['us', 'eu', 'latam'] as const;
 type RegionKey = (typeof REGIONS)[number];
 
@@ -220,18 +225,31 @@ app.post('/api/reviews', async (c) => {
 
   const id = randomUUID();
   record.id = id;
-  const session = new BoardSession({
-    roomId: `review-${id}`,
-    asset,
-    brand,
-    rulebooks: currentRulebooks(),
-    models: realBoardModels(),
-    onEvent,
-    onPrecedent: (p) => store.appendPrecedent(p),
-    hostImage: (u) => store.hostImage(u) ?? u,
-    publishArtifact,
-    getPrecedents: recentPrecedents,
-  });
+  const roomId = `review-${id}`;
+  const hostImage = (u: string): string => store.hostImage(u) ?? u;
+  const session = BOARD_TOPOLOGY === 'pods'
+    ? new PodBoardSession({
+        roomId,
+        asset,
+        brand,
+        rulebooks: currentRulebooks(),
+        models: realPodBoardModels(),
+        onEvent,
+        onPrecedent: (p) => store.appendPrecedent({ roomId, regions: [], decision: `${p.decision}: ${p.claim}` }),
+        hostImage,
+      })
+    : new BoardSession({
+        roomId,
+        asset,
+        brand,
+        rulebooks: currentRulebooks(),
+        models: realBoardModels(),
+        onEvent,
+        onPrecedent: (p) => store.appendPrecedent(p),
+        hostImage,
+        publishArtifact,
+        getPrecedents: recentPrecedents,
+      });
   record.submitDecision = (text) => session.submitDecision(text);
   reviews.set(id, record);
   void session.run().catch((err: unknown) => {
@@ -250,7 +268,7 @@ app.get('/api/reviews', (c) => {
     byId.set(r.id, { id: r.id, createdAt: r.createdAt, assetId: r.asset.id, copy: r.asset.copy, markets: r.asset.markets, status: r.status, conflict: r.conflict });
   }
   const list = [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
-  return c.json({ reviews: list, mode: BOARD_MODE });
+  return c.json({ reviews: list, mode: BOARD_MODE, topology: BOARD_TOPOLOGY });
 });
 
 app.get('/api/reviews/:id', (c) => {

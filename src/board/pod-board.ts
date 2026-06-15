@@ -9,12 +9,23 @@ import { makeScout, makeClaimEvidence, makePrecedent, makeDisclosure, makeBrandV
 import { makeMediator } from '../agents/mediator';
 import { makeRemediation } from '../agents/pod-remediation';
 import { makeRiskAdjudicator } from '../agents/risk-adjudicator';
+import { modelFor, imageClientFor } from '../models/route';
 
 export interface PodBoardModels {
   scout: ModelClient; claim: ModelClient; precedent: ModelClient; disclosure: ModelClient;
   us: ModelClient; eu: ModelClient; latam: ModelClient;
   brand: ModelClient; channel: ModelClient; visual: ModelClient;
   mediator: ModelClient; remediationCopy: ModelClient; image: ModelClient;
+}
+
+// Build the per-role clients for the pods cast from the active MODEL_MODE (aiml main / dev).
+export function realPodBoardModels(): PodBoardModels {
+  return {
+    scout: modelFor('scout'), claim: modelFor('claim'), precedent: modelFor('precedent'), disclosure: modelFor('disclosure'),
+    us: modelFor('us'), eu: modelFor('eu'), latam: modelFor('latam'),
+    brand: modelFor('brand'), channel: modelFor('channel'), visual: modelFor('visual'),
+    mediator: modelFor('mediator'), remediationCopy: modelFor('remediation'), image: imageClientFor(),
+  };
 }
 
 export interface PodBoardConfig {
