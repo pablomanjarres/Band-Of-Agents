@@ -1,10 +1,10 @@
 import type { RegionStatus } from '../boardState';
 
 const STYLES: Record<RegionStatus, string> = {
-  publish: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
-  adapt: 'bg-amber-100 text-amber-700 ring-amber-200',
-  escalate: 'bg-red-100 text-red-700 ring-red-200',
-  reviewing: 'bg-slate-200 text-slate-600 ring-slate-300 animate-pulse-soft',
+  publish: 'bg-human/10 text-human ring-human/25',
+  adapt: 'bg-warn/10 text-warn ring-warn/25',
+  escalate: 'bg-danger/10 text-danger ring-danger/25',
+  reviewing: 'bg-surface-3 text-muted ring-border-strong animate-pulse-soft',
 };
 
 const LABELS: Record<RegionStatus, string> = {
