@@ -26,4 +26,22 @@ describe('conductor', () => {
     await room.drain();
     expect(got['@reg-lead']).toBe(2);
   });
+
+  it('resolves a saved campaign a human names instead of pasting JSON', async () => {
+    const asset = loadAsset(`${ASSETS}sample-asset.json`);
+    const got: Record<string, number> = {};
+    const room = new FakeBandTransport('r');
+    for (const [id, handle] of [['cl', '@claims-lead'], ['rg', '@reg-lead'], ['br', '@brand-lead']] as const) {
+      await room.connectAgent({ agentId: id, name: handle, handle, onMessage: async () => { got[handle] = (got[handle] ?? 0) + 1; } });
+    }
+    const lookupCampaign = (q: string) => (/lumavida|immune/i.test(q) ? asset : undefined);
+    await room.connectAgent({ agentId: 'cond', name: 'Conductor', handle: '@conductor', onMessage: makeConductor({ podLeadHandles: ['@claims-lead', '@reg-lead', '@brand-lead'], lookupCampaign }) });
+    room.addUser('lead', 'Compliance Lead', '@compliance-lead');
+
+    room.post('lead', 'Conductor, please review the Lumavida immune campaign', [{ id: 'cond' }]);
+    await room.drain();
+    expect(got['@claims-lead']).toBe(1);
+    expect(got['@reg-lead']).toBe(1);
+    expect(got['@brand-lead']).toBe(1);
+  });
 });
