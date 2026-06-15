@@ -31,6 +31,20 @@ export interface Remediation {
   markets: string[];
 }
 
+/**
+ * The live multimodal-perception snapshot for a material (the "analyzing" panel):
+ * the current keyframe being read, progress, the stage, and the transcript as it
+ * returns. Updated by every 'perceiving' tick; `done` flips when the pass settles.
+ */
+export interface PerceivingState {
+  frameUrl?: string;
+  index: number;
+  total: number;
+  stage: 'vision' | 'stt' | 'done';
+  transcript?: string;
+  done: boolean;
+}
+
 export interface BoardState {
   asset?: ContentAsset;
   regions: Record<string, RegionState>;
@@ -40,6 +54,8 @@ export interface BoardState {
   decisionText?: string;
   status: BoardStatus;
   events: BoardEvent[];
+  /** Live perception panel state, present once the perception pre-pass starts. */
+  perceiving?: PerceivingState;
 }
 
 function freshRegion(region: string): RegionState {
@@ -118,6 +134,19 @@ export function applyEvent(prev: BoardState, event: BoardEvent): BoardState {
     }
     case 'status': {
       next.status = event.status;
+      break;
+    }
+    case 'perceiving': {
+      const priorTranscript = next.perceiving?.transcript;
+      next.perceiving = {
+        ...(event.frameUrl !== undefined ? { frameUrl: event.frameUrl } : next.perceiving?.frameUrl !== undefined ? { frameUrl: next.perceiving.frameUrl } : {}),
+        index: event.index,
+        total: event.total,
+        stage: event.stage,
+        // Keep the transcript once it has arrived even if a later tick omits it.
+        ...(event.transcript !== undefined ? { transcript: event.transcript } : priorTranscript !== undefined ? { transcript: priorTranscript } : {}),
+        done: event.stage === 'done',
+      };
       break;
     }
     case 'recruited':
@@ -332,4 +361,57 @@ export function buildMatrix(state: CampaignBoardState): MatrixRow[] {
       }
       return { materialId: lane.material.id, material: lane.material, cells };
     });
+}
+
+// --- Perception panel selector -------------------------------------------
+// The live "analyzing" panel reads one snapshot per material that is currently
+// being perceived. A lane is "perceiving" once its pre-pass has emitted at least
+// one tick and has not settled (done) yet; when the pass finishes (or the
+// material reaches a verdict) it drops out and the matrix carries the result.
+// If perception is OFF entirely, no lane ever has a snapshot, so the list is
+// empty and the panel simply does not render.
+
+/** A material actively under the perception pre-pass, with the data the panel shows. */
+export interface PerceivingLane {
+  materialId: string;
+  material: Material;
+  perceiving: PerceivingState;
+  /**
+   * The transcript to surface. The stream does not carry transcript text (only
+   * frame ticks), so prefer the material's known perception transcript (seeded or
+   * resolved); fall back to anything a tick happened to include.
+   */
+  transcript?: string;
+}
+
+function laneHasVerdict(lane: MaterialLane): boolean {
+  return REGION_ORDER.some((region) => {
+    const rs = lane.board.regions[region];
+    return rs ? rs.status !== 'reviewing' : false;
+  });
+}
+
+/**
+ * The materials whose perception pre-pass is live right now, in declared order.
+ * A lane qualifies while it has a perceiving snapshot that has not settled and the
+ * material has not yet produced any verdict (so the panel yields to the matrix the
+ * moment reviewers land a decision). Returns [] when perception is off.
+ */
+export function activePerceivingLanes(state: CampaignBoardState): PerceivingLane[] {
+  const out: PerceivingLane[] = [];
+  for (const id of state.order) {
+    const lane = state.lanes[id];
+    if (!lane) continue;
+    const perceiving = lane.board.perceiving;
+    if (!perceiving) continue;
+    if (perceiving.done && laneHasVerdict(lane)) continue;
+    const transcript = lane.material.perception?.transcript ?? perceiving.transcript;
+    out.push({
+      materialId: lane.material.id,
+      material: lane.material,
+      perceiving,
+      ...(transcript !== undefined ? { transcript } : {}),
+    });
+  }
+  return out;
 }

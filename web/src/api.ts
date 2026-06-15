@@ -21,6 +21,7 @@ import type {
   RulebookListResponse,
   RulebookPresetListResponse,
   RulebookResponse,
+  VideoUploadResponse,
 } from './types';
 
 async function asJson<T>(res: Response): Promise<T> {
@@ -164,6 +165,22 @@ export async function addMaterial(
     body: JSON.stringify(material),
   });
   return asJson<MaterialResponse>(res);
+}
+
+// Upload a video file (multipart) to the perception pipeline. The server hosts it
+// under data/videos/ and, when campaignId + materialId are supplied, attaches the
+// returned url to that material so the next review perceives it (frames + vision +
+// STT run server-side and stream 'perceiving' over SSE). Returns the served url.
+export async function uploadVideo(
+  file: File,
+  opts?: { campaignId?: string; materialId?: string },
+): Promise<VideoUploadResponse> {
+  const form = new FormData();
+  form.append('video', file);
+  if (opts?.campaignId) form.append('campaignId', opts.campaignId);
+  if (opts?.materialId) form.append('materialId', opts.materialId);
+  const res = await fetch('/api/videos', { method: 'POST', body: form });
+  return asJson<VideoUploadResponse>(res);
 }
 
 // Start a concurrent per-material review of a saved campaign (local board mode).

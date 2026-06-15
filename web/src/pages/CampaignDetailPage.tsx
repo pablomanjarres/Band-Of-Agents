@@ -9,6 +9,7 @@ import {
 } from '../api';
 import type { EventSubscription } from '../api';
 import {
+  activePerceivingLanes,
   applyCampaignEvent,
   buildMatrix,
   deriveAggregateVerdict,
@@ -18,6 +19,7 @@ import type { CampaignBoardState } from '../boardState';
 import { CampaignMatrix } from '../components/CampaignMatrix';
 import { DossierEditor } from '../components/DossierEditor';
 import { MaterialsTree } from '../components/MaterialsTree';
+import { PerceptionPanel } from '../components/PerceptionPanel';
 import { PipelineDiagram } from '../components/PipelineDiagram';
 import { StatusBadge } from '../components/StatusBadge';
 import { AggregateBadge } from '../components/VerdictBadge';
@@ -154,6 +156,7 @@ export function CampaignDetailPage() {
   const campaign = load.campaign;
   const matrix = buildMatrix(board);
   const aggregate = deriveAggregateVerdict(board);
+  const perceivingLanes = activePerceivingLanes(board);
   const selectedLane = selectedMaterialId ? board.lanes[selectedMaterialId] : undefined;
   const reviewing = Boolean(reviewId);
   // A review is actively streaming only after one started AND the campaign has
@@ -195,27 +198,44 @@ export function CampaignDetailPage() {
       ) : null}
 
       {/* The matrix is the campaign centerpiece: rows = materials, columns =
-          regions, every material negotiating CONCURRENTLY. Clicking a cell drills
-          into that material's full Live Board below. */}
-      <section className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Material x region matrix
-          </h2>
-          {reviewing ? (
-            <span className="text-xs text-slate-400">
-              {matrix.length} materials negotiating concurrently
-            </span>
-          ) : (
-            <span className="text-xs text-slate-400">Run a review to populate verdicts</span>
-          )}
-        </div>
-        <CampaignMatrix
-          rows={matrix}
-          onSelect={setSelectedMaterialId}
-          {...(selectedMaterialId ? { selectedMaterialId } : {})}
-        />
-      </section>
+          regions, every material negotiating CONCURRENTLY. The live "analyzing"
+          panel sits BESIDE it (sticky aside) while a material is being perceived,
+          so the matrix and the materials tree stay fully visible the whole time.
+          When perception is off, the panel renders nothing and the matrix fills
+          the width. Clicking a cell drills into that material's full Live Board. */}
+      <div
+        className={
+          perceivingLanes.length > 0
+            ? 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]'
+            : 'grid gap-6'
+        }
+      >
+        <section className="min-w-0 space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+              Material x region matrix
+            </h2>
+            {reviewing ? (
+              <span className="text-xs text-slate-400">
+                {matrix.length} materials negotiating concurrently
+              </span>
+            ) : (
+              <span className="text-xs text-slate-400">Run a review to populate verdicts</span>
+            )}
+          </div>
+          <CampaignMatrix
+            rows={matrix}
+            onSelect={setSelectedMaterialId}
+            {...(selectedMaterialId ? { selectedMaterialId } : {})}
+          />
+        </section>
+
+        {perceivingLanes.length > 0 ? (
+          <div className="xl:sticky xl:top-6 xl:self-start">
+            <PerceptionPanel lanes={perceivingLanes} />
+          </div>
+        ) : null}
+      </div>
 
       {/* Drill-in: the selected material's existing Live Board pipeline. */}
       {selectedLane ? (

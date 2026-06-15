@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { addMaterial } from '../api';
+import { addMaterial, uploadVideo } from '../api';
 import type { Campaign, Material, MaterialKind } from '../types';
 
 interface MaterialsTreeProps {
@@ -171,6 +171,8 @@ function AddMaterialForm({
   const [copy, setCopy] = useState('');
   const [claim, setClaim] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadName, setUploadName] = useState<string | null>(null);
   const [markets, setMarkets] = useState<string[]>([...campaign.markets]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -179,6 +181,25 @@ function AddMaterialForm({
     setMarkets((prev) =>
       prev.includes(market) ? prev.filter((m) => m !== market) : [...prev, market],
     );
+  }
+
+  // Upload a chosen video file to the perception pipeline. The server hosts it
+  // and returns a served url; we drop that into the videoUrl field so submit (and
+  // the next review's perception pass: frames + vision + STT) picks it up. Posting
+  // the campaignId also attaches the url server-side as a convenience.
+  async function handleVideoUpload(file: File | undefined) {
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const res = await uploadVideo(file, { campaignId: campaign.id });
+      setVideoUrl(res.videoUrl);
+      setUploadName(file.name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to upload the video.');
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -247,18 +268,53 @@ function AddMaterialForm({
       </div>
 
       {kind === 'video' ? (
-        <div>
-          <label className={labelClass} htmlFor="material-video">
-            Video URL <span className="font-normal lowercase text-slate-400">(optional)</span>
-          </label>
-          <input
-            id="material-video"
-            type="text"
-            value={videoUrl}
-            onChange={(event) => setVideoUrl(event.target.value)}
-            className={inputClass}
-            placeholder="https://.../hero.mp4"
-          />
+        <div className="space-y-3 rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+          <div>
+            <span className={labelClass}>
+              Upload video{' '}
+              <span className="font-normal lowercase text-slate-400">
+                (perceived on the next review)
+              </span>
+            </span>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-sm font-medium text-violet-700 shadow-sm transition hover:bg-violet-50">
+                <input
+                  type="file"
+                  accept="video/*"
+                  className="sr-only"
+                  disabled={uploading}
+                  onChange={(event) => {
+                    void handleVideoUpload(event.target.files?.[0]);
+                    // Reset so re-selecting the same file fires onChange again.
+                    event.target.value = '';
+                  }}
+                />
+                {uploading ? 'Uploading.' : 'Choose video file'}
+              </label>
+              {uploadName ? (
+                <span className="inline-flex items-center gap-1 text-xs text-violet-600">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  {uploadName} uploaded
+                </span>
+              ) : null}
+            </div>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="material-video">
+              Video URL{' '}
+              <span className="font-normal lowercase text-slate-400">
+                (or paste a hosted url)
+              </span>
+            </label>
+            <input
+              id="material-video"
+              type="text"
+              value={videoUrl}
+              onChange={(event) => setVideoUrl(event.target.value)}
+              className={inputClass}
+              placeholder="https://.../hero.mp4"
+            />
+          </div>
         </div>
       ) : null}
 

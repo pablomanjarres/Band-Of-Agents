@@ -46,9 +46,11 @@ export interface BoardEventCampaignRef {
 }
 
 /**
- * A live keyframe-analysis tick from the multimodal perception pass (Rung C).
- * Defined now for the perception SSE channel; it is not yet a BoardEvent union
- * member (the live-board reducers stay exhaustive until Rung C adds its UI).
+ * A live keyframe-analysis tick from the multimodal perception pass (Rung C). The
+ * server emits these per frame (and once with stage 'done') so the UI can cycle
+ * the frame being read, fill a progress bar, and type the transcript in. It is a
+ * full BoardEvent union member; it carries campaignId/materialId so it lanes to
+ * the right material and it gates nothing.
  */
 export interface PerceivingEvent extends BoardEventCampaignRef {
   type: 'perceiving';
@@ -88,6 +90,16 @@ export type BoardEvent = (
   | { type: 'decision'; seq: number; fromName: string; text: string }
   | { type: 'log'; seq: number; fromName: string; messageType: string; text: string }
   | { type: 'status'; seq: number; fromName: string; status: BoardStatus }
+  | {
+      type: 'perceiving';
+      seq: number;
+      fromName: string;
+      frameUrl?: string;
+      index: number;
+      total: number;
+      stage: 'vision' | 'stt' | 'done';
+      transcript?: string;
+    }
 ) &
   BoardEventCampaignRef;
 
@@ -302,4 +314,16 @@ export interface CreateCampaignReviewResponse {
   id: string;
   kind: 'campaign';
   materials: string[];
+}
+
+/**
+ * Response for POST /api/videos (multipart upload). The server hosts the file
+ * under data/videos/ and returns its served url; when campaignId + materialId are
+ * sent, the url is also attached to that material's videoUrl so the next review
+ * perceives it (frames + vision + STT run server-side, streamed over SSE).
+ */
+export interface VideoUploadResponse {
+  videoUrl: string;
+  campaignId?: string;
+  materialId?: string;
 }
