@@ -1,7 +1,11 @@
 {
   "id": "immune-plus-q3",
   "name": "Immune+ Q3 Launch",
-  "markets": ["US", "EU", "LATAM"],
+  "markets": [
+    "US",
+    "EU",
+    "LATAM"
+  ],
   "dossier": {
     "approvedClaims": [
       "Clinically supported to help maintain a healthy immune response",
@@ -29,10 +33,14 @@
       "name": "Hero Video",
       "kind": "video",
       "channel": "instagram",
-      "markets": ["US", "EU", "LATAM"],
+      "markets": [
+        "US",
+        "EU",
+        "LATAM"
+      ],
       "copy": "Feeling run down? Northwind Immune+ helps maintain your immune response so you can feel your best, every day. 9 out of 10 users felt the difference in two weeks.",
       "claim": "Helps maintain immune response; 9 out of 10 users felt the difference.",
-      "videoUrl": "https://cdn.example.com/northwind/immune-plus-hero.mp4",
+      "videoUrl": "/api/videos/immune-plus-hero.mp4",
       "imagePrompt": "A bright, energetic flat-lay of Northwind Immune+ supplement bottles with fresh citrus and eucalyptus, warm morning sunlight, clean wellness aesthetic.",
       "substantiation": "Two RCTs (n=240, n=180) on the Immune+ formula; typical-results data on file ref DF-2026-07.",
       "attachments": [
@@ -41,7 +49,11 @@
           "name": "Hero Cutdown Post",
           "kind": "post",
           "channel": "instagram",
-          "markets": ["US", "EU", "LATAM"],
+          "markets": [
+            "US",
+            "EU",
+            "LATAM"
+          ],
           "copy": "15 seconds to feeling your best. Northwind Immune+ supports everyday wellness as part of a balanced diet and healthy lifestyle.",
           "claim": "Supports everyday wellness."
         },
@@ -50,19 +62,42 @@
           "name": "Hero Thumbnail",
           "kind": "image",
           "channel": "instagram",
-          "markets": ["US", "EU", "LATAM"],
+          "markets": [
+            "US",
+            "EU",
+            "LATAM"
+          ],
           "copy": "Northwind Immune+ : daily immune support.",
           "claim": "Daily immune support.",
           "imagePrompt": "Close-up of a single Northwind Immune+ bottle beside sliced oranges on a soft neutral background, gentle natural morning light."
         }
-      ]
+      ],
+      "perception": {
+        "frames": [
+          "/api/images/immune-plus-frame-01.png",
+          "/api/images/immune-plus-frame-02.png",
+          "/api/images/immune-plus-frame-03.png",
+          "/api/images/immune-plus-frame-04.png"
+        ],
+        "transcript": "Feeling run down? Northwind Immune plus helps maintain your immune response so you can feel your best, every day. Nine out of ten users felt the difference in two weeks. As part of a varied, balanced diet and a healthy lifestyle.",
+        "visualDescription": "A bright, warm flat-lay: Northwind Immune plus supplement bottles surrounded by fresh citrus and eucalyptus in morning sunlight, then a close-up of a single bottle as text fades in.",
+        "onScreenText": "Northwind Immune+  |  Feel your best, every day  |  9 out of 10 felt the difference",
+        "detectedClaims": [
+          "Helps maintain your immune response",
+          "9 out of 10 users felt the difference in two weeks"
+        ]
+      }
     },
     {
       "id": "launch-post",
       "name": "Launch Announcement Post",
       "kind": "post",
       "channel": "x",
-      "markets": ["US", "EU", "LATAM"],
+      "markets": [
+        "US",
+        "EU",
+        "LATAM"
+      ],
       "copy": "Northwind Immune+ with Vitamin C is here. Vitamin C contributes to the normal function of the immune system. Feel your best, every day, as part of a varied, balanced diet and healthy lifestyle.",
       "claim": "Vitamin C contributes to the normal function of the immune system.",
       "substantiation": "EFSA-authorised health-claim wording for vitamin C and normal immune function; each serving provides 80 mg vitamin C (100% NRV)."
@@ -72,7 +107,9 @@
       "name": "Promo Banner",
       "kind": "banner",
       "channel": "display",
-      "markets": ["US"],
+      "markets": [
+        "US"
+      ],
       "copy": "Northwind Immune+ : start your free trial today. Clinically supported immune support, delivered monthly.",
       "claim": "Clinically supported immune support.",
       "imagePrompt": "A clean display banner showing the Northwind Immune+ bottle, a call-to-action button, and a citrus motif on a light background."
