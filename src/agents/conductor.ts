@@ -43,9 +43,11 @@ export function makeConductor(opts: ConductorOptions): AgentHandler {
     const dispatch = opts.hub
       ? `Reviewing the "${asset.name ?? asset.id}" campaign for ${asset.markets.join(', ')} plus brand. Pods, please run your reviews.`
       : JSON.stringify(asset);
-    for (const handle of [...opts.podLeadHandles, ...(opts.primeHandles ?? [])]) {
-      const t = matchParticipant(participants, handle, 'agent');
-      if (t) await tools.sendMessage(dispatch, [{ id: t.id, handle: t.handle }]);
-    }
+    // One message mentioning every pod lead (plus prime handles), not one each.
+    const targets = [...opts.podLeadHandles, ...(opts.primeHandles ?? [])]
+      .map((h) => matchParticipant(participants, h, 'agent'))
+      .filter((p): p is NonNullable<typeof p> => !!p)
+      .map((p) => ({ id: p.id, handle: p.handle }));
+    if (targets.length) await tools.sendMessage(dispatch, targets);
   };
 }

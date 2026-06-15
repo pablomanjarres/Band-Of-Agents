@@ -91,12 +91,17 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
       replies.set(roomId, new Map());
       const participants = await tools.getParticipants();
       const present: string[] = [];
-      const dispatch = opts.hub ? `Please review the "${asset.name ?? asset.id}" campaign.` : JSON.stringify(asset);
+      const mentions: Array<{ id: string; handle: string }> = [];
       for (let i = 0; i < opts.members.length; i++) {
         const t = findParticipant(participants, opts.members[i]!, 'agent');
         if (!t) continue;
         present.push(opts.memberKeys[i]!);
-        await tools.sendMessage(dispatch, [{ id: t.id, handle: t.handle }]);
+        mentions.push({ id: t.id, handle: t.handle });
+      }
+      // One message mentioning every present member, not one each.
+      if (mentions.length) {
+        const dispatch = opts.hub ? `Please review the "${asset.name ?? asset.id}" campaign.` : JSON.stringify(asset);
+        await tools.sendMessage(dispatch, mentions);
       }
       expectedKeys.set(roomId, present);
       await tools.sendEvent(`${opts.pod} pod deliberating (${present.length} members)`, 'recruited', { pod: opts.pod });
