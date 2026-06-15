@@ -64,6 +64,7 @@ export interface BoardSessionOptions {
   campaign?: {
     campaignId: string;
     materialId: string;
+    advertisementId?: string;
     dossier: CampaignDossier;
   };
   /**
@@ -144,7 +145,12 @@ export class BoardSession {
         ...(campaignCtx
           ? {
               lookupCampaign: () => asset,
-              startOptions: { dossier: campaignCtx.dossier, campaignId: campaignCtx.campaignId, materialId: campaignCtx.materialId },
+              startOptions: {
+                dossier: campaignCtx.dossier,
+                campaignId: campaignCtx.campaignId,
+                materialId: campaignCtx.materialId,
+                ...(campaignCtx.advertisementId !== undefined ? { advertisementId: campaignCtx.advertisementId } : {}),
+              },
             }
           : {}),
       }),
@@ -224,7 +230,11 @@ export class BoardSession {
     if (!hasVisual) return asset;
 
     const total0Ref = campaignCtx
-      ? { campaignId: campaignCtx.campaignId, materialId: campaignCtx.materialId }
+      ? {
+          campaignId: campaignCtx.campaignId,
+          materialId: campaignCtx.materialId,
+          ...(campaignCtx.advertisementId !== undefined ? { advertisementId: campaignCtx.advertisementId } : {}),
+        }
       : {};
     let perception: MaterialPerception;
     try {

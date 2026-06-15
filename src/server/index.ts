@@ -14,14 +14,16 @@ import 'dotenv/config';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { loadBrandDna, loadRulebook } from '../domain/load';
-import { Campaign as CampaignSchema, ContentAsset as ContentAssetSchema, Material as MaterialSchema, Rulebook as RulebookSchema } from '../domain/types';
-import type { Campaign, ContentAsset, Rulebook } from '../domain/types';
+import { Advertisement as AdvertisementSchema, Campaign as CampaignSchema, ContentAsset as ContentAssetSchema, Material as MaterialSchema, Rulebook as RulebookSchema } from '../domain/types';
+import type { Advertisement, Campaign, ContentAsset, Material, Rulebook } from '../domain/types';
 import { BoardSession, realBoardModels, realPerceptionModels, type BoardModels } from '../board/session';
 import { type ModelClient, type SttClient } from '../models/client';
 import { demoCampaignModels, demoPerception } from '../run/demo-fixtures';
@@ -171,22 +173,25 @@ function registerDiscoveredReview(roomId: string): (event: BoardEvent) => void {
   return makeOnEvent(record);
 }
 
-// band mode: connect the agents (you add them in app.band.ai) and OBSERVE. We never create rooms.
-const bandBoard =
-  BOARD_MODE === 'band'
-    ? new BandBoard({
-        brand,
-        rulebooks: currentRulebooks(),
-        models: realBoardModels(),
-        ...(process.env.HUMAN_HANDLE ? { humanHandle: process.env.HUMAN_HANDLE } : {}),
-        hostImage: (u) => store.hostImage(u) ?? u,
-        getPrecedents: recentPrecedents,
-        getRulebook: (region) => store.getRulebookOverride(region) ?? defaultRulebooks[region.toLowerCase() as RegionKey] ?? defaultRulebooks.us,
-        lookupCampaign: findCampaign,
-        logPrecedent: (p) => store.appendPrecedent(p),
-        onReviewDiscovered: registerDiscoveredReview,
-      })
-    : undefined;
+// band mode: connect the agents (you add them in app.band.ai) and OBSERVE. We never
+// create rooms. Built lazily inside main() (only when actually serving in band
+// mode) so importing this module (e.g. in tests, or in local mode) never
+// constructs the real board models, which would require an AIML key.
+function buildBandBoard(): BandBoard | undefined {
+  if (BOARD_MODE !== 'band') return undefined;
+  return new BandBoard({
+    brand,
+    rulebooks: currentRulebooks(),
+    models: realBoardModels(),
+    ...(process.env.HUMAN_HANDLE ? { humanHandle: process.env.HUMAN_HANDLE } : {}),
+    hostImage: (u) => store.hostImage(u) ?? u,
+    getPrecedents: recentPrecedents,
+    getRulebook: (region) => store.getRulebookOverride(region) ?? defaultRulebooks[region.toLowerCase() as RegionKey] ?? defaultRulebooks.us,
+    lookupCampaign: findCampaign,
+    logPrecedent: (p) => store.appendPrecedent(p),
+    onReviewDiscovered: registerDiscoveredReview,
+  });
+}
 
 const CreateReview = z.object({
   copy: z.string().min(1),
@@ -195,6 +200,14 @@ const CreateReview = z.object({
   markets: z.array(z.string()).min(1),
   imagePrompt: z.string().optional(),
   substantiation: z.string().optional(),
+});
+
+// JSON body for a dossier source (the non-multipart path). content is required;
+// name/kind are optional (kind defaults to text).
+const DossierSourceBody = z.object({
+  name: z.string().optional(),
+  kind: z.enum(['md', 'json', 'text']).optional(),
+  content: z.string().min(1),
 });
 
 function imageContentType(name: string): string {
@@ -213,6 +226,51 @@ function videoContentType(name: string): string {
 function extOf(filename: string, fallback = 'mp4'): string {
   const m = /\.([a-z0-9]+)$/i.exec(filename);
   return m && m[1] ? m[1].toLowerCase() : fallback;
+}
+
+// --- Advertisement-aware campaign helpers --------------------------------
+// A material lives inside an advertisement now, so mutations walk the ad tier.
+
+/** Total material count across every advertisement. */
+function materialCount(camp: Campaign): number {
+  return camp.advertisements.reduce((n, ad) => n + ad.materials.length, 0);
+}
+
+/** All materials across every advertisement (flattened). */
+function allMaterials(camp: Campaign): Material[] {
+  return camp.advertisements.flatMap((ad) => ad.materials);
+}
+
+/** Apply a patch to the material with this id, wherever it lives, returning a new campaign. */
+function patchMaterial(camp: Campaign, materialId: string, patch: (m: Material) => Material): Campaign {
+  return {
+    ...camp,
+    advertisements: camp.advertisements.map((ad) => ({
+      ...ad,
+      materials: ad.materials.map((m) => (m.id === materialId ? patch(m) : m)),
+    })),
+  };
+}
+
+/**
+ * Add (or replace by id) a material under a target advertisement. When
+ * advertisementId is omitted, the first advertisement is used; when the campaign
+ * has no advertisements yet, a single "Default" advertisement is created. The
+ * material is removed from any OTHER advertisement first, so an id stays unique.
+ */
+function addMaterialToCampaign(camp: Campaign, material: Material, advertisementId?: string): Campaign {
+  let advertisements = camp.advertisements.map((ad) => ({
+    ...ad,
+    materials: ad.materials.filter((m) => m.id !== material.id),
+  }));
+  if (advertisements.length === 0) advertisements = [{ id: 'default', name: 'Default', materials: [] }];
+  const targetId = advertisementId && advertisements.some((ad) => ad.id === advertisementId)
+    ? advertisementId
+    : advertisements[0]!.id;
+  advertisements = advertisements.map((ad) =>
+    ad.id === targetId ? { ...ad, materials: [...ad.materials, material] } : ad,
+  );
+  return { ...camp, advertisements };
 }
 
 function makeOnEvent(record: ReviewRecord): (event: BoardEvent) => void {
@@ -342,9 +400,10 @@ app.post('/api/reviews', async (c) => {
       if (!parsedCampaign.success) return c.json({ error: parsedCampaign.error.flatten() }, 400);
       campaign = parsedCampaign.data;
     }
-    if (campaign.materials.length === 0) return c.json({ error: 'campaign has no materials' }, 400);
+    const allMaterials = campaign.advertisements.flatMap((ad) => ad.materials);
+    if (allMaterials.length === 0) return c.json({ error: 'campaign has no materials' }, 400);
     const id = runCampaignReview(campaign);
-    return c.json({ id, kind: 'campaign', materials: campaign.materials.map((m) => m.id) });
+    return c.json({ id, kind: 'campaign', materials: allMaterials.map((m) => m.id) });
   }
 
   const parsed = CreateReview.safeParse(body);
@@ -498,13 +557,84 @@ app.post('/api/videos', async (c) => {
   const materialId = typeof form.get('materialId') === 'string' ? (form.get('materialId') as string) : '';
   if (campaignId && materialId) {
     const camp = store.getCampaign(campaignId);
-    if (camp) {
-      const materials = camp.materials.map((m) => (m.id === materialId ? { ...m, videoUrl } : m));
-      store.saveCampaign({ ...camp, materials });
-    }
+    if (camp) store.saveCampaign(patchMaterial(camp, materialId, (m) => ({ ...m, videoUrl })));
   }
   return c.json({ videoUrl, ...(campaignId ? { campaignId } : {}), ...(materialId ? { materialId } : {}) });
 });
+
+// Multipart image upload. Hosts the file under data/images/ and returns its served
+// url. When campaignId + materialId are included, the url is attached to that
+// material's imageUrl (so the perception pre-pass treats it as the single frame).
+app.post('/api/images', async (c) => {
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.json({ error: 'expected multipart/form-data with an "image" file' }, 400);
+  }
+  const file = form.get('image');
+  if (!(file instanceof File)) return c.json({ error: 'missing "image" file field' }, 400);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.byteLength === 0) return c.json({ error: 'empty image file' }, 400);
+  const imageUrl = store.hostImageBytes(bytes, extOf(file.name, 'png'));
+
+  const campaignId = typeof form.get('campaignId') === 'string' ? (form.get('campaignId') as string) : '';
+  const materialId = typeof form.get('materialId') === 'string' ? (form.get('materialId') as string) : '';
+  if (campaignId && materialId) {
+    const camp = store.getCampaign(campaignId);
+    if (camp) store.saveCampaign(patchMaterial(camp, materialId, (m) => ({ ...m, imageUrl })));
+  }
+  return c.json({ imageUrl, ...(campaignId ? { campaignId } : {}), ...(materialId ? { materialId } : {}) });
+});
+
+// Append a source to a campaign's dossier so it cascades into every reviewer
+// prompt. Two ways in: a multipart upload (a "file" field, .md/.txt/.json) OR a
+// JSON body { name, kind, content }. The kind is inferred from the file
+// extension on upload, or taken from the body. Both endpoints below share this.
+async function addDossierSource(c: Context): Promise<Response> {
+  const camp = store.getCampaign(c.req.param('id') ?? '');
+  if (!camp) return c.json({ error: 'not found' }, 404);
+
+  let source: { name: string; kind: 'md' | 'json' | 'text'; content: string } | undefined;
+  const contentType = c.req.header('content-type') ?? '';
+  if (contentType.includes('multipart/form-data')) {
+    let form: FormData;
+    try {
+      form = await c.req.formData();
+    } catch {
+      return c.json({ error: 'expected multipart/form-data with a "file" field' }, 400);
+    }
+    const file = form.get('file');
+    if (!(file instanceof File)) return c.json({ error: 'missing "file" field' }, 400);
+    const content = await file.text();
+    const ext = extOf(file.name, 'text');
+    const kind: 'md' | 'json' | 'text' = ext === 'md' ? 'md' : ext === 'json' ? 'json' : 'text';
+    source = { name: file.name || `source-${randomUUID().slice(0, 6)}`, kind, content };
+  } else {
+    // JSON body: { name?, kind?, content }. content is required; kind defaults to text.
+    const parsed = DossierSourceBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+    source = {
+      name: parsed.data.name ?? `source-${randomUUID().slice(0, 6)}`,
+      kind: parsed.data.kind ?? 'text',
+      content: parsed.data.content,
+    };
+  }
+
+  const next: Campaign = {
+    ...camp,
+    dossier: { ...camp.dossier, sources: [...camp.dossier.sources, source] },
+  };
+  store.saveCampaign(next);
+  return c.json({ campaign: next, source });
+}
+
+// TASK-spec path. Accepts a multipart .md/.txt/.json upload or a JSON body.
+app.post('/api/campaigns/:id/dossier/sources', (c) => addDossierSource(c));
+
+// Back-compat alias (the same handler) used by the earlier multipart upload path.
+app.post('/api/campaigns/:id/dossier-sources', (c) => addDossierSource(c));
+
 
 app.get('/api/precedents', (c) => c.json({ precedents: store.listPrecedents() }));
 
@@ -520,13 +650,14 @@ app.post('/api/assets', async (c) => {
 });
 
 // --- Campaigns -----------------------------------------------------------
-// The saved campaign library. listCampaigns also surfaces legacy single assets
-// as one-material campaigns, so existing data still appears (store back-compat).
+// The saved campaign library. A Campaign holds Advertisements, each holding
+// Materials. listCampaigns also surfaces legacy single assets as one-advertisement
+// campaigns, so existing data still appears (store back-compat).
 
 app.get('/api/campaigns', (c) => {
   const list = store
     .listCampaigns()
-    .map((camp) => ({ id: camp.id, name: camp.name, markets: camp.markets, materialCount: camp.materials.length }))
+    .map((camp) => ({ id: camp.id, name: camp.name, markets: camp.markets, advertisementCount: camp.advertisements.length, materialCount: materialCount(camp) }))
     .sort((a, b) => a.name.localeCompare(b.name));
   return c.json({ campaigns: list });
 });
@@ -546,18 +677,51 @@ app.post('/api/campaigns', async (c) => {
   return c.json({ campaign: parsed.data });
 });
 
-// Add a material to an existing campaign (id auto-assigned when absent).
-app.post('/api/campaigns/:id/materials', async (c) => {
+// Add an advertisement to an existing campaign (id auto-assigned when absent).
+// Advertisements can be added at any time, including after a review completes.
+app.post('/api/campaigns/:id/advertisements', async (c) => {
   const camp = store.getCampaign(c.req.param('id'));
   if (!camp) return c.json({ error: 'not found' }, 404);
   const body: unknown = await c.req.json().catch(() => ({}));
+  const candidate = (body as { id?: unknown })?.id ? body : { ...(body as object), id: `ad-${randomUUID().slice(0, 8)}` };
+  const parsed = AdvertisementSchema.safeParse(candidate);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const next = { ...camp, advertisements: [...camp.advertisements.filter((ad) => ad.id !== parsed.data.id), parsed.data] };
+  store.saveCampaign(next);
+  return c.json({ campaign: next, advertisement: parsed.data });
+});
+
+// Add a material to a campaign under a target advertisement. Both ids are
+// auto-assigned when absent. The target advertisement can be given in the URL
+// (POST .../advertisements/:adId/materials) or in the body (advertisementId);
+// when neither is given it defaults to the first advertisement. Materials can be
+// added at ANY time, including after a review has completed (no status gate).
+async function addMaterial(c: Context, advertisementIdFromPath?: string): Promise<Response> {
+  const camp = store.getCampaign(c.req.param('id') ?? '');
+  if (!camp) return c.json({ error: 'not found' }, 404);
+  // A path-addressed advertisement must exist; a typo should 404, not silently
+  // fall through to the first advertisement.
+  if (advertisementIdFromPath !== undefined && !camp.advertisements.some((ad) => ad.id === advertisementIdFromPath)) {
+    return c.json({ error: `advertisement ${advertisementIdFromPath} not found` }, 404);
+  }
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const advertisementId = advertisementIdFromPath
+    ?? (typeof (body as { advertisementId?: unknown })?.advertisementId === 'string'
+      ? (body as { advertisementId: string }).advertisementId
+      : undefined);
   const candidate = (body as { id?: unknown })?.id ? body : { ...(body as object), id: `mat-${randomUUID().slice(0, 8)}` };
   const parsed = MaterialSchema.safeParse(candidate);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
-  const next = { ...camp, materials: [...camp.materials.filter((m) => m.id !== parsed.data.id), parsed.data] };
+  const next = addMaterialToCampaign(camp, parsed.data, advertisementId);
   store.saveCampaign(next);
   return c.json({ campaign: next, material: parsed.data });
-});
+}
+
+// Body carries the (optional) advertisementId; defaults to the first ad.
+app.post('/api/campaigns/:id/materials', (c) => addMaterial(c));
+
+// The advertisement is addressed in the URL path (TASK spec). Add-anytime.
+app.post('/api/campaigns/:id/advertisements/:adId/materials', (c) => addMaterial(c, c.req.param('adId')));
 
 // Campaign review state for the UI: status, the observational rollup (worst-case
 // per region + the material x region matrix), and the full event stream.
@@ -689,7 +853,14 @@ if (existsSync(WEB_DIST)) {
   );
 }
 
+// The Hono app and the store are exported so tests can drive the routes via
+// app.fetch without binding a port (run tests with BOARD_MODE=local). Importing
+// this module has no side effects: the server only binds, and band.ai agents only
+// connect, when run as the entrypoint (npm run serve / dev:server) via main().
+export { app, store };
+
 async function main(): Promise<void> {
+  const bandBoard = buildBandBoard();
   if (bandBoard) {
     console.log('Connecting band.ai agents (BOARD_MODE=band). This is the real coordination layer...');
     await bandBoard.start();
@@ -699,7 +870,11 @@ async function main(): Promise<void> {
   console.log(`Campaign portal on http://localhost:${PORT} (BOARD_MODE=${BOARD_MODE}, MODEL_MODE=${process.env.MODEL_MODE ?? 'aiml'})`);
 }
 
-main().catch((err: unknown) => {
-  console.error(err);
-  process.exit(1);
-});
+// Run the server only when this file is the process entrypoint, not on import.
+const isEntrypoint = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isEntrypoint) {
+  main().catch((err: unknown) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

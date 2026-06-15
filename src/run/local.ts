@@ -56,8 +56,10 @@ function printEvent(e: BoardEvent): void {
   }
 }
 
-// One product, several materials, one shared dossier. The dossier is the
-// cascading source-of-truth that grounds every reviewer of every material.
+// One product, THREE advertisements (each with its own materials), one shared
+// dossier. The dossier is the cascading source-of-truth that grounds every
+// reviewer of every material; every material across every ad negotiates
+// concurrently (no ad-wide or campaign-wide gate).
 function demoCampaign(): Campaign {
   return Campaign.parse({
     id: 'immune-plus-q3',
@@ -69,10 +71,32 @@ function demoCampaign(): Campaign {
       approvedInfo: 'Always present claims as part of a varied, balanced diet and a healthy lifestyle.',
       sources: [{ name: 'trial-summary', kind: 'text', content: 'Double-blind, placebo-controlled; primary immune-response endpoint met.' }],
     },
-    materials: [
-      { id: 'hero-video', name: 'Hero Video', kind: 'video', channel: 'instagram', markets: ['US', 'EU', 'LATAM'], copy: 'Feel your best. Northwind Immune+ helps maintain your immune response. 9 out of 10 felt the difference.', claim: 'helps maintain immune response', videoUrl: '/api/videos/immune-plus-hero.mp4', perception: { frames: ['/api/images/immune-plus-frame-01.png', '/api/images/immune-plus-frame-02.png', '/api/images/immune-plus-frame-03.png', '/api/images/immune-plus-frame-04.png'] } },
-      { id: 'launch-post', name: 'Launch Post', kind: 'post', channel: 'x', markets: ['US', 'EU', 'LATAM'], copy: 'Northwind Immune+ supports everyday wellness as part of a balanced diet and healthy lifestyle.', claim: 'supports everyday wellness' },
-      { id: 'promo-banner', name: 'Promo Banner', kind: 'banner', channel: 'display', markets: ['US'], copy: 'Northwind Immune+: start your free trial today. Clinically supported immune support, delivered monthly.', claim: 'free trial; clinically supported immune support' },
+    advertisements: [
+      {
+        id: 'hero-launch',
+        name: 'Hero Launch',
+        materials: [
+          { id: 'hero-video', name: 'Hero Video', kind: 'video', channel: 'instagram', markets: ['US', 'EU', 'LATAM'], copy: 'Feel your best. Northwind Immune+ helps maintain your immune response. 9 out of 10 felt the difference.', claim: 'helps maintain immune response', videoUrl: '/api/videos/immune-plus-hero.mp4', perception: { frames: ['/api/images/immune-plus-frame-01.png', '/api/images/immune-plus-frame-02.png', '/api/images/immune-plus-frame-03.png', '/api/images/immune-plus-frame-04.png'] } },
+          { id: 'hero-cutdown-post', name: 'Hero Cutdown Post', kind: 'post', channel: 'instagram', markets: ['US', 'EU', 'LATAM'], copy: '15 seconds to feeling your best. Northwind Immune+ supports everyday wellness as part of a balanced diet and healthy lifestyle.', claim: 'supports everyday wellness' },
+          { id: 'hero-thumbnail-image', name: 'Hero Thumbnail', kind: 'image', channel: 'instagram', markets: ['US', 'EU', 'LATAM'], copy: 'Northwind Immune+: daily immune support.', claim: 'daily immune support' },
+        ],
+      },
+      {
+        id: 'retargeting',
+        name: 'Retargeting',
+        materials: [
+          { id: 'retarget-video', name: 'Retargeting Cutdown', kind: 'video', channel: 'youtube', markets: ['US', 'EU', 'LATAM'], copy: 'Still thinking about it? Northwind Immune+ supports your everyday immune health, as part of a balanced diet and healthy lifestyle.', claim: 'supports everyday immune health' },
+          { id: 'promo-banner', name: 'Promo Banner', kind: 'banner', channel: 'display', markets: ['US'], copy: 'Northwind Immune+: start your free trial today. Clinically supported immune support, delivered monthly.', claim: 'free trial; clinically supported immune support' },
+        ],
+      },
+      {
+        id: 'influencer',
+        name: 'Influencer',
+        materials: [
+          { id: 'launch-post', name: 'Launch Post', kind: 'post', channel: 'x', markets: ['US', 'EU', 'LATAM'], copy: 'Northwind Immune+ supports everyday wellness as part of a balanced diet and healthy lifestyle.', claim: 'supports everyday wellness' },
+          { id: 'influencer-story-image', name: 'Influencer Story', kind: 'image', channel: 'instagram', markets: ['US', 'EU', 'LATAM'], copy: 'My everyday wellness pick. Northwind Immune+ as part of a balanced diet and healthy lifestyle. #ad', claim: 'everyday wellness pick' },
+        ],
+      },
     ],
   });
 }
@@ -87,7 +111,8 @@ async function runCampaignDemo(): Promise<void> {
   const campaign = demoCampaign();
 
   console.log(`\n# Campaign review board (local fake-Band demo, NOT legal advice)`);
-  console.log(`# Campaign: "${campaign.name}" with ${campaign.materials.length} materials, all negotiated CONCURRENTLY.`);
+  const materialTotal = campaign.advertisements.reduce((n, ad) => n + ad.materials.length, 0);
+  console.log(`# Campaign: "${campaign.name}" with ${campaign.advertisements.length} advertisements / ${materialTotal} materials, all negotiated CONCURRENTLY.`);
   console.log(`# Shared dossier cascades into every reviewer of every material.\n`);
 
   const session = new CampaignSession({
@@ -117,7 +142,11 @@ async function runCampaignDemo(): Promise<void> {
   console.log(`  Worst-case per region: ${finalRollup.worstCaseByRegion.map((r) => `${r.region}=${r.decision}`).join(', ')}`);
   console.log(`  Material x region matrix:`);
   for (const cell of finalRollup.matrix) {
-    console.log(`    ${cell.materialId.padEnd(14)} ${cell.region.padEnd(6)} ${cell.decision}`);
+    console.log(`    ${cell.advertisementId.padEnd(12)} ${cell.materialId.padEnd(22)} ${cell.region.padEnd(6)} ${cell.decision}`);
+  }
+  console.log(`  Per-advertisement worst-case:`);
+  for (const ad of finalRollup.perAdvertisement) {
+    console.log(`    ${ad.name.padEnd(14)} ${ad.worstCaseByRegion.map((r) => `${r.region}=${r.decision}`).join(', ')}`);
   }
 }
 

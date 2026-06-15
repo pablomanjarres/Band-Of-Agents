@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { BoardEvent, BoardStatus } from '../board/events';
 import type { Campaign, ContentAsset, Material, Rulebook } from '../domain/types';
-import { Campaign as CampaignSchema } from '../domain/types';
+import { Campaign as CampaignSchema, normalizeCampaign } from '../domain/types';
 import type { Precedent } from '../agents/reconcile';
 
 export interface StoredReview {
@@ -75,6 +75,14 @@ export class Store {
     const p = join(this.imagesDir, safe);
     if (!existsSync(p)) return null;
     return readFileSync(p);
+  }
+
+  /** Save raw image bytes (a multipart upload), returning the served url (/api/images/<name>). */
+  hostImageBytes(bytes: Uint8Array, ext = 'png'): string {
+    const safeExt = /^[a-z0-9]+$/i.test(ext) ? ext.toLowerCase() : 'png';
+    const name = `${randomUUID()}.${safeExt}`;
+    writeFileSync(join(this.imagesDir, name), Buffer.from(bytes));
+    return `/api/images/${name}`;
   }
 
   // --- Videos --------------------------------------------------------------
@@ -142,13 +150,15 @@ export class Store {
   }
 
   // --- Campaigns -----------------------------------------------------------
-  // The saved campaign library lives in data/campaigns.json. For back-compat,
-  // any legacy single ContentAsset in data/assets.json is also surfaced as a
-  // one-material campaign, so existing saved assets still appear and review.
+  // The saved campaign library lives in data/campaigns.json. Each stored record is
+  // normalized on read, so a legacy flat materials[] campaign loads as a single
+  // "Default" advertisement. For back-compat, any legacy single ContentAsset in
+  // data/assets.json is also surfaced as a one-advertisement campaign, so existing
+  // saved assets still appear and review.
 
-  /** Saved campaigns plus legacy single assets read as one-material campaigns (saved ones win on id collision). */
+  /** Saved campaigns (normalized to the advertisement tier) plus legacy single assets; saved win on id collision. */
   listCampaigns(): Campaign[] {
-    const saved = this.readJson<Campaign[]>('campaigns.json', []);
+    const saved = this.readJson<unknown[]>('campaigns.json', []).map((c) => safeNormalize(c)).filter((c): c is Campaign => c !== null);
     const savedIds = new Set(saved.map((c) => c.id));
     const legacy = this.listAssets()
       .map((a) => assetToCampaign(a))
@@ -217,11 +227,12 @@ export class Store {
 }
 
 /**
- * Read a legacy single ContentAsset as a one-material campaign so existing saved
- * assets (and old reviews) still load under the campaign model. The material
- * reuses every asset field and is typed as a post (the default channel kind); the
- * dossier starts empty (the asset's own substantiation is carried into it so the
- * cascade still has the one fact the single-asset flow had).
+ * Read a legacy single ContentAsset as a one-advertisement, one-material campaign
+ * so existing saved assets (and old reviews) still load under the three-tier
+ * model. The material reuses every asset field and is typed as a post (the default
+ * channel kind), grouped under a single "Default" advertisement; the dossier
+ * starts empty (the asset's own substantiation is carried into it so the cascade
+ * still has the one fact the single-asset flow had).
  */
 export function assetToCampaign(asset: ContentAsset): Campaign {
   const material: Material = { ...asset, kind: 'post' };
@@ -235,6 +246,20 @@ export function assetToCampaign(asset: ContentAsset): Campaign {
       approvedInfo: '',
       sources: [],
     },
-    materials: [material],
+    advertisements: [{ id: 'default', name: 'Default', materials: [material] }],
   };
+}
+
+
+/**
+ * Normalize a stored campaign record into a Campaign, tolerating the legacy flat
+ * `materials[]` shape (it becomes a single "Default" advertisement) and dropping
+ * any record that no longer parses, so one bad row never breaks the library.
+ */
+function safeNormalize(raw: unknown): Campaign | null {
+  try {
+    return normalizeCampaign(raw);
+  } catch {
+    return null;
+  }
 }

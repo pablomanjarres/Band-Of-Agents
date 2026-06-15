@@ -13,6 +13,7 @@ import type { ContentAsset, Finding, RegionVerdict } from '../domain/types';
 export interface BoardEventCampaignRef {
   campaignId?: string;
   materialId?: string;
+  advertisementId?: string;
 }
 
 export type BoardEvent = (

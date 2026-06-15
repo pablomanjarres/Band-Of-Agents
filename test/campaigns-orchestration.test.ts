@@ -85,14 +85,16 @@ describe('THE ONE RULE end to end: materials negotiate concurrently, no shared g
       image: { model: 'stub-image', complete: async () => ({ text: '' }) } satisfies ModelClient,
     };
 
+    // The two materials live in DIFFERENT advertisements, so this also proves
+    // there is no advertisement-wide gate, not just no campaign-wide gate.
     const campaign = Campaign.parse({
       id: 'camp-conc',
       name: 'Concurrency',
       markets: ['US'],
       dossier: { approvedClaims: [], substantiation: '', approvedInfo: '', sources: [] },
-      materials: [
-        { id: 'slow', kind: 'video', channel: 'social', markets: ['US'], copy: 'slow copy', claim: 'c' },
-        { id: 'fast', kind: 'post', channel: 'x', markets: ['US'], copy: 'fast copy', claim: 'c' },
+      advertisements: [
+        { id: 'ad-slow', name: 'Slow Ad', materials: [{ id: 'slow', kind: 'video', channel: 'social', markets: ['US'], copy: 'slow copy', claim: 'c' }] },
+        { id: 'ad-fast', name: 'Fast Ad', materials: [{ id: 'fast', kind: 'post', channel: 'x', markets: ['US'], copy: 'fast copy', claim: 'c' }] },
       ],
     });
 
@@ -151,9 +153,9 @@ describe('THE ONE RULE end to end: materials negotiate concurrently, no shared g
       name: 'Independent',
       markets: ['US', 'EU', 'LATAM'],
       dossier: { approvedClaims: [], substantiation: '', approvedInfo: '', sources: [] },
-      materials: [
-        { id: 'matA', kind: 'video', channel: 'social', markets: ['US', 'EU'], copy: 'a', claim: 'a' },
-        { id: 'matB', kind: 'post', channel: 'x', markets: ['US', 'EU'], copy: 'b', claim: 'b' },
+      advertisements: [
+        { id: 'ad-A', name: 'Ad A', materials: [{ id: 'matA', kind: 'video', channel: 'social', markets: ['US', 'EU'], copy: 'a', claim: 'a' }] },
+        { id: 'ad-B', name: 'Ad B', materials: [{ id: 'matB', kind: 'post', channel: 'x', markets: ['US', 'EU'], copy: 'b', claim: 'b' }] },
       ],
     });
 
@@ -206,9 +208,15 @@ describe('the dossier cascades into the region-reviewer prompt through a campaig
         approvedInfo: 'Always present as part of a balanced diet.',
         sources: [{ name: 'trial-summary', kind: 'text', content: 'Primary endpoint met.' }],
       },
-      materials: [
-        { id: 'm1', kind: 'video', channel: 'social', markets: ['US'], copy: 'c1', claim: 'c1' },
-        { id: 'm2', kind: 'post', channel: 'x', markets: ['US'], copy: 'c2', claim: 'c2' },
+      advertisements: [
+        {
+          id: 'ad-cascade',
+          name: 'Cascade Ad',
+          materials: [
+            { id: 'm1', kind: 'video', channel: 'social', markets: ['US'], copy: 'c1', claim: 'c1' },
+            { id: 'm2', kind: 'post', channel: 'x', markets: ['US'], copy: 'c2', claim: 'c2' },
+          ],
+        },
       ],
     });
 
@@ -226,9 +234,12 @@ describe('the dossier cascades into the region-reviewer prompt through a campaig
 });
 
 describe('campaign loads/validates and the worst-case rollup is correct', () => {
-  it('computeRollup folds per-material verdicts into worst-case (block beats adapt beats publish)', () => {
+  it('computeRollup folds verdicts into per-campaign AND per-advertisement worst-case', () => {
+    // Two advertisements. adX worst-case: US=adapt (mA), EU=adapt (mA). adY
+    // worst-case: US=escalate (mB), EU=publish. Campaign worst-case folds both ads.
     const perMaterial = [
       {
+        advertisementId: 'adX',
         materialId: 'mA',
         verdicts: [
           { region: 'US', decision: 'publish', rationale: 'ok' },
@@ -236,6 +247,7 @@ describe('campaign loads/validates and the worst-case rollup is correct', () => 
         ] as RegionVerdict[],
       },
       {
+        advertisementId: 'adY',
         materialId: 'mB',
         verdicts: [
           { region: 'US', decision: 'escalate', rationale: 'hard block' },
@@ -243,14 +255,32 @@ describe('campaign loads/validates and the worst-case rollup is correct', () => 
         ] as RegionVerdict[],
       },
     ];
-    const rollup = computeRollup('camp-x', perMaterial);
+    const rollup = computeRollup('camp-x', perMaterial, [
+      { id: 'adX', name: 'Ad X' },
+      { id: 'adY', name: 'Ad Y' },
+    ]);
+
+    // Campaign worst-case: US escalate beats publish; EU adapt beats publish.
     const byRegion = new Map(rollup.worstCaseByRegion.map((r) => [r.region, r.decision]));
-    // US: escalate beats publish. EU: adapt beats publish.
     expect(byRegion.get('US')).toBe('escalate');
     expect(byRegion.get('EU')).toBe('adapt');
-    // The matrix has one cell per (material, region).
+
+    // The campaign matrix has one cell per (material, region) and cells carry the ad id.
     expect(rollup.matrix.length).toBe(4);
-    expect(rollup.matrix).toContainEqual({ materialId: 'mB', region: 'US', decision: 'escalate', rationale: 'hard block' });
+    expect(rollup.matrix).toContainEqual({ advertisementId: 'adY', materialId: 'mB', region: 'US', decision: 'escalate', rationale: 'hard block' });
+
+    // Per-advertisement rollups: each ad's worst-case is across ONLY its materials.
+    expect(rollup.perAdvertisement.map((a) => a.advertisementId)).toEqual(['adX', 'adY']);
+    const adX = rollup.perAdvertisement.find((a) => a.advertisementId === 'adX')!;
+    const adY = rollup.perAdvertisement.find((a) => a.advertisementId === 'adY')!;
+    expect(adX.name).toBe('Ad X');
+    expect(new Map(adX.worstCaseByRegion.map((r) => [r.region, r.decision])).get('US')).toBe('publish');
+    expect(new Map(adX.worstCaseByRegion.map((r) => [r.region, r.decision])).get('EU')).toBe('adapt');
+    expect(new Map(adY.worstCaseByRegion.map((r) => [r.region, r.decision])).get('US')).toBe('escalate');
+    expect(new Map(adY.worstCaseByRegion.map((r) => [r.region, r.decision])).get('EU')).toBe('publish');
+    // Each per-ad matrix only contains that ad's cells.
+    expect(adX.matrix.every((cell) => cell.advertisementId === 'adX')).toBe(true);
+    expect(adY.matrix.every((cell) => cell.advertisementId === 'adY')).toBe(true);
   });
 
   it('runs a 3-material campaign and computes the correct worst-case rollup over real verdicts', async () => {
@@ -271,15 +301,29 @@ describe('campaign loads/validates and the worst-case rollup is correct', () => 
       image: { model: 'stub-image', complete: async () => ({ text: '' }), generateImage: async () => ({ url: 'https://cdn.aimlapi.com/x.png' }) } satisfies ModelClient,
     };
 
+    // Two advertisements: "Hero" holds the clean + remediating materials; "Promo"
+    // holds the escalating banner. This lets us check per-ad worst-case too.
     const campaign = Campaign.parse({
       id: 'camp-roll',
       name: 'Rollup',
       markets: ['US', 'EU', 'LATAM'],
       dossier: { approvedClaims: [], substantiation: '', approvedInfo: '', sources: [] },
-      materials: [
-        { id: 'm-pub', kind: 'post', channel: 'x', markets: ['US', 'EU', 'LATAM'], copy: 'p', claim: 'p' },
-        { id: 'm-adapt', kind: 'video', channel: 'social', markets: ['US', 'EU', 'LATAM'], copy: 'a', claim: 'a' },
-        { id: 'm-esc', kind: 'banner', channel: 'display', markets: ['US'], copy: 'free forever', claim: 'free' },
+      advertisements: [
+        {
+          id: 'ad-hero',
+          name: 'Hero',
+          materials: [
+            { id: 'm-pub', kind: 'post', channel: 'x', markets: ['US', 'EU', 'LATAM'], copy: 'p', claim: 'p' },
+            { id: 'm-adapt', kind: 'video', channel: 'social', markets: ['US', 'EU', 'LATAM'], copy: 'a', claim: 'a' },
+          ],
+        },
+        {
+          id: 'ad-promo',
+          name: 'Promo',
+          materials: [
+            { id: 'm-esc', kind: 'banner', channel: 'display', markets: ['US'], copy: 'free forever', claim: 'free' },
+          ],
+        },
       ],
     });
 
@@ -287,24 +331,41 @@ describe('campaign loads/validates and the worst-case rollup is correct', () => 
     const rollup = await session.run();
 
     expect(rollup.perMaterial.length).toBe(3);
+    // Every per-material entry is tagged with its advertisement.
+    expect(rollup.perMaterial.find((m) => m.materialId === 'm-esc')?.advertisementId).toBe('ad-promo');
+
+    // Campaign worst-case across all ads.
     const byRegion = new Map(rollup.worstCaseByRegion.map((r) => [r.region, r.decision]));
-    expect(byRegion.get('US')).toBe('escalate'); // from m-esc
+    expect(byRegion.get('US')).toBe('escalate'); // from m-esc (Promo)
     expect(byRegion.get('EU')).toBe('publish'); // m-adapt remediated to publish
     expect(byRegion.get('LATAM')).toBe('publish');
     expect(byRegion.get('BRAND')).toBe('publish');
-    // Full matrix: 3 materials x 4 regions = 12 cells.
+    // Full campaign matrix: 3 materials x 4 regions = 12 cells.
     expect(rollup.matrix.length).toBe(12);
+
+    // Per-advertisement worst-case: Hero never escalates (US publish); Promo does.
+    const hero = rollup.perAdvertisement.find((a) => a.advertisementId === 'ad-hero')!;
+    const promo = rollup.perAdvertisement.find((a) => a.advertisementId === 'ad-promo')!;
+    expect(new Map(hero.worstCaseByRegion.map((r) => [r.region, r.decision])).get('US')).toBe('publish');
+    expect(new Map(hero.worstCaseByRegion.map((r) => [r.region, r.decision])).get('EU')).toBe('publish');
+    expect(new Map(promo.worstCaseByRegion.map((r) => [r.region, r.decision])).get('US')).toBe('escalate');
+    // Hero has 2 materials x 4 regions = 8 cells; Promo has 1 x 4 = 4 cells.
+    expect(hero.matrix.length).toBe(8);
+    expect(promo.matrix.length).toBe(4);
   });
 
-  it('validates a campaign from JSON (one-level materials, dossier defaults)', () => {
+  it('validates a three-tier campaign from JSON (advertisements -> materials, dossier defaults)', () => {
     const camp = Campaign.parse({
       id: 'c',
       name: 'n',
       dossier: {},
-      materials: [{ id: 'm', kind: 'image', channel: 'ig', markets: ['US'], copy: 'c', claim: 'c' }],
+      advertisements: [
+        { id: 'ad', name: 'Ad', materials: [{ id: 'm', kind: 'image', channel: 'ig', markets: ['US'], copy: 'c', claim: 'c' }] },
+      ],
     });
     expect(camp.markets).toEqual([]);
     expect(camp.dossier.sources).toEqual([]);
-    expect(camp.materials[0]?.kind).toBe('image');
+    expect(camp.advertisements[0]?.id).toBe('ad');
+    expect(camp.advertisements[0]?.materials[0]?.kind).toBe('image');
   });
 });

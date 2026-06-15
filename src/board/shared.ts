@@ -18,6 +18,7 @@ interface RoomData {
   /** Campaign coordinates, set when this key is a material review inside a campaign. */
   campaignId?: string;
   materialId?: string;
+  advertisementId?: string;
 }
 
 export type BoardEmit = (roomId: string, event: BoardEvent) => void;
@@ -32,6 +33,7 @@ export interface StartReviewOptions {
   dossier?: CampaignDossier;
   campaignId?: string;
   materialId?: string;
+  advertisementId?: string;
 }
 
 export class SharedBoard {
@@ -55,6 +57,7 @@ export class SharedBoard {
       ...(opts?.dossier !== undefined ? { dossier: opts.dossier } : {}),
       ...(opts?.campaignId !== undefined ? { campaignId: opts.campaignId } : {}),
       ...(opts?.materialId !== undefined ? { materialId: opts.materialId } : {}),
+      ...(opts?.advertisementId !== undefined ? { advertisementId: opts.advertisementId } : {}),
     });
     this.emit(roomId, { type: 'intake', seq: 0, fromName: 'Coordinator', asset: campaign, ...this.ref(roomId) });
     this.emit(roomId, { type: 'status', seq: 0, fromName: 'system', status: 'running', ...this.ref(roomId) });
@@ -86,13 +89,19 @@ export class SharedBoard {
     return this.rooms.get(roomId)?.materialId;
   }
 
+  /** The advertisement id for this key, when the review is one material of a campaign. */
+  advertisementId(roomId: string): string | undefined {
+    return this.rooms.get(roomId)?.advertisementId;
+  }
+
   /** Campaign coordinates for this key, spread into every emitted event so the UI can route per material. */
-  private ref(roomId: string): { campaignId?: string; materialId?: string } {
+  private ref(roomId: string): { campaignId?: string; materialId?: string; advertisementId?: string } {
     const room = this.rooms.get(roomId);
     if (!room) return {};
     return {
       ...(room.campaignId !== undefined ? { campaignId: room.campaignId } : {}),
       ...(room.materialId !== undefined ? { materialId: room.materialId } : {}),
+      ...(room.advertisementId !== undefined ? { advertisementId: room.advertisementId } : {}),
     };
   }
 

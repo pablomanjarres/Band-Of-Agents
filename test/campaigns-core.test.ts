@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Campaign, Material, type CampaignDossier, type ContentAsset } from '../src/domain/types';
+import { Campaign, Material, normalizeCampaign, type CampaignDossier, type ContentAsset } from '../src/domain/types';
 import { makeRegionReviewer } from '../src/agents/region-reviewer';
 import { makeReconcile } from '../src/agents/reconcile';
 import { SharedBoard } from '../src/board/shared';
@@ -57,70 +57,75 @@ const DOSSIER: CampaignDossier = {
   sources: [{ name: 'trial-summary', kind: 'text', content: 'Double-blind trial, primary endpoint met.' }],
 };
 
-describe('campaign domain: schema validates and stays one-level', () => {
-  it('parses a campaign whose material reuses ContentAsset fields plus kind', () => {
+describe('campaign domain: three tiers (campaign -> advertisements -> materials)', () => {
+  it('parses a three-tier campaign whose material reuses ContentAsset fields plus kind', () => {
     const parsed = Campaign.parse({
       id: 'camp-1',
       name: 'Immune+ Q3',
       markets: ['US', 'EU'],
       dossier: { approvedClaims: [], substantiation: '', approvedInfo: '', sources: [] },
-      materials: [
-        { id: 'm1', kind: 'video', channel: 'social', markets: ['US'], copy: 'hero copy', claim: 'feel better', videoUrl: 'https://x/v.mp4' },
+      advertisements: [
+        {
+          id: 'ad-hero',
+          name: 'Hero Launch',
+          materials: [
+            { id: 'm1', kind: 'video', channel: 'social', markets: ['US'], copy: 'hero copy', claim: 'feel better', videoUrl: 'https://x/v.mp4' },
+          ],
+        },
       ],
     });
-    expect(parsed.materials[0]?.kind).toBe('video');
-    expect(parsed.materials[0]?.copy).toBe('hero copy');
+    expect(parsed.advertisements[0]?.id).toBe('ad-hero');
+    expect(parsed.advertisements[0]?.materials[0]?.kind).toBe('video');
+    expect(parsed.advertisements[0]?.materials[0]?.copy).toBe('hero copy');
   });
 
-  it('applies defaults for dossier and markets', () => {
-    const parsed = Campaign.parse({ id: 'c', name: 'n', dossier: {}, materials: [] });
+  it('applies defaults for dossier, markets, and advertisements', () => {
+    const parsed = Campaign.parse({ id: 'c', name: 'n', dossier: {} });
     expect(parsed.markets).toEqual([]);
+    expect(parsed.advertisements).toEqual([]);
     expect(parsed.dossier.approvedClaims).toEqual([]);
     expect(parsed.dossier.sources).toEqual([]);
   });
 
-  it('allows one level of attachments', () => {
-    const m = Material.parse({
-      id: 'v',
-      kind: 'video',
-      channel: 'social',
+  it('normalizes a legacy flat materials[] campaign into a single "Default" advertisement', () => {
+    // Old data / old seeds had a flat materials[]; the schema preprocess (and the
+    // exported normalizeCampaign) load it as one advertisement so nothing breaks.
+    const legacy = {
+      id: 'legacy-camp',
+      name: 'Legacy',
       markets: ['US'],
-      copy: 'c',
-      claim: 'c',
-      attachments: [{ id: 'p', kind: 'post', channel: 'x', markets: ['US'], copy: 'derived', claim: 'd' }],
-    });
-    expect(m.attachments?.[0]?.id).toBe('p');
+      dossier: { approvedClaims: [], substantiation: '', approvedInfo: '', sources: [] },
+      materials: [
+        { id: 'm1', kind: 'post', channel: 'x', markets: ['US'], copy: 'c', claim: 'c' },
+        { id: 'm2', kind: 'image', channel: 'ig', markets: ['US'], copy: 'c2', claim: 'c2' },
+      ],
+    };
+    const viaParse = Campaign.parse(legacy);
+    const viaNormalize = normalizeCampaign(legacy);
+    for (const parsed of [viaParse, viaNormalize]) {
+      expect(parsed.advertisements.length).toBe(1);
+      expect(parsed.advertisements[0]?.id).toBe('default');
+      expect(parsed.advertisements[0]?.name).toBe('Default');
+      expect(parsed.advertisements[0]?.materials.map((m) => m.id)).toEqual(['m1', 'm2']);
+      // The legacy `materials` key does not survive as a campaign field.
+      expect((parsed as unknown as { materials?: unknown }).materials).toBeUndefined();
+    }
   });
 
-  it('rejects a second level of attachments (one level only)', () => {
-    const res = Material.safeParse({
-      id: 'v',
+  it('a Material is a flat leaf: it has no attachments field any more', () => {
+    const m = Material.parse({ id: 'v', kind: 'video', channel: 'social', markets: ['US'], copy: 'c', claim: 'c' });
+    expect((m as unknown as { attachments?: unknown }).attachments).toBeUndefined();
+    // The advertisement is the grouping, so an `attachments` array is dropped, not nested.
+    const m2 = Material.parse({
+      id: 'v2',
       kind: 'video',
       channel: 'social',
       markets: ['US'],
       copy: 'c',
       claim: 'c',
-      attachments: [
-        {
-          id: 'p',
-          kind: 'post',
-          channel: 'x',
-          markets: ['US'],
-          copy: 'derived',
-          claim: 'd',
-          // a nested attachment under an attachment must not be a valid Material field
-          attachments: [{ id: 'deep', kind: 'image', channel: 'ig', markets: ['US'], copy: 'x', claim: 'x' }],
-        },
-      ],
-    });
-    // The base material has no `attachments` field, so strict-by-default object
-    // parsing drops or rejects it; assert the deep level did not survive.
-    if (res.success) {
-      const nested = res.data.attachments?.[0] as { attachments?: unknown };
-      expect(nested.attachments).toBeUndefined();
-    } else {
-      expect(res.success).toBe(false);
-    }
+      attachments: [{ id: 'p', kind: 'post', channel: 'x', markets: ['US'], copy: 'd', claim: 'd' }],
+    } as unknown as Record<string, unknown>);
+    expect((m2 as unknown as { attachments?: unknown }).attachments).toBeUndefined();
   });
 });
 
@@ -262,12 +267,15 @@ describe('store: campaign persistence and legacy back-compat', () => {
         name: 'Immune+ Q3',
         markets: ['US'],
         dossier: { approvedClaims: ['x'], substantiation: 's', approvedInfo: '', sources: [] },
-        materials: [{ id: 'm1', kind: 'post', channel: 'x', markets: ['US'], copy: 'c', claim: 'c' }],
+        advertisements: [
+          { id: 'ad-1', name: 'Hero', materials: [{ id: 'm1', kind: 'post', channel: 'x', markets: ['US'], copy: 'c', claim: 'c' }] },
+        ],
       });
       store.saveCampaign(campaign);
       const got = store.getCampaign('camp-1');
       expect(got?.name).toBe('Immune+ Q3');
-      expect(got?.materials[0]?.id).toBe('m1');
+      expect(got?.advertisements[0]?.id).toBe('ad-1');
+      expect(got?.advertisements[0]?.materials[0]?.id).toBe('m1');
       expect(store.listCampaigns().some((c) => c.id === 'camp-1')).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -281,8 +289,10 @@ describe('store: campaign persistence and legacy back-compat', () => {
       store.saveAsset({ id: 'legacy-1', name: 'Old Asset', channel: 'post', markets: ['US', 'EU'], copy: 'c', claim: 'c', substantiation: 'on file' });
       const got = store.getCampaign('legacy-1');
       expect(got).toBeDefined();
-      expect(got?.materials.length).toBe(1);
-      expect(got?.materials[0]?.kind).toBe('post');
+      expect(got?.advertisements.length).toBe(1);
+      expect(got?.advertisements[0]?.id).toBe('default');
+      expect(got?.advertisements[0]?.materials.length).toBe(1);
+      expect(got?.advertisements[0]?.materials[0]?.kind).toBe('post');
       // the asset's own substantiation carries into the dossier so the cascade has it
       expect(got?.dossier.substantiation).toBe('on file');
     } finally {
@@ -293,7 +303,8 @@ describe('store: campaign persistence and legacy back-compat', () => {
   it('assetToCampaign helper maps a single asset to a one-material campaign', () => {
     const camp = assetToCampaign({ id: 'a', channel: 'post', markets: ['US'], copy: 'c', claim: 'c' });
     expect(camp.id).toBe('a');
-    expect(camp.materials[0]?.kind).toBe('post');
+    expect(camp.advertisements[0]?.id).toBe('default');
+    expect(camp.advertisements[0]?.materials[0]?.kind).toBe('post');
     expect(Campaign.safeParse(camp).success).toBe(true);
   });
 
@@ -310,12 +321,13 @@ describe('store: campaign persistence and legacy back-compat', () => {
       const store = new Store(dataDir);
       const seeded = store.listCampaigns();
       expect(seeded.length).toBeGreaterThan(0);
-      // The bundled seed parses and carries materials (proves the real seed file is valid).
-      expect(seeded[0]?.materials.length).toBeGreaterThan(0);
+      // The bundled seed parses and carries advertisements with materials (proves the real seed file is valid).
+      expect(seeded[0]?.advertisements.length).toBeGreaterThan(0);
+      expect(seeded[0]?.advertisements[0]?.materials.length).toBeGreaterThan(0);
 
       // Once a real campaign is saved, the seed no longer masks the saved library.
       store.saveCampaign(
-        Campaign.parse({ id: 'saved-1', name: 'Saved', dossier: {}, materials: [] }),
+        Campaign.parse({ id: 'saved-1', name: 'Saved', dossier: {}, advertisements: [] }),
       );
       const after = store.listCampaigns();
       expect(after.some((c) => c.id === 'saved-1')).toBe(true);

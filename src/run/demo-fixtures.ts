@@ -5,7 +5,10 @@
 // lets the hero video run (with a typical-results note) while EU demands the
 // Article 10(2) wording and LATAM demands localization, and the promo banner
 // carries an unfixable US negative-option problem that escalates to a human.
-// Stubs are keyed by material id, which match the seeded campaign's materials.
+// Stubs are keyed by MATERIAL id (which is stable across the three advertisements
+// in the seed); any material not in a table defaults to NO findings, so the new
+// materials in the seed (cutdowns, thumbnails, influencer story) never crash and
+// simply publish.
 
 import type { BoardModels } from '../board/session';
 import { StubModelClient, StubSttClient, type CompleteRequest, type ModelClient, type SttClient } from '../models/client';

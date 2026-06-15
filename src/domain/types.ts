@@ -32,6 +32,8 @@ export const ReviewResult = z.object({
   findings: z.array(Finding),
   /** Which material this review covers, when the review is part of a campaign. */
   materialId: z.string().optional(),
+  /** Which advertisement this review covers, when the review is part of a campaign. */
+  advertisementId: z.string().optional(),
 });
 export type ReviewResult = z.infer<typeof ReviewResult>;
 
@@ -53,6 +55,8 @@ export const RegionVerdict = z.object({
   rationale: z.string(),
   /** Which material this verdict covers, when the review is part of a campaign. */
   materialId: z.string().optional(),
+  /** Which advertisement this verdict covers, when the review is part of a campaign. */
+  advertisementId: z.string().optional(),
 });
 export type RegionVerdict = z.infer<typeof RegionVerdict>;
 
@@ -99,12 +103,13 @@ export const ContentAsset = z.object({
 });
 export type ContentAsset = z.infer<typeof ContentAsset>;
 
-// --- Campaigns (a product groups many marketing materials) ---------------------
-// A Campaign is the top-level unit: one product (e.g. a Q3 launch) holding many
-// Materials. Every Material reuses the ContentAsset fields verbatim and adds a
-// discriminating `kind`, optional video, optional perception artifacts, and one
-// level of attachments (a video owns its derived posts/images). The dossier is
-// the shared source-of-truth that cascades into every material's review.
+// --- Campaigns (a product holds advertisements; each advertisement holds materials) ---
+// THREE tiers. A Campaign is the product (a Q3 launch). It holds Advertisements
+// (a creative concept like "Hero Launch"). Each Advertisement holds its own
+// Materials (the videos, posts, images, banners that make up that ad). Every
+// Material reuses the ContentAsset fields verbatim and adds a discriminating
+// `kind`, an optional video, and optional perception artifacts. The dossier is
+// the shared source-of-truth that cascades into EVERY material's review.
 
 /** Shared source-of-truth that cascades to every material under review. */
 export const CampaignDossier = z.object({
@@ -128,10 +133,9 @@ export const CampaignDossier = z.object({
 export type CampaignDossier = z.infer<typeof CampaignDossier>;
 
 /**
- * Perception artifacts produced by the multimodal pre-pass (a later rung). All
- * text, so they cascade like the dossier and even a text-only region model
- * benefits; `frames` are hosted keyframe URLs for vision-capable models and the
- * live "analyzing" UI.
+ * Perception artifacts produced by the multimodal pre-pass. All text, so they
+ * cascade like the dossier and even a text-only region model benefits; `frames`
+ * are hosted keyframe URLs for vision-capable models and the live "analyzing" UI.
  */
 export const MaterialPerception = z.object({
   transcript: z.string().optional(),
@@ -145,29 +149,66 @@ export type MaterialPerception = z.infer<typeof MaterialPerception>;
 export const MaterialKind = z.enum(['video', 'post', 'image', 'banner']);
 export type MaterialKind = z.infer<typeof MaterialKind>;
 
-// A Material is structurally a ContentAsset plus campaign-material fields. We
-// define the base (no attachments) first, then extend it with one level of
-// attachments, so nesting stops at one level without a recursive z.lazy schema.
-const MaterialBase = ContentAsset.extend({
+/**
+ * A single marketing material. Structurally a ContentAsset plus the material
+ * fields. There is no `attachments` field any more: the Advertisement is the
+ * grouping, so a material is a flat leaf.
+ */
+export const Material = ContentAsset.extend({
   kind: MaterialKind,
   videoUrl: z.string().optional(),
   perception: MaterialPerception.optional(),
 });
-
-/** A single marketing material in a campaign (one level of attachments only). */
-export const Material = MaterialBase.extend({
-  attachments: z.array(MaterialBase).optional(),
-});
 export type Material = z.infer<typeof Material>;
 
-/** A product launch: many materials sharing one cascading dossier. */
-export const Campaign = z.object({
+/** An advertisement: one creative concept holding its own materials. */
+export const Advertisement = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** Optional markets for the ad; a material may still narrow them via its own markets. */
+  markets: z.array(z.string()).optional(),
+  materials: z.array(Material).default([]),
+});
+export type Advertisement = z.infer<typeof Advertisement>;
+
+/**
+ * A product launch: many advertisements (each with its own materials) sharing one
+ * cascading dossier. `advertisements` replaces the old flat `materials[]`.
+ */
+export const Campaign = z.preprocess(normalizeCampaignInput, z.object({
   id: z.string(),
   /** The product name, e.g. "Immune+ Q3". */
   name: z.string(),
-  /** Default markets for the campaign; a material may narrow them via its own markets. */
+  /** Default markets for the campaign; an ad/material may narrow them. */
   markets: z.array(z.string()).default([]),
   dossier: CampaignDossier,
-  materials: z.array(Material).default([]),
-});
+  advertisements: z.array(Advertisement).default([]),
+}));
 export type Campaign = z.infer<typeof Campaign>;
+
+/**
+ * Back-compat normalizer. A campaign authored or stored with a legacy flat
+ * `materials[]` (no `advertisements`) is read as a single advertisement
+ * { id: 'default', name: 'Default', materials }. Anything already shaped with
+ * `advertisements` is returned untouched. Used as the Campaign schema's
+ * preprocess step (so old data, old seeds, and old tests still parse) and
+ * exported for callers that hold a raw object.
+ */
+export function normalizeCampaignInput(input: unknown): unknown {
+  if (input === null || typeof input !== 'object') return input;
+  const obj = input as Record<string, unknown>;
+  if (Array.isArray(obj.advertisements)) return obj;
+  if (Array.isArray(obj.materials)) {
+    const { materials, ...rest } = obj;
+    return {
+      ...rest,
+      advertisements: [{ id: 'default', name: 'Default', materials }],
+    };
+  }
+  return obj;
+}
+
+/** Parse any campaign-shaped value (legacy flat materials[] included) into a Campaign. */
+export function normalizeCampaign(input: unknown): Campaign {
+  return Campaign.parse(input);
+}
