@@ -1,0 +1,81 @@
+{
+  "id": "immune-plus-q3",
+  "name": "Immune+ Q3 Launch",
+  "markets": ["US", "EU", "LATAM"],
+  "dossier": {
+    "approvedClaims": [
+      "Clinically supported to help maintain a healthy immune response",
+      "Vitamin C contributes to the normal function of the immune system",
+      "Each serving provides 80 mg vitamin C (100% NRV)"
+    ],
+    "substantiation": "Two randomized, double-blind, placebo-controlled trials on the Immune+ formula (n=240 and n=180); the primary immune-response endpoint was met in both. Typical-results data on file, reference DF-2026-07. The vitamin C wording follows the EFSA-authorised health claim.",
+    "approvedInfo": "Always present claims as part of a varied, balanced diet and a healthy lifestyle. Do not state or imply that the product prevents, treats, or cures any disease. EU materials must carry the Article 10(2) accompanying statements.",
+    "sources": [
+      {
+        "name": "trial-summary",
+        "kind": "text",
+        "content": "Double-blind, placebo-controlled design. Primary endpoint (immune-response marker) met at week 8 in both cohorts; no serious adverse events reported."
+      },
+      {
+        "name": "regulatory-notes",
+        "kind": "text",
+        "content": "Vitamin C and normal immune function is an EFSA-authorised health claim. US claims rely on the data-on-file substantiation, not on an FDA disease claim."
+      }
+    ]
+  },
+  "materials": [
+    {
+      "id": "hero-video",
+      "name": "Hero Video",
+      "kind": "video",
+      "channel": "instagram",
+      "markets": ["US", "EU", "LATAM"],
+      "copy": "Feeling run down? Northwind Immune+ helps maintain your immune response so you can feel your best, every day. 9 out of 10 users felt the difference in two weeks.",
+      "claim": "Helps maintain immune response; 9 out of 10 users felt the difference.",
+      "videoUrl": "https://cdn.example.com/northwind/immune-plus-hero.mp4",
+      "imagePrompt": "A bright, energetic flat-lay of Northwind Immune+ supplement bottles with fresh citrus and eucalyptus, warm morning sunlight, clean wellness aesthetic.",
+      "substantiation": "Two RCTs (n=240, n=180) on the Immune+ formula; typical-results data on file ref DF-2026-07.",
+      "attachments": [
+        {
+          "id": "hero-cutdown-post",
+          "name": "Hero Cutdown Post",
+          "kind": "post",
+          "channel": "instagram",
+          "markets": ["US", "EU", "LATAM"],
+          "copy": "15 seconds to feeling your best. Northwind Immune+ supports everyday wellness as part of a balanced diet and healthy lifestyle.",
+          "claim": "Supports everyday wellness."
+        },
+        {
+          "id": "hero-thumbnail-image",
+          "name": "Hero Thumbnail",
+          "kind": "image",
+          "channel": "instagram",
+          "markets": ["US", "EU", "LATAM"],
+          "copy": "Northwind Immune+ : daily immune support.",
+          "claim": "Daily immune support.",
+          "imagePrompt": "Close-up of a single Northwind Immune+ bottle beside sliced oranges on a soft neutral background, gentle natural morning light."
+        }
+      ]
+    },
+    {
+      "id": "launch-post",
+      "name": "Launch Announcement Post",
+      "kind": "post",
+      "channel": "x",
+      "markets": ["US", "EU", "LATAM"],
+      "copy": "Northwind Immune+ with Vitamin C is here. Vitamin C contributes to the normal function of the immune system. Feel your best, every day, as part of a varied, balanced diet and healthy lifestyle.",
+      "claim": "Vitamin C contributes to the normal function of the immune system.",
+      "substantiation": "EFSA-authorised health-claim wording for vitamin C and normal immune function; each serving provides 80 mg vitamin C (100% NRV)."
+    },
+    {
+      "id": "promo-banner",
+      "name": "Promo Banner",
+      "kind": "banner",
+      "channel": "display",
+      "markets": ["US"],
+      "copy": "Northwind Immune+ : start your free trial today. Clinically supported immune support, delivered monthly.",
+      "claim": "Clinically supported immune support.",
+      "imagePrompt": "A clean display banner showing the Northwind Immune+ bottle, a call-to-action button, and a citrus motif on a light background."
+    }
+  ]
+}
