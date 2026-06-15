@@ -259,3 +259,29 @@ Each rung is proven green (tests + a real run) before the next.
   (Rung C) so the text product stays shippable throughout.
 - AIML vision/STT slug or quota surprises. Mitigation: confirm slugs early, keep a paste-transcript
   and skip-vision fallback so a material always reviews even if perception is unavailable.
+
+## Revision 2 (2026-06-15): Advertisement tier + UI redesign (user feedback)
+
+Correction: the hierarchy is THREE tiers, not two. A Campaign is the product; it holds many
+Advertisements; each Advertisement holds its own Materials (videos, posts, images, banners). The
+earlier "a video owns attachments" model is replaced.
+
+Data model:
+- Advertisement { id, name, materials: Material[] }.
+- Campaign { id, name, markets, dossier, advertisements: Advertisement[] } (advertisements replace the flat materials[]).
+- Material drops `attachments`; keeps kind/videoUrl/perception/copy/claim/markets.
+- ReviewResult/RegionVerdict gain optional advertisementId (alongside materialId).
+- Each material is still reviewed per region concurrently (board key includes adId + materialId); reconcile stays per material (the one rule). Rollup is computed per advertisement (worst-case per region across its materials) and then per campaign.
+- Persistence/seed: sample-campaign.json re-seeded with 2-3 advertisements, each with materials. A legacy materials[] campaign loads as a single "Default" advertisement (back-compat).
+
+Working uploads (real, end to end):
+- Material video upload (POST /api/videos, exists) and image upload (POST /api/images, new), linked to the material.
+- Dossier source upload (.md/.txt/.json) appended to dossier.sources.
+- Rulebook .md/.json import (exists) wired in the UI so files actually upload.
+- Advertisements and materials can be added at ANY time, including after a review completes.
+
+UI redesign (campaign detail), 2-pane + slide-over:
+- LEFT rail: the live "analyzing" perception view during a review (cycling keyframe, transcript, progress, per-region watching). Processing shows on the LEFT, not the center panel.
+- MAIN (full width): advertisements as tabs/pagination; the selected ad's materials grid; prominent dropzones to add materials.
+- Clicking a material opens a slide-over detail panel from the right: media preview, copy, claim, perception artifacts, per-region verdicts/findings, and a "View debate" action. The agent/pipeline diagram is NOT the default material click.
+- Drop the legacy single-asset Compose from the main flow; campaign-first nav (Campaigns, New campaign, + Advertisement, + Material). Use the full width and the sides; less cramped.

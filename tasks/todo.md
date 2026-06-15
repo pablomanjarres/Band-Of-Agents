@@ -231,3 +231,26 @@ Keep it NON-LINEAR: reconcile fires per material, rollup is observational (the o
   import + presets, and real multimodal perception with a live analyzing panel. Demo brand removed. Docs:
   docs/CAMPAIGNS.md + updated README. Follow-ups: band-mode multi-material coordinator (local/server campaign
   path is done); confirm the real AIML vision/STT slugs (env-overridable).
+
+## 2026-06-15 (rev 2): Advertisement tier + UI redesign (user feedback)
+
+Confirmed: Campaign (product) -> Advertisements -> Materials (videos/posts/images per ad).
+Layout: 2-pane + slide-over (left = live video processing; main = ad tabs + materials grid;
+click material -> right slide-over detail). Fix uploads (md/json/image/video, real), add-anytime,
+drop legacy Compose, material click shows the material (not the agent diagram).
+
+### Rung D: Advertisement tier + orchestration + uploads + server + seed
+- [ ] Domain: add Advertisement; Campaign.advertisements[]; drop Material.attachments; advertisementId on ReviewResult/RegionVerdict.
+- [ ] Orchestration: CampaignSession iterates ads -> materials, per-material concurrent (key adId+materialId); rollup per ad + per campaign.
+- [ ] Persistence/seed: re-seed sample-campaign.json with 2-3 ads each with materials; legacy materials[] -> single "Default" ad (back-compat).
+- [ ] Server: advertisements + materials CRUD (add anytime); image upload endpoint; dossier source upload; SSE carries adId+materialId; rollup per ad + campaign.
+- [ ] demo-fixtures: re-key to the new seed material ids; keep the US/EU conflict.
+- [ ] Tests green (+ 3-tier load, concurrency across ads, per-ad + campaign rollup, upload endpoints).
+
+### Rung E: campaign-detail UI redesign (2-pane + slide-over)
+- [ ] Full-width 2-pane layout; left rail = live perception (analyzing video) during review.
+- [ ] Main: advertisement tabs/pagination + selected ad's materials grid; prominent dropzones.
+- [ ] Click material -> right slide-over detail (media, copy, claim, perception, per-region verdicts, "View debate").
+- [ ] Real uploads wired (video/image for materials, .md/.json for rulebooks + dossier sources).
+- [ ] Add advertisements/materials anytime (incl. after completion).
+- [ ] Drop legacy Compose from nav; campaign-first nav. web build green.
