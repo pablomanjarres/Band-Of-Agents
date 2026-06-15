@@ -1,4 +1,5 @@
 import type {
+  AdvertisementResponse,
   AssetListResponse,
   AssetResponse,
   BoardEvent,
@@ -11,6 +12,7 @@ import type {
   CreateReviewRequest,
   CreateReviewResponse,
   DecisionResponse,
+  ImageUploadResponse,
   Material,
   MaterialResponse,
   PrecedentListResponse,
@@ -71,10 +73,7 @@ export async function getRulebook(region: string): Promise<RulebookResponse> {
   return asJson<RulebookResponse>(res);
 }
 
-export async function saveRulebook(
-  region: string,
-  rulebook: Rulebook,
-): Promise<RulebookResponse> {
+export async function saveRulebook(region: string, rulebook: Rulebook): Promise<RulebookResponse> {
   const res = await fetch(`/api/rulebooks/${encodeURIComponent(region)}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
@@ -84,9 +83,8 @@ export async function saveRulebook(
 }
 
 // Smart import: send a raw rulebook (.md / .json / plain text) and get back a
-// validated Rulebook PROPOSAL. Nothing is persisted server-side; the caller
-// reviews the returned rules and saves them via saveRulebook (PUT). md/text go
-// through the AIML-default model; json validates directly.
+// validated Rulebook PROPOSAL. Nothing is persisted; the caller reviews and saves
+// via saveRulebook (PUT). md/text go through the AIML-default model; json validates.
 export async function importRulebook(
   region: string,
   body: RulebookImportRequest,
@@ -99,8 +97,6 @@ export async function importRulebook(
   return asJson<RulebookResponse>(res);
 }
 
-// List the curated one-click rulebook presets (US-FTC, EU health claims, LATAM).
-// Each carries a full Rulebook the user can review and then save via saveRulebook.
 export async function listRulebookPresets(): Promise<RulebookPresetListResponse> {
   const res = await fetch('/api/rulebooks/presets');
   return asJson<RulebookPresetListResponse>(res);
@@ -142,8 +138,8 @@ export async function getCampaign(id: string): Promise<CampaignResponse> {
 
 export type NewCampaign = Omit<Campaign, 'id'> & { id?: string };
 
-// Save or update a campaign (id auto-assigned by the server when absent). Used
-// both to create a campaign and to persist dossier edits on the detail page.
+// Save or update a campaign (id auto-assigned when absent). Used to create a
+// campaign and to persist dossier edits on the detail page.
 export async function saveCampaign(campaign: NewCampaign): Promise<CampaignResponse> {
   const res = await fetch('/api/campaigns', {
     method: 'POST',
@@ -153,34 +149,66 @@ export async function saveCampaign(campaign: NewCampaign): Promise<CampaignRespo
   return asJson<CampaignResponse>(res);
 }
 
-export type NewMaterial = Omit<Material, 'id'> & { id?: string };
+export interface NewAdvertisement {
+  name: string;
+  markets?: string[];
+}
 
-export async function addMaterial(
+// Add an advertisement to a campaign (works at any time, including after a review).
+export async function createAdvertisement(
   campaignId: string,
-  material: NewMaterial,
-): Promise<MaterialResponse> {
-  const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/materials`, {
+  ad: NewAdvertisement,
+): Promise<AdvertisementResponse> {
+  const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/advertisements`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(material),
+    body: JSON.stringify(ad),
   });
+  return asJson<AdvertisementResponse>(res);
+}
+
+export type NewMaterial = Omit<Material, 'id'> & { id?: string };
+
+// Add a material to a specific advertisement (works at any time).
+export async function addMaterial(
+  campaignId: string,
+  advertisementId: string,
+  material: NewMaterial,
+): Promise<MaterialResponse> {
+  const res = await fetch(
+    `/api/campaigns/${encodeURIComponent(campaignId)}/advertisements/${encodeURIComponent(advertisementId)}/materials`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(material),
+    },
+  );
   return asJson<MaterialResponse>(res);
 }
 
-// Upload a video file (multipart) to the perception pipeline. The server hosts it
-// under data/videos/ and, when campaignId + materialId are supplied, attaches the
-// returned url to that material so the next review perceives it (frames + vision +
-// STT run server-side and stream 'perceiving' over SSE). Returns the served url.
+// Upload a video file (multipart). The server hosts it under data/videos/ and,
+// with campaignId + advertisementId + materialId, attaches the url to that
+// material so the next review perceives it (frames + vision + STT over SSE).
 export async function uploadVideo(
   file: File,
-  opts?: { campaignId?: string; materialId?: string },
+  opts?: { campaignId?: string; advertisementId?: string; materialId?: string },
 ): Promise<VideoUploadResponse> {
   const form = new FormData();
   form.append('video', file);
   if (opts?.campaignId) form.append('campaignId', opts.campaignId);
+  if (opts?.advertisementId) form.append('advertisementId', opts.advertisementId);
   if (opts?.materialId) form.append('materialId', opts.materialId);
   const res = await fetch('/api/videos', { method: 'POST', body: form });
   return asJson<VideoUploadResponse>(res);
+}
+
+// Upload an image file (multipart). The server hosts it under data/images/ and
+// returns the served url, used as a material's imageUrl / perception frame.
+export async function uploadImage(file: File): Promise<ImageUploadResponse> {
+  const form = new FormData();
+  form.append('image', file);
+  const res = await fetch('/api/images', { method: 'POST', body: form });
+  return asJson<ImageUploadResponse>(res);
 }
 
 // Start a concurrent per-material review of a saved campaign (local board mode).
@@ -233,23 +261,16 @@ function subscribeSSE(
       const parsed = JSON.parse(message.data) as BoardEvent;
       onEvent(parsed);
     } catch {
-      // Ignore malformed payloads (e.g. heartbeat comments) rather than crash the stream.
+      // Ignore malformed payloads (e.g. heartbeat comments) rather than crash.
     }
   };
 
-  if (onError) {
-    source.onerror = onError;
-  }
+  if (onError) source.onerror = onError;
 
-  return {
-    close: () => source.close(),
-  };
+  return { close: () => source.close() };
 }
 
-/**
- * Subscribe to the live event stream for a single review via EventSource.
- * Each SSE message payload is a single JSON-encoded BoardEvent.
- */
+/** Subscribe to a single review's live event stream via EventSource. */
 export function subscribeToEvents(
   id: string,
   onEvent: (event: BoardEvent) => void,
@@ -258,11 +279,7 @@ export function subscribeToEvents(
   return subscribeSSE(`/api/reviews/${encodeURIComponent(id)}/events`, onEvent, onError);
 }
 
-/**
- * Subscribe to a campaign review's combined stream. Every event carries a
- * materialId so the consumer can lane it to the right material; the stream stays
- * open until a campaign-level terminal status (no materialId) arrives.
- */
+/** Subscribe to a campaign review's combined stream (every event carries ids). */
 export function subscribeToCampaignEvents(
   id: string,
   onEvent: (event: BoardEvent) => void,

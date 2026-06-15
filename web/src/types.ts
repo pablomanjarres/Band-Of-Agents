@@ -18,8 +18,10 @@ export interface RegionVerdict {
   region: string;
   decision: VerdictDecision;
   rationale: string;
-  /** Which material this verdict covers, when the review is part of a campaign. */
+  /** Which material this verdict covers, when part of a campaign. */
   materialId?: string;
+  /** Which advertisement the material belongs to. */
+  advertisementId?: string;
 }
 
 export interface ContentAsset {
@@ -36,31 +38,13 @@ export interface ContentAsset {
 
 /**
  * Campaign coordinates carried on every event when the review is part of a
- * campaign. Optional so single-asset reviews (no campaign) and old stored events
- * keep the exact same shape: the ids are simply absent. Mirrors the backend
- * BoardEventCampaignRef in src/board/events.ts.
+ * campaign. Optional so single-asset reviews and old stored events keep the same
+ * shape. Mirrors the backend BoardEventCampaignRef in src/board/events.ts.
  */
 export interface BoardEventCampaignRef {
   campaignId?: string;
+  advertisementId?: string;
   materialId?: string;
-}
-
-/**
- * A live keyframe-analysis tick from the multimodal perception pass (Rung C). The
- * server emits these per frame (and once with stage 'done') so the UI can cycle
- * the frame being read, fill a progress bar, and type the transcript in. It is a
- * full BoardEvent union member; it carries campaignId/materialId so it lanes to
- * the right material and it gates nothing.
- */
-export interface PerceivingEvent extends BoardEventCampaignRef {
-  type: 'perceiving';
-  seq: number;
-  fromName: string;
-  frameUrl?: string;
-  index: number;
-  total: number;
-  stage: 'vision' | 'stt' | 'done';
-  transcript?: string;
 }
 
 export type BoardEvent = (
@@ -206,12 +190,11 @@ export interface PrecedentListResponse {
   precedents: Precedent[];
 }
 
-
 // Campaigns ----------------------------------------------------------------
-// A Campaign groups many Materials (videos, posts, images, banners) under one
-// product, sharing a single cascading dossier. Mirrors src/domain/types.ts. A
-// Material is structurally a ContentAsset plus a discriminating kind, optional
-// video, optional perception artifacts, and one level of attachments.
+// THREE tiers: a Campaign is a product; it holds Advertisements; each
+// Advertisement holds its own Materials (videos, posts, images, banners). One
+// shared cascading dossier grounds every reviewer of every material. Mirrors
+// src/domain/types.ts.
 
 export type MaterialKind = 'video' | 'post' | 'image' | 'banner';
 
@@ -230,7 +213,7 @@ export interface CampaignDossier {
   sources: DossierSource[];
 }
 
-/** Perception artifacts from the multimodal pre-pass (Rung C); all text + frames. */
+/** Perception artifacts from the multimodal pre-pass; all text + frames. */
 export interface MaterialPerception {
   transcript?: string;
   onScreenText?: string;
@@ -239,21 +222,28 @@ export interface MaterialPerception {
   frames: string[];
 }
 
-/** A single marketing material in a campaign (one level of attachments only). */
+/** A single marketing creative inside an advertisement. */
 export interface Material extends ContentAsset {
   kind: MaterialKind;
   videoUrl?: string;
   perception?: MaterialPerception;
-  attachments?: Material[];
 }
 
-/** A product launch: many materials sharing one cascading dossier. */
+/** A specific advertisement: a set of creatives (the materials) for one ad. */
+export interface Advertisement {
+  id: string;
+  name: string;
+  markets?: string[];
+  materials: Material[];
+}
+
+/** A product launch: several advertisements sharing one cascading dossier. */
 export interface Campaign {
   id: string;
   name: string;
   markets: string[];
   dossier: CampaignDossier;
-  materials: Material[];
+  advertisements: Advertisement[];
 }
 
 /** Card-level summary returned by GET /api/campaigns. */
@@ -261,6 +251,7 @@ export interface CampaignSummary {
   id: string;
   name: string;
   markets: string[];
+  advertisementCount: number;
   materialCount: number;
 }
 
@@ -272,14 +263,19 @@ export interface CampaignResponse {
   campaign: Campaign;
 }
 
+export interface AdvertisementResponse {
+  campaign: Campaign;
+  advertisement: Advertisement;
+}
+
 export interface MaterialResponse {
   campaign: Campaign;
   material: Material;
 }
 
 // Campaign review (observational rollup over per-material verdicts) -----------
-// The rollup gates nothing (the one rule): it is a derived worst-case-per-region
-// badge plus the full material x region matrix. Mirrors src/board/campaign.ts.
+// The rollup gates nothing (the one rule): worst-case per region across all
+// materials, plus a per-advertisement breakdown and the full matrix.
 
 export interface RollupRegion {
   region: string;
@@ -287,17 +283,25 @@ export interface RollupRegion {
 }
 
 export interface RollupCell {
+  advertisementId: string;
   materialId: string;
   region: string;
   decision: VerdictDecision;
   rationale: string;
 }
 
+export interface AdvertisementRollup {
+  advertisementId: string;
+  name: string;
+  worstCaseByRegion: RollupRegion[];
+  matrix: RollupCell[];
+}
+
 export interface CampaignRollup {
   campaignId: string;
   worstCaseByRegion: RollupRegion[];
+  perAdvertisement: AdvertisementRollup[];
   matrix: RollupCell[];
-  perMaterial: Array<{ materialId: string; verdicts: RegionVerdict[] }>;
 }
 
 /** Response for GET /api/campaign-reviews/:id. */
@@ -316,14 +320,15 @@ export interface CreateCampaignReviewResponse {
   materials: string[];
 }
 
-/**
- * Response for POST /api/videos (multipart upload). The server hosts the file
- * under data/videos/ and returns its served url; when campaignId + materialId are
- * sent, the url is also attached to that material's videoUrl so the next review
- * perceives it (frames + vision + STT run server-side, streamed over SSE).
- */
+/** Response for POST /api/videos (multipart upload). */
 export interface VideoUploadResponse {
   videoUrl: string;
   campaignId?: string;
+  advertisementId?: string;
   materialId?: string;
+}
+
+/** Response for POST /api/images (multipart upload). */
+export interface ImageUploadResponse {
+  url: string;
 }

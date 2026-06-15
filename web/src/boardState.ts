@@ -186,6 +186,8 @@ export function orderedRegions(state: BoardState): RegionState[] {
 export interface MaterialLane {
   material: Material;
   board: BoardState;
+  /** Which advertisement this material belongs to (for per-ad views). */
+  advertisementId?: string;
 }
 
 export interface CampaignBoardState {
@@ -201,20 +203,22 @@ export interface CampaignBoardState {
   events: BoardEvent[];
 }
 
-function freshLane(material: Material): MaterialLane {
+function freshLane(material: Material, advertisementId?: string): MaterialLane {
   // A Material is structurally a ContentAsset plus campaign fields, so it seeds the
   // lane board's asset header directly (the lane reuses the single-asset reducer).
   const board = initialBoardState();
-  return { material, board: { ...board, asset: material } };
+  return { material, board: { ...board, asset: material }, ...(advertisementId ? { advertisementId } : {}) };
 }
 
 export function initialCampaignState(campaign?: Campaign): CampaignBoardState {
   const lanes: Record<string, MaterialLane> = {};
   const order: string[] = [];
   if (campaign) {
-    for (const material of campaign.materials) {
-      lanes[material.id] = freshLane(material);
-      order.push(material.id);
+    for (const ad of campaign.advertisements) {
+      for (const material of ad.materials) {
+        lanes[material.id] = freshLane(material, ad.id);
+        order.push(material.id);
+      }
     }
   }
   return {
@@ -270,7 +274,7 @@ export function applyCampaignEvent(
       event.type === 'intake'
         ? { ...event.asset, kind: 'post' }
         : { id: materialId, name: materialId, kind: 'post', channel: '', markets: [], copy: '', claim: '' };
-    const lane = freshLane(synthetic);
+    const lane = freshLane(synthetic, event.advertisementId);
     next.lanes[materialId] = { ...lane, board: applyEvent(lane.board, event) };
     next.order.push(materialId);
   }
@@ -344,8 +348,8 @@ export interface MatrixRow {
  * = the four regions). Each cell carries the region's current status plus its
  * finding counts so the UI shows verdict + finding count per cell.
  */
-export function buildMatrix(state: CampaignBoardState): MatrixRow[] {
-  return state.order
+export function buildMatrix(state: CampaignBoardState, materialIds?: string[]): MatrixRow[] {
+  return (materialIds ?? state.order)
     .map((id) => state.lanes[id])
     .filter((lane): lane is MaterialLane => Boolean(lane))
     .map((lane) => {

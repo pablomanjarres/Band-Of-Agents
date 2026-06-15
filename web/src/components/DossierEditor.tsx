@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { saveCampaign } from '../api';
 import type { Campaign, CampaignDossier, DossierSource } from '../types';
+import { Dropzone } from './Dropzone';
 
 interface DossierEditorProps {
   campaign: Campaign;
@@ -60,6 +61,17 @@ export function DossierEditor({ campaign, onSaved }: DossierEditorProps) {
   }
   function removeSource(index: number) {
     setSources((prev) => prev.filter((_, i) => i !== index));
+    setSave({ kind: 'idle' });
+  }
+
+  // Upload a reference file (.md / .json / .txt): read it locally, infer the kind
+  // from the extension, and append it as a source. Save persists it to the dossier
+  // so it cascades into every material's review.
+  async function handleSourceFile(file: File) {
+    const text = await file.text();
+    const ext = file.name.toLowerCase().split('.').pop();
+    const kind: DossierSource['kind'] = ext === 'md' || ext === 'markdown' ? 'md' : ext === 'json' ? 'json' : 'text';
+    setSources((prev) => [...prev, { name: file.name, kind, content: text }]);
     setSave({ kind: 'idle' });
   }
 
@@ -174,6 +186,16 @@ export function DossierEditor({ campaign, onSaved }: DossierEditorProps) {
             >
               + Add source
             </button>
+          </div>
+          <div className="mt-2">
+            <Dropzone
+              accent="slate"
+              accept=".md,.markdown,.json,.txt,text/*,application/json"
+              label="Drop a .md / .json / .txt source, or click to choose"
+              hint="read locally; Save the dossier to attach it"
+              compact
+              onFile={handleSourceFile}
+            />
           </div>
           {sources.length === 0 ? (
             <p className="mt-2 text-xs text-slate-400">No reference sources attached.</p>
