@@ -159,12 +159,25 @@ Keep it NON-LINEAR: reconcile fires per material, rollup is observational (the o
   the band-mode multi-material coordinator (the local/UI path is done via CampaignSession).
 
 ## Rung B: rulebook smart import + presets
-- [ ] `POST /api/rulebooks/:region/import` (json direct; md/text via LLM -> `Rule[]`, returned for
-      confirmation, not auto-saved).
-- [ ] Curated presets under `assets/presets/rulebook.*.json`; `GET /api/rulebooks/presets`.
-- [ ] Web: Rulebooks page dropzone (.md/.json) + preset picker + editable preview table; manual
-      edit stays.
-- [ ] Tests: json import validates; md-to-rules via a stubbed model; preset apply.
+- [x] `POST /api/rulebooks/:region/import` (json direct; md/text via LLM -> `Rule[]`, returned for
+      confirmation, not auto-saved). Parser in `src/domain/rulebook-import.ts` (injectable
+      ModelClient, stubbable). json validates directly (full Rulebook or bare Rule[], re-tagged to
+      the target region); md/text goes through the AIML-default model (`modelFor('eu')`, honors
+      MODEL_MODE) and normalizes ids/severity/region; returns a PROPOSAL, never persists.
+- [x] Curated presets under `assets/presets/rulebook.{us-ftc,eu-health,latam}.json`;
+      `GET /api/rulebooks/presets` (loader in `src/domain/presets.ts`, reads/validates from disk).
+- [x] Web: Rulebooks page dropzone (.md/.json) + preset picker + editable preview table; manual
+      edit stays. (Frontend; backend endpoints above are ready for it.)
+- [x] Tests: `test/rulebook-import.test.ts` (9 tests): json import validates (full + bare Rule[]),
+      md/text via a STUBBED ModelClient returns parsed Rules, presets load + each validates against
+      the Rulebook schema. Backend verified end to end via curl against a live local server.
+
+## Rung B review
+- 2026-06-15: Rung B GREEN and committed. tsc clean, 48/48 vitest (+9). POST /api/rulebooks/:region/import
+  returns a PROPOSAL only (json validated directly; .md/text parsed by the AIML-default model into Rule[],
+  stubbable in tests); GET /api/rulebooks/presets serves 3 curated presets (us-ftc, eu-health, latam).
+  Rulebooks page now has a dropzone (.md/.json), a preset picker, and an editable preview table (manual
+  add/edit preserved); nothing persists until Save (PUT). Backend curl-verified live; web build green.
 
 ## Rung C: multimodal perception + live "analyzing" UI
 - [ ] `Msg.content` becomes `string | ContentBlock[]`; update all four adapters (text passthrough
