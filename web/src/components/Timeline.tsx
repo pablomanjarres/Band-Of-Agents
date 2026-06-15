@@ -17,6 +17,12 @@ const TYPE_LABELS: Record<BoardEvent['type'], string> = {
   decision: 'Decision',
   log: 'Log',
   status: 'Status',
+  workitem: 'Work item',
+  debate: 'Debate',
+  'pod-finding': 'Pod finding',
+  mediation: 'Mediation',
+  adjudication: 'Adjudication',
+  terminal: 'Terminal',
 };
 
 function describe(event: BoardEvent): string {
@@ -43,6 +49,17 @@ function describe(event: BoardEvent): string {
       return `${event.messageType}: ${event.text}`;
     case 'status':
       return `Status is now ${event.status}.`;
+    case 'workitem':
+    case 'debate':
+      return event.text;
+    case 'pod-finding':
+      return `${event.pod} pod filed: ${event.conflicts} conflict(s). ${event.text}`;
+    case 'mediation':
+      return `${event.resolved ? 'Resolved' : 'No movement'}: ${event.text}`;
+    case 'adjudication':
+      return `Decision ${event.decision}: ${event.text}`;
+    case 'terminal':
+      return `Spine reached ${event.decision}.`;
     default: {
       const _never: never = event;
       return _never;
@@ -61,6 +78,12 @@ const DOT_COLORS: Record<BoardEvent['type'], string> = {
   decision: 'bg-emerald-600',
   log: 'bg-slate-300',
   status: 'bg-indigo-300',
+  workitem: 'bg-slate-300',
+  debate: 'bg-amber-400',
+  'pod-finding': 'bg-indigo-400',
+  mediation: 'bg-amber-500',
+  adjudication: 'bg-indigo-500',
+  terminal: 'bg-emerald-600',
 };
 
 export function Timeline({ events }: { events: BoardEvent[] }) {

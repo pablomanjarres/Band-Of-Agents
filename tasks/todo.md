@@ -4,6 +4,32 @@ Plan derived from `docs/superpowers/specs/2026-06-13-multi-region-review-board-d
 Walking skeleton: prove each rung end to end (run it, show output) before the next.
 Platform: band.ai. Stack: TypeScript, Node 22+, pnpm, ESM. No commits/remote (per user).
 
+## Orchestration redesign (active): Blackboard pods on a decision spine
+Full plan: `docs/superpowers/plans/2026-06-14-blackboard-pods-and-spine.md` (design: `docs/superpowers/specs/2026-06-14-orchestration-redesign-proposals.md`, Proposal 4). Replaces the scatter-gather (coordinator broadcast + deterministic reconcile) with pods that debate, a board that reconciles, and a spine that ends in a terminal state.
+- [x] Phase 0: board domain schemas (work-items, pod findings, conflicts, adjudication).
+- [x] Phase 1: knowledge-source shell, pod-lead, Regulatory debate (rebuttal round).
+- [x] Phase 2: Claims and Brand pod members.
+- [x] Phase 3: Mediator at the board.
+- [x] Phase 4: Conductor + Risk Adjudicator (the decision spine).
+- [x] Phase 5: routing, board events, full wiring, walking-skeleton integration, real Band.
+- [x] Phase 6 (optional): web live-board diagram (pods + board + spine).
+
+### Review (2026-06-14): blackboard pods/board/spine implemented on branch `blackboard-pods`
+Implemented end to end via TDD, one commit per task (19 task commits, exact plan messages,
+no co-author trailers, no em dashes). Built on a worktree branched off `orchestration-redesign`.
+- Tests: 35 passing across 22 files (was 19/11). Root + web typecheck clean (noUncheckedIndexedAccess).
+- `pnpm local` proves the full flow on the fake transport: intake to 3 pods, the Regulatory
+  debate (Reg Lead challenges EU with the US peer rationale, EU holds), one conflict-bearing
+  PodFinding, Adjudicator consults the Mediator (no movement), one remediation recommit, deadlock
+  escalation to the human, terminal SPIKED. The conflict is genuine (verified), not a linear pipeline.
+- Phase 5.6 wires the same cast on RealBandTransport (typechecked). Live `pnpm agents` is the only
+  remaining manual step: needs 17 band.ai agents registered (handles in src/run/agents.ts) plus their
+  PREFIX_AGENT_ID/PREFIX_API_KEY in `.env`. The web live-board visual (`pnpm --dir web dev`) is also
+  a manual check; the diagram model (web/src/pipeline.ts) is a pure derivation and typechecks.
+- Known MVP simplifications (carried from the plan, not regressions): Claims/Brand pod members run
+  concurrently (the genuine debate is the Regulatory rebuttal round); the demo exercises the HOLD
+  branch, the CONCEDE-downgrade branch exists in code but is not hit by the default run.
+
 ## Phase 0: Scaffolding -- DONE
 - [x] pnpm + TypeScript ESM project (package.json, tsconfig, vitest, MIT LICENSE, README).
 - [x] Domain types + zod schemas.

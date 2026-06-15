@@ -34,6 +34,7 @@ export interface BoardActivity {
   content: string;
   messageType: string;
   mentions: Mention[];
+  metadata?: Record<string, unknown>;
   seq: number;
 }
 

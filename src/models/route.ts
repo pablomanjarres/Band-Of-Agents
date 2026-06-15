@@ -4,7 +4,9 @@ import { BedrockModelClient } from './bedrock';
 import { GeminiModelClient } from './gemini';
 import { FeatherlessModelClient } from './featherless';
 
-export type AgentRole = 'coordinator' | 'us' | 'eu' | 'latam' | 'brand' | 'reconcile' | 'remediation';
+export type AgentRole =
+  | 'coordinator' | 'us' | 'eu' | 'latam' | 'brand' | 'reconcile' | 'remediation'
+  | 'scout' | 'claim' | 'precedent' | 'disclosure' | 'channel' | 'visual' | 'mediator';
 export type ModelMode = 'aiml' | 'dev';
 
 interface RouteEntry {
@@ -28,6 +30,13 @@ const ROUTES: Record<AgentRole, RouteEntry> = {
   brand: { aiml: 'anthropic/claude-haiku-4.5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-haiku-4-5-20251001-v1:0' },
   reconcile: { aiml: 'anthropic/claude-opus-4-5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-opus-4-6-v1' },
   remediation: { aiml: 'deepseek/deepseek-chat', devProvider: 'bedrock', devModel: 'us.anthropic.claude-sonnet-4-6' },
+  scout: { aiml: 'meta-llama/llama-3.1-8b-instruct', devProvider: 'featherless', devModel: 'meta-llama/Meta-Llama-3.1-8B-Instruct' },
+  claim: { aiml: 'google/gemini-2.5-pro', devProvider: 'gemini', devModel: 'gemini-2.5-pro' },
+  precedent: { aiml: 'google/gemini-2.5-flash', devProvider: 'gemini', devModel: 'gemini-2.5-flash' },
+  disclosure: { aiml: 'anthropic/claude-sonnet-4.5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-sonnet-4-6' },
+  channel: { aiml: 'google/gemini-2.5-flash', devProvider: 'gemini', devModel: 'gemini-2.5-flash' },
+  visual: { aiml: 'google/gemini-2.5-flash', devProvider: 'gemini', devModel: 'gemini-2.5-flash' },
+  mediator: { aiml: 'anthropic/claude-opus-4-5', devProvider: 'bedrock', devModel: 'us.anthropic.claude-opus-4-6-v1' },
 };
 
 const IMAGE_AIML_MODEL = 'google/gemini-2.5-flash-image';

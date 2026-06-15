@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { BoardState } from '../boardState';
 import { buildPipelineModel } from '../pipeline';
-import type { AgentNodeModel, NodeId } from '../pipeline';
+import type { NodeId, PodNodeModel } from '../pipeline';
 import { DiagramEdges } from './DiagramEdges';
 import type { NodeRect, RectMap } from './DiagramEdges';
 import { DiagramNode } from './DiagramNode';
@@ -12,12 +12,13 @@ interface PipelineDiagramProps {
 }
 
 // Pill badge used for counts / flags inside nodes.
-function Pill({ tone, children }: { tone: 'red' | 'amber' | 'slate' | 'emerald'; children: React.ReactNode }) {
+function Pill({ tone, children }: { tone: 'red' | 'amber' | 'slate' | 'emerald' | 'indigo'; children: React.ReactNode }) {
   const styles: Record<typeof tone, string> = {
     red: 'bg-red-500/20 text-red-200 ring-red-400/40',
     amber: 'bg-amber-500/20 text-amber-100 ring-amber-400/40',
     slate: 'bg-slate-500/20 text-slate-200 ring-slate-400/30',
     emerald: 'bg-emerald-500/20 text-emerald-100 ring-emerald-400/40',
+    indigo: 'bg-indigo-500/20 text-indigo-100 ring-indigo-400/40',
   };
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset ${styles[tone]}`}>
@@ -26,26 +27,40 @@ function Pill({ tone, children }: { tone: 'red' | 'amber' | 'slate' | 'emerald';
   );
 }
 
-function AgentBadge({ agent }: { agent: AgentNodeModel }) {
-  if (agent.activity === 'active') {
+// Status badge for a pod container: deliberating, filed, or a conflict count.
+function PodBadge({ pod }: { pod: PodNodeModel }) {
+  if (pod.activity === 'active') {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-indigo-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-100 ring-1 ring-inset ring-indigo-400/40">
         <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-indigo-300" />
-        reviewing
+        deliberating
       </span>
     );
   }
-  if (agent.verdict === 'publish') return <Pill tone="emerald">publish</Pill>;
-  if (agent.verdict === 'adapt') return <Pill tone="amber">adapt</Pill>;
-  if (agent.verdict === 'escalate') return <Pill tone="red">escalate</Pill>;
+  if (pod.filed) {
+    return pod.conflicts > 0 ? (
+      <Pill tone="amber">{pod.conflicts} conflict{pod.conflicts === 1 ? '' : 's'}</Pill>
+    ) : (
+      <Pill tone="emerald">filed</Pill>
+    );
+  }
   return null;
 }
 
 const LEGEND: { label: string; dot: string }[] = [
-  { label: 'AI agent', dot: 'bg-indigo-400' },
+  { label: 'pod / board', dot: 'bg-indigo-400' },
   { label: 'human', dot: 'bg-emerald-400' },
-  { label: 'context / outcome', dot: 'bg-slate-400' },
+  { label: 'terminal', dot: 'bg-slate-400' },
 ];
+
+// Human-readable label for the phase chip in the header.
+const PHASE_LABEL: Record<BoardState['phase'], string> = {
+  intake: 'intake',
+  deliberating: 'pods deliberating',
+  reconciling: 'board reconciling',
+  deciding: 'adjudicating',
+  terminal: 'terminal',
+};
 
 // Compare two measured-rect maps so measure() can bail out when nothing moved.
 // Without this, setRects/setSize always create new objects and the (deps-less)
@@ -103,8 +118,8 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
     );
   }, []);
 
-  // Measure after layout and whenever the model shape changes (new nodes light
-  // up, remediation image expands a node, the decision form appears, etc.).
+  // Measure after layout and whenever the model shape changes (pods fill, the
+  // board lights up, a terminal node resolves, the decision form appears, etc.).
   useLayoutEffect(() => {
     measure();
   });
@@ -122,20 +137,19 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
     };
   }, [measure]);
 
-  const remediation = state.remediation;
-
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-xl">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-200">
-            Multi-agent review pipeline
+            Blackboard pods on a decision spine
           </h2>
           <p className="text-[11px] text-slate-500">
-            Coordinated negotiation: recruit, review, reconcile, remediate, re-review, escalate.
+            Three pods deliberate, file findings to the board, and a Risk Adjudicator drives a terminal verdict.
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <Pill tone="indigo">{PHASE_LABEL[model.phase]}</Pill>
           {LEGEND.map((item) => (
             <span key={item.label} className="inline-flex items-center gap-1.5 text-[11px] text-slate-400">
               <span className={`h-2 w-2 rounded-full ${item.dot}`} />
@@ -153,156 +167,107 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
 
         {/* Node layer sits above the edges. */}
         <div className="relative z-10 flex flex-col items-stretch gap-10">
-          {/* Shared context. */}
+          {/* Asset (intake). */}
           <div className="flex justify-center">
             <DiagramNode
-              nodeRef={setNodeRef('context')}
+              nodeRef={setNodeRef('asset')}
               variant="context"
-              activity={model.context.activity}
-              title="Shared context"
-              subtitle="brand DNA + region rules"
-              className="w-60 text-center"
-              badge={model.context.pulse ? <Pill tone="slate">precedent</Pill> : undefined}
+              activity={model.asset.activity}
+              title="Asset"
+              subtitle="marketing content under review"
+              className="w-64 text-center"
+              badge={model.asset.assetId ? <Pill tone="slate">{model.asset.assetId}</Pill> : undefined}
             />
           </div>
 
-          {/* Coordinator. */}
-          <div className="flex justify-center">
-            <DiagramNode
-              nodeRef={setNodeRef('coordinator')}
-              variant="ai"
-              activity={model.coordinator.activity}
-              title="Coordinator"
-              subtitle="recruits region agents"
-              className="w-64 text-center"
-              badge={
-                model.coordinator.recruitCount !== undefined ? (
-                  <Pill tone="slate">{model.coordinator.recruitCount} recruited</Pill>
-                ) : undefined
-              }
-            >
-              {model.coordinator.reReview ? (
-                <p className="text-[10px] font-medium uppercase tracking-wide text-indigo-300/80">
-                  re-review round dispatched
-                </p>
-              ) : null}
-            </DiagramNode>
-          </div>
+          {/* Pods (left) -> board + adjudicator (center) -> terminals (right). */}
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1fr)] lg:items-start">
+            {/* Left rail: the three deliberation pods. */}
+            <div className="flex flex-col gap-4">
+              {model.pods.map((pod) => (
+                <DiagramNode
+                  key={pod.id}
+                  nodeRef={setNodeRef(pod.id)}
+                  variant="ai"
+                  activity={pod.activity}
+                  title={pod.title}
+                  subtitle={pod.subtitle}
+                  badge={<PodBadge pod={pod} />}
+                >
+                  <p className="text-[10px] uppercase tracking-wide text-indigo-300/70">{pod.members}</p>
+                </DiagramNode>
+              ))}
+            </div>
 
-          {/* Region / brand agents row. */}
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {model.agents.map((agent) => (
+            {/* Spine: the shared board over the Risk Adjudicator. */}
+            <div className="flex flex-col gap-8 lg:pt-6">
               <DiagramNode
-                key={agent.id}
-                nodeRef={setNodeRef(agent.id)}
+                nodeRef={setNodeRef('board')}
                 variant="ai"
-                activity={agent.activity}
-                {...(agent.verdict ? { verdict: agent.verdict } : {})}
-                title={agent.title}
-                subtitle={agent.subtitle}
-                badge={<AgentBadge agent={agent} />}
+                activity={model.board.activity}
+                title="Board"
+                subtitle="Mediator reconciles cross-pod conflict"
+                className="text-center"
+                badge={
+                  model.board.conflicts > 0 ? (
+                    <Pill tone="amber">{model.board.conflicts} conflict{model.board.conflicts === 1 ? '' : 's'}</Pill>
+                  ) : undefined
+                }
               >
-                {agent.activity !== 'idle' ? (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {agent.blocking > 0 ? (
-                      <Pill tone="red">{agent.blocking} blocking</Pill>
-                    ) : agent.findings > 0 ? (
-                      <Pill tone="amber">{agent.findings} finding{agent.findings === 1 ? '' : 's'}</Pill>
-                    ) : agent.activity === 'done' ? (
-                      <Pill tone="emerald">clear</Pill>
-                    ) : null}
-                  </div>
+                {model.board.mediating ? (
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-amber-300/80">
+                    mediating
+                  </p>
                 ) : null}
               </DiagramNode>
-            ))}
-          </div>
 
-          {/* Reconcile. */}
-          <div className="flex justify-center">
-            <DiagramNode
-              nodeRef={setNodeRef('reconcile')}
-              variant="ai"
-              activity={model.reconcile.activity}
-              title="Reconcile agent"
-              subtitle="per-region verdict"
-              className="w-80 text-center"
-              badge={model.reconcile.conflict ? <Pill tone="amber">conflict</Pill> : undefined}
-            >
-              {model.reconcile.summary ? (
-                <p className="font-mono text-[11px] tracking-tight text-slate-300">
-                  {model.reconcile.summary}
-                </p>
-              ) : null}
-            </DiagramNode>
-          </div>
+              <DiagramNode
+                nodeRef={setNodeRef('adjudicator')}
+                variant="ai"
+                activity={model.adjudicator.activity}
+                title="Risk Adjudicator"
+                subtitle="scores the board, drives the verdict"
+                className="text-center"
+                badge={model.adjudicator.decision ? <Pill tone="indigo">{model.adjudicator.decision}</Pill> : undefined}
+              />
+            </div>
 
-          {/* Outcome row. */}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3 md:items-start">
-            <DiagramNode
-              nodeRef={setNodeRef('remediation')}
-              variant="ai"
-              activity={model.remediation.activity}
-              title="Remediation"
-              subtitle="adapt per region"
-            >
-              {remediation ? (
-                <div className="space-y-2">
-                  {remediation.imageUrl ? (
-                    <img
-                      src={remediation.imageUrl}
-                      alt={`Revised creative for ${remediation.region}`}
-                      className="h-28 w-full rounded-lg border border-indigo-500/30 object-cover"
-                    />
-                  ) : null}
-                  <p className="line-clamp-3 rounded-md border border-indigo-500/20 bg-slate-900/60 p-2 text-[11px] leading-snug text-slate-300">
-                    {remediation.copy}
-                  </p>
-                  <p className="text-[10px] uppercase tracking-wide text-indigo-300/70">
-                    {remediation.region} - {remediation.markets.join(', ') || 'no markets'}
-                  </p>
-                </div>
-              ) : (
-                <p className="text-[11px] text-slate-500">Idle until a region needs adaptation.</p>
-              )}
-            </DiagramNode>
-
-            <DiagramNode
-              nodeRef={setNodeRef('publish')}
-              variant="outcome"
-              activity={model.publish.activity}
-              title="Publish"
-              subtitle="per passing region"
-            >
-              {model.publish.regions.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {model.publish.regions.map((region) => (
-                    <Pill key={region} tone="emerald">
-                      {region}
-                    </Pill>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-[11px] text-slate-500">No region cleared yet.</p>
-              )}
-            </DiagramNode>
-
-            <DiagramNode
-              nodeRef={setNodeRef('compliance')}
-              variant="human"
-              activity={model.compliance.activity}
-              title="Compliance lead"
-              subtitle="rules on gray areas"
-            >
-              {state.escalationText ? (
-                <EscalationDecision
-                  text={state.escalationText}
-                  recordedDecision={state.decisionText}
-                  variant="diagram"
-                />
-              ) : (
-                <p className="text-[11px] text-slate-500">No escalation. Lit only on gray areas.</p>
-              )}
-            </DiagramNode>
+            {/* Right rail: the terminal states. */}
+            <div className="flex flex-col gap-4 lg:pt-6">
+              <DiagramNode
+                nodeRef={setNodeRef('published')}
+                variant="outcome"
+                activity={model.published.activity}
+                title="Published"
+                subtitle="cleared to ship"
+                badge={model.terminal === 'published' ? <Pill tone="emerald">final</Pill> : undefined}
+              />
+              <DiagramNode
+                nodeRef={setNodeRef('spiked')}
+                variant="outcome"
+                activity={model.spiked.activity}
+                title="Spiked"
+                subtitle="killed by the board"
+                badge={model.terminal === 'spiked' ? <Pill tone="red">final</Pill> : undefined}
+              />
+              <DiagramNode
+                nodeRef={setNodeRef('human')}
+                variant="human"
+                activity={model.human.activity}
+                title="Compliance lead"
+                subtitle="rules on genuine deadlocks"
+              >
+                {state.escalationText ? (
+                  <EscalationDecision
+                    text={state.escalationText}
+                    recordedDecision={state.decisionText}
+                    variant="diagram"
+                  />
+                ) : (
+                  <p className="text-[11px] text-slate-500">No escalation. Lit only on a deadlock.</p>
+                )}
+              </DiagramNode>
+            </div>
           </div>
         </div>
       </div>

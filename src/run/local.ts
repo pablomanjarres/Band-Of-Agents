@@ -1,102 +1,85 @@
-// Local end-to-end demo of the full review board on the in-process fake
-// transport, via BoardSession. Runs the whole debate with stub models (no API
-// keys), exercising publish, adapt -> remediation (rewrite + regenerated image),
-// and escalate -> human. The agents coordinate in plain English and share data
-// via the in-process board; this prints the resulting board events.
+// Local end-to-end demo of the pods -> board -> spine topology on the in-process
+// fake transport. Runs the whole deliberation with stub models (no API keys):
+// the Conductor fans the asset to three pods, the Regulatory pod debates (US
+// passes, EU blocks and holds on rebuttal), each pod files one PodFinding, the
+// Risk Adjudicator consults the Mediator, runs one remediation cycle that still
+// fails, escalates to the human, and the human reject yields a terminal spiked.
+// Swap in the real Band transport and real model clients (pnpm agents) once
+// credentials are wired.
 //
 //   pnpm local
 
-import { BoardSession, type BoardModels } from '../board/session';
+import { FakeBandTransport } from '../band/fake';
+import { connectPodBoardAgents, type PodBoardModels } from '../board/pod-board';
+import { translateActivity } from '../board/events';
 import { StubModelClient, type ModelClient } from '../models/client';
 import { loadAsset, loadBrandDna, loadRulebook } from '../domain/load';
-import type { BoardEvent } from '../board/events';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
 
-function findings(...items: unknown[]): { text: string; json: { findings: unknown[] } } {
-  return { text: '', json: { findings: items } };
-}
-
-function printEvent(e: BoardEvent): void {
-  switch (e.type) {
-    case 'intake':
-      console.log(`  intake: "${e.asset.name ?? e.asset.id}" for ${e.asset.markets.join(', ')}`);
-      break;
-    case 'recruited':
-    case 'progress':
-    case 'log':
-      console.log(`  ${e.fromName}: ${e.text}`);
-      break;
-    case 'review':
-      console.log(`  ${e.reviewerName}: ${e.region} review, ${e.findings.length} finding(s), ${e.blocking} blocking`);
-      break;
-    case 'verdict':
-      console.log(`  VERDICT: ${e.verdicts.map((v) => `${v.region}=${v.decision}`).join(', ')} (conflict=${e.conflict})`);
-      break;
-    case 'revised':
-      console.log(`  REVISED ${e.region}: ${e.copy.slice(0, 60)} [image ${e.imageUrl ? 'yes' : 'no'}]`);
-      break;
-    case 'escalation':
-      console.log(`  ESCALATION: ${e.text}`);
-      break;
-    case 'decision':
-      console.log(`  DECISION: ${e.text}`);
-      break;
-    case 'status':
-      console.log(`  [status: ${e.status}]`);
-      break;
-  }
+function findings(severity: 'block' | 'warn' | 'info', claim: string): { text: string; json: { findings: unknown[] } } {
+  return { text: '', json: { findings: [{ category: 'claim', severity, claim, rationale: 'r' }] } };
 }
 
 async function main(): Promise<void> {
   const brand = loadBrandDna(`${ASSETS}brand-dna.json`);
-  const rulebooks = {
-    us: loadRulebook(`${ASSETS}rulebook.us.json`),
-    eu: loadRulebook(`${ASSETS}rulebook.eu.json`),
-    latam: loadRulebook(`${ASSETS}rulebook.latam.json`),
-  };
+  const usRules = loadRulebook(`${ASSETS}rulebook.us.json`);
+  const euRules = loadRulebook(`${ASSETS}rulebook.eu.json`);
+  const latamRules = loadRulebook(`${ASSETS}rulebook.latam.json`);
   const asset = loadAsset(`${ASSETS}sample-asset.json`);
+  const claim = asset.claim;
 
-  // Stub models so the full debate runs with no keys.
-  const models: BoardModels = {
-    us: new StubModelClient(() =>
-      findings({ category: 'endorsement', severity: 'warn', claim: '9 out of 10 users felt healthier', rationale: 'Add a typical-results disclosure; substantiation is on file.', ruleId: 'us-testimonial' }),
-    ),
-    eu: new StubModelClient(() =>
-      findings(
-        { category: 'health_claim', severity: 'block', claim: 'clinically proven to boost your immune system', rationale: 'Unauthorised health claim; not on the EU Register.', ruleId: 'eu-health-preauth' },
-        { category: 'disclosure', severity: 'block', claim: 'whole asset', rationale: 'Missing Article 10(2) statements.', ruleId: 'eu-mandatory-disclosure', requiredDisclosure: 'Article 10(2) accompanying statements' },
-      ),
-    ),
-    latam: new StubModelClient(() =>
-      findings({ category: 'localization', severity: 'block', claim: 'whole asset', rationale: 'Copy is not localized to Portuguese/Spanish.', ruleId: 'latam-localization', requiredDisclosure: 'Localized copy' }),
-    ),
-    brand: new StubModelClient(() => findings()),
-    remediationCopy: new StubModelClient(() => ({ text: 'Lumavida Immune+ apoia o seu bem-estar diario como parte de uma dieta variada e equilibrada e de um estilo de vida saudavel.' })),
-    image: { model: 'stub-image', complete: async () => ({ text: '' }), generateImage: async () => ({ url: 'https://cdn.aimlapi.com/lumavida-latam.png' }) } satisfies ModelClient,
+  // Stub models so the full debate runs with no keys. Real runs route through
+  // AIML (main) or Bedrock/Vertex/Featherless (dev) via the ModelClient seam.
+  const pass: ModelClient = new StubModelClient(() => findings('info', claim));
+  const empty: ModelClient = new StubModelClient(() => ({ text: '', json: { findings: [] } }));
+  // EU blocks on review, then holds on rebuttal: a two-phase model keyed on call count.
+  let euCall = 0;
+  const euModel: ModelClient = new StubModelClient(() => (euCall++ % 2 === 0
+    ? findings('block', claim)
+    : { text: '', json: { stance: 'hold', rationale: 'unlawful' } }));
+  const mediator: ModelClient = new StubModelClient(() => ({ text: '', json: { resolved: false, note: 'no movement', requiredDisclosure: null } }));
+  const revised: ModelClient = new StubModelClient(() => ({ text: JSON.stringify({ ...asset, copy: 'softened' }) }));
+  const image: ModelClient = { model: 'stub-image', complete: async () => ({ text: '' }), generateImage: async () => ({ url: 'https://cdn.aimlapi.com/lumavida.png' }) };
+
+  const models: PodBoardModels = {
+    scout: empty, claim: empty, precedent: empty, disclosure: empty,
+    us: pass, eu: euModel, latam: pass,
+    brand: empty, channel: empty, visual: empty,
+    mediator, remediationCopy: revised, image,
   };
 
-  const events: BoardEvent[] = [];
-  const session = new BoardSession({
-    roomId: 'demo-room',
-    asset,
-    brand,
-    rulebooks,
-    models,
-    onEvent: (e) => {
-      events.push(e);
-      printEvent(e);
+  const room = new FakeBandTransport('demo-room', {
+    onActivity: (a) => {
+      const e = translateActivity(a);
+      if (e) console.log(`  [event] ${e.type} (${a.fromName}): ${a.content}`);
     },
-    onPrecedent: (p) => console.log(`  [precedent] ${JSON.stringify(p)}`),
   });
+  room.addUser('lead', 'Compliance Lead', '@compliance-lead');
+  await connectPodBoardAgents(room, { brand, rulebooks: { us: usRules, eu: euRules, latam: latamRules }, models });
 
-  console.log(`\n# Multi-region review board (local fake-Band demo, NOT legal advice)`);
-  console.log(`# Campaign: ${asset.id}; markets US/EU/LATAM + brand consistency\n`);
-  await session.run();
+  console.log(`\n# Pods -> board -> spine review (local fake-Band demo, NOT legal advice)`);
+  console.log(`# Asset: ${asset.id}; markets US/EU/LATAM + brand consistency\n`);
 
-  if (events.some((e) => e.type === 'status' && e.status === 'awaiting-decision')) {
-    console.log(`\n# Human rules on the escalation:\n`);
-    await session.submitDecision('Reject for EU: require authorised wording and Article 10(2) disclosures. US may publish with the typical-results disclosure.');
+  room.post('lead', JSON.stringify(asset), [{ id: 'cond' }]);
+  await room.drain();
+
+  room.post('lead', 'Reject: cannot publish in EU without authorization. US may publish with the typical-results disclosure.', [{ id: 'adj' }]);
+  await room.drain();
+
+  printTranscript(room);
+}
+
+function printTranscript(room: FakeBandTransport): void {
+  console.log('\n--- room transcript ---');
+  for (const t of room.transcript) {
+    if (t.kind === 'event') {
+      console.log(`  · ${t.fromName} (${t.messageType}): ${t.content}`);
+    } else {
+      const to = t.mentions.map((m) => m.handle ?? m.id).join(', ');
+      const body = t.content.length > 150 ? `${t.content.slice(0, 150)}…` : t.content;
+      console.log(`→ ${t.fromName} -> [${to}]: ${body}`);
+    }
   }
 }
 

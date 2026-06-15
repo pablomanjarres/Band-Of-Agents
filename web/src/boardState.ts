@@ -28,6 +28,18 @@ export interface Remediation {
   markets: string[];
 }
 
+// One pod's board-facing summary: whether it filed its consolidated finding and
+// how many cross-pod conflicts it carried.
+export interface PodState {
+  filed: boolean;
+  conflicts: number;
+}
+
+// The spine phase the board is in, derived from the events seen so far.
+export type BoardPhase = 'intake' | 'deliberating' | 'reconciling' | 'deciding' | 'terminal';
+
+export type TerminalDecision = 'published' | 'spiked' | 'escalated';
+
 export interface BoardState {
   asset?: ContentAsset;
   regions: Record<string, RegionState>;
@@ -36,6 +48,10 @@ export interface BoardState {
   escalationText?: string;
   decisionText?: string;
   status: BoardStatus;
+  // 'claims' | 'regulatory' | 'brand' -> filed/conflicts, populated as pods report.
+  pods: Record<string, PodState>;
+  phase: BoardPhase;
+  terminal?: TerminalDecision;
   events: BoardEvent[];
 }
 
@@ -52,6 +68,8 @@ export function initialBoardState(): BoardState {
     regions,
     conflict: false,
     status: 'running',
+    pods: {},
+    phase: 'intake',
     events: [],
   };
 }
@@ -64,12 +82,14 @@ export function applyEvent(prev: BoardState, event: BoardEvent): BoardState {
   const next: BoardState = {
     ...prev,
     regions: { ...prev.regions },
+    pods: { ...prev.pods },
     events: [...prev.events, event],
   };
 
   switch (event.type) {
     case 'intake': {
       next.asset = event.asset;
+      next.phase = 'deliberating';
       break;
     }
     case 'review': {
@@ -117,9 +137,29 @@ export function applyEvent(prev: BoardState, event: BoardEvent): BoardState {
       next.status = event.status;
       break;
     }
+    case 'pod-finding': {
+      // A pod filed its consolidated finding; the board moves to reconciling.
+      next.pods[event.pod] = { filed: true, conflicts: event.conflicts };
+      next.phase = 'reconciling';
+      break;
+    }
+    case 'adjudication': {
+      // The Risk Adjudicator is scoring the board.
+      next.phase = 'deciding';
+      break;
+    }
+    case 'terminal': {
+      next.phase = 'terminal';
+      next.terminal = event.decision;
+      next.status = 'complete';
+      break;
+    }
     case 'recruited':
     case 'progress':
-    case 'log': {
+    case 'log':
+    case 'workitem':
+    case 'debate':
+    case 'mediation': {
       // Timeline-only events; already appended above.
       break;
     }
