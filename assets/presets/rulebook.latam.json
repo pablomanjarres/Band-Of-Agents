@@ -1,0 +1,49 @@
+{
+  "region": "LATAM",
+  "label": "Latin America preset (illustrative; e.g. Brazil CONAR/ANVISA, Mexico PROFECO/COFEPRIS). Demo rules, not legal advice.",
+  "notLegalAdvice": true,
+  "rules": [
+    {
+      "id": "latam-localization",
+      "region": "LATAM",
+      "category": "localization",
+      "severity": "warn",
+      "check": "Copy and disclosures should be localized into the market language (Portuguese for Brazil, Spanish for most of LATAM), not left in English.",
+      "requiredDisclosure": "Localized copy and disclosures"
+    },
+    {
+      "id": "latam-health-registration",
+      "region": "LATAM",
+      "category": "health_claim",
+      "severity": "block",
+      "check": "Health and efficacy claims for supplements require substantiation and, in several markets, prior regulatory registration (e.g. ANVISA in Brazil, COFEPRIS in Mexico) before promotion.",
+      "requiredDisclosure": "Local substantiation / registration reference"
+    },
+    {
+      "id": "latam-self-regulation",
+      "region": "LATAM",
+      "category": "comparative",
+      "severity": "warn",
+      "check": "Advertising self-regulation bodies (e.g. CONAR in Brazil) expect truthful, non-misleading, and non-denigrating claims, including in comparative advertising.",
+      "requiredDisclosure": null,
+      "sourceUrl": "http://www.conar.org.br"
+    },
+    {
+      "id": "latam-consumer-protection",
+      "region": "LATAM",
+      "category": "free_offer",
+      "severity": "warn",
+      "check": "Consumer-protection rules (e.g. Mexico PROFECO) require clear, complete terms for promotions and 'free' or trial offers.",
+      "requiredDisclosure": "Promotion terms",
+      "sourceUrl": "https://www.gob.mx/profeco"
+    },
+    {
+      "id": "latam-no-disease",
+      "region": "LATAM",
+      "category": "health_claim",
+      "severity": "block",
+      "check": "Supplement advertising must not state or imply that the product prevents, treats, or cures a disease.",
+      "requiredDisclosure": null
+    }
+  ]
+}

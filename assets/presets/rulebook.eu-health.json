@@ -1,0 +1,61 @@
+{
+  "region": "EU",
+  "label": "European Union health claims preset",
+  "notLegalAdvice": true,
+  "rules": [
+    {
+      "id": "eu-health-preauth",
+      "region": "EU",
+      "category": "health_claim",
+      "severity": "block",
+      "check": "Health claims are prohibited unless authorised and listed on the EU Register, even if scientifically true (pre-authorization).",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://eur-lex.europa.eu/eli/reg/2006/1924/oj/eng"
+    },
+    {
+      "id": "eu-health-verbatim",
+      "region": "EU",
+      "category": "health_claim",
+      "severity": "block",
+      "check": "Authorised claims must use the registered verbatim wording and meet nutrient conditions (e.g. 'source of' requires at least 15% NRV). Free wording like 'boost your immune system' is not authorised.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://food.ec.europa.eu/food-safety/labelling-and-nutrition/nutrition-and-health-claims/eu-register-health-claims_en"
+    },
+    {
+      "id": "eu-health-article10",
+      "region": "EU",
+      "category": "disclosure",
+      "severity": "block",
+      "check": "A permitted health claim must carry the Article 10(2) statements: importance of a varied, balanced diet and healthy lifestyle, and the quantity and pattern of consumption needed for the effect.",
+      "requiredDisclosure": "Article 10(2) accompanying statements",
+      "sourceUrl": "https://eur-lex.europa.eu/eli/reg/2006/1924/oj/eng"
+    },
+    {
+      "id": "eu-health-no-disease",
+      "region": "EU",
+      "category": "health_claim",
+      "severity": "block",
+      "check": "No claim may state or imply prevention, treatment, or cure of disease; reduction-of-disease-risk claims need Article 14 authorisation plus the multiple-risk-factors statement.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://eur-lex.europa.eu/eli/reg/2006/1924/oj/eng"
+    },
+    {
+      "id": "eu-health-ucpd-omission",
+      "region": "EU",
+      "category": "misleading",
+      "severity": "warn",
+      "check": "Practices must not mislead by action or by omission of material information the average consumer needs to make an informed choice (UCPD).",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32005L0029"
+    },
+    {
+      "id": "eu-health-gdpr-consent",
+      "region": "EU",
+      "category": "gdpr",
+      "severity": "warn",
+      "check": "Any data-capture call to action needs freely given, specific, informed, unambiguous opt-in consent (no pre-ticked boxes).",
+      "requiredDisclosure": "GDPR opt-in consent language",
+      "sourceUrl": "https://gdpr-info.eu/issues/consent/"
+    }
+  ]
+}

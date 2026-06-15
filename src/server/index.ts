@@ -25,10 +25,14 @@ import type { Campaign, ContentAsset, Rulebook } from '../domain/types';
 import { BoardSession, realBoardModels } from '../board/session';
 import { CampaignSession, type CampaignRollup } from '../board/campaign';
 import { BandBoard } from '../board/band-session';
+import { modelFor } from '../models/route';
+import { importRulebook, type ImportFormat } from '../domain/rulebook-import';
+import { loadPresets } from '../domain/presets';
 import type { BoardEvent, BoardStatus } from '../board/events';
 import { Store } from '../store/store';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
+const PRESETS_DIR = new URL('../../assets/presets/', import.meta.url).pathname;
 const WEB_DIST = new URL('../../web/dist/', import.meta.url).pathname;
 const DATA_DIR = new URL('../../data/', import.meta.url).pathname;
 const PORT = Number(process.env.PORT ?? 8787);
@@ -83,6 +87,13 @@ function currentRulebooks(): Record<RegionKey, Rulebook> {
     eu: store.getRulebookOverride('EU') ?? defaultRulebooks.eu,
     latam: store.getRulebookOverride('LATAM') ?? defaultRulebooks.latam,
   };
+}
+
+// The model used to parse a freeform (.md/text) rulebook into structured rules.
+// AIML is the default route (MODEL_MODE); we reuse the EU reviewer's slot because
+// it is a strong, strict structured-output model. No new model ids are added.
+function importModel() {
+  return modelFor('eu');
 }
 
 function normalizeName(s: string): string {
@@ -518,6 +529,13 @@ app.get('/api/rulebooks', (c) => {
   return c.json({ rulebooks: REGIONS.map((r) => current[r]) });
 });
 
+// Curated one-click rulebook presets (US-FTC, EU health claims, LATAM). Read-only;
+// the picked preset is applied via the existing PUT /api/rulebooks/:region.
+app.get('/api/rulebooks/presets', (c) => {
+  const presets = loadPresets(PRESETS_DIR).map((p) => ({ id: p.id, label: p.label, region: p.region, rulebook: p.rulebook }));
+  return c.json({ presets });
+});
+
 app.get('/api/rulebooks/:region', (c) => {
   const region = c.req.param('region').toLowerCase();
   if (!(REGIONS as readonly string[]).includes(region)) return c.json({ error: 'unknown region' }, 404);
@@ -532,6 +550,39 @@ app.put('/api/rulebooks/:region', async (c) => {
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
   store.saveRulebookOverride(region, parsed.data);
   return c.json({ rulebook: parsed.data });
+});
+
+// Smart rulebook import. The result is a PROPOSAL for the user to confirm: it is
+// NOT persisted here. The user reviews the returned rulebook and saves it with
+// the PUT above. json => validate the content directly (no model call). md/text
+// => parse with the AIML-default model into structured Rule[] (the same
+// structured-output path the reviewers use), honoring MODEL_MODE.
+const ImportBody = z.object({
+  format: z.enum(['md', 'json', 'text']),
+  content: z.string().min(1),
+  label: z.string().optional(),
+});
+
+app.post('/api/rulebooks/:region/import', async (c) => {
+  const region = c.req.param('region').toLowerCase();
+  if (!(REGIONS as readonly string[]).includes(region)) return c.json({ error: 'unknown region' }, 404);
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const parsed = ImportBody.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const { format, content, label } = parsed.data;
+  try {
+    const rulebook = await importRulebook({
+      format: format as ImportFormat,
+      content,
+      region,
+      ...(label ? { label } : {}),
+      // The model is only constructed for md/text; a json import never calls it.
+      ...(format === 'json' ? {} : { model: importModel() }),
+    });
+    return c.json({ rulebook });
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error)?.message ?? 'rulebook import failed' }, 400);
+  }
 });
 
 if (existsSync(WEB_DIST)) {
