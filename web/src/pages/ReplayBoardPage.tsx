@@ -40,20 +40,20 @@ export function ReplayBoardPage() {
   }, [id]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <Link to="/history" className="text-sm text-indigo-600 hover:text-indigo-500">
-          &larr; All reviews
+        <Link to="/history" className="text-sm text-muted transition-colors hover:text-fg">
+          ← All reviews
         </Link>
-        <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-3 px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted ring-1 ring-inset ring-border-strong">
           Read-only replay
         </span>
       </div>
 
       {load.kind === 'loading' ? (
-        <p className="text-sm text-slate-500">Loading review.</p>
+        <p className="text-sm text-muted">Loading review…</p>
       ) : load.kind === 'error' ? (
-        <p className="text-sm text-red-600">{load.message}</p>
+        <p className="text-sm text-danger">{load.message}</p>
       ) : (
         <BoardView state={load.board} />
       )}

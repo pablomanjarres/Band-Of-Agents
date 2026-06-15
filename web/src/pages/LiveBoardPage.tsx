@@ -48,25 +48,25 @@ export function LiveBoardPage() {
   }, [state.status]);
 
   if (!id) {
-    return <p className="text-sm text-red-600">Missing review id.</p>;
+    return <p className="text-sm text-danger">Missing review id.</p>;
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <Link to="/history" className="text-sm text-indigo-600 hover:text-indigo-500">
-          &larr; All reviews
-        </Link>
         <Link
-          to="/"
-          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
+          to="/history"
+          className="text-sm text-muted transition-colors hover:text-fg"
         >
+          ← All reviews
+        </Link>
+        <Link to="/" className="btn btn-primary">
           + Compose campaign
         </Link>
       </div>
 
       {connectionError && state.status === 'running' ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
+        <div className="rounded-xl border border-warn/30 bg-warn/[0.07] px-4 py-2.5 text-sm text-warn">
           Live connection interrupted. The browser will attempt to reconnect.
         </div>
       ) : null}
