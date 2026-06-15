@@ -36,6 +36,10 @@ export interface PodBoardConfig {
   logPrecedent?: (p: { claim: string; decision: string; note: string }) => void;
   /** Resolve a human's free-text reference to a saved campaign (for the Conductor). */
   lookupCampaign?: (query: string) => ContentAsset | undefined;
+  /** Read the live rulebook per region (UI overrides) so edits apply to the next review. */
+  getRulebook?: (region: string) => Rulebook | undefined;
+  /** Recent human-ruling precedents fed into the region reviewers' prompts. */
+  getPrecedents?: () => string[];
 }
 
 // Connects the full pods -> board -> spine cast to any transport (fake or real).
@@ -53,9 +57,10 @@ export async function connectPodBoardAgents(t: BandTransport, cfg: PodBoardConfi
 
   // Regulatory pod (debates)
   await t.connectAgent({ agentId: 'reglead', name: 'Reg Lead', handle: '@reg-lead', onMessage: makePodLead({ pod: 'regulatory', members: ['@us-reviewer', '@eu-reviewer', '@latam-reviewer'], memberKeys: ['US', 'EU', 'LATAM'], reportToHandle: '@adjudicator', debate: true }) });
-  await t.connectAgent({ agentId: 'us', name: 'US Reviewer', handle: '@us-reviewer', onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: cfg.rulebooks.us, brand: cfg.brand, model: m.us, reportToHandle: '@reg-lead' }) });
-  await t.connectAgent({ agentId: 'eu', name: 'EU Reviewer', handle: '@eu-reviewer', onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: cfg.rulebooks.eu, brand: cfg.brand, model: m.eu, reportToHandle: '@reg-lead' }) });
-  await t.connectAgent({ agentId: 'latam', name: 'LATAM Reviewer', handle: '@latam-reviewer', onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: cfg.rulebooks.latam, brand: cfg.brand, model: m.latam, reportToHandle: '@reg-lead' }) });
+  const precedents = cfg.getPrecedents ? { precedents: cfg.getPrecedents } : {};
+  await t.connectAgent({ agentId: 'us', name: 'US Reviewer', handle: '@us-reviewer', onMessage: makeRegionReviewer({ region: 'US', reviewerName: 'US Reviewer', rulebook: cfg.rulebooks.us, brand: cfg.brand, model: m.us, reportToHandle: '@reg-lead', getRulebook: () => cfg.getRulebook?.('US') ?? cfg.rulebooks.us, ...precedents }) });
+  await t.connectAgent({ agentId: 'eu', name: 'EU Reviewer', handle: '@eu-reviewer', onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: cfg.rulebooks.eu, brand: cfg.brand, model: m.eu, reportToHandle: '@reg-lead', getRulebook: () => cfg.getRulebook?.('EU') ?? cfg.rulebooks.eu, ...precedents }) });
+  await t.connectAgent({ agentId: 'latam', name: 'LATAM Reviewer', handle: '@latam-reviewer', onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: cfg.rulebooks.latam, brand: cfg.brand, model: m.latam, reportToHandle: '@reg-lead', getRulebook: () => cfg.getRulebook?.('LATAM') ?? cfg.rulebooks.latam, ...precedents }) });
 
   // Brand pod
   await t.connectAgent({ agentId: 'brandlead', name: 'Brand Lead', handle: '@brand-lead', onMessage: makePodLead({ pod: 'brand', members: ['@brand-voice', '@channel', '@visual'], memberKeys: ['brand-voice', 'channel', 'visual'], reportToHandle: '@adjudicator', debate: false }) });

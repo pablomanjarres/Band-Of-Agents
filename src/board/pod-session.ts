@@ -26,6 +26,10 @@ export interface PodBoardSessionOptions {
   onPrecedent?: (precedent: PodPrecedent) => void;
   /** Host generated images (base64 -> short URL) so messages stay small. */
   hostImage?: (url: string) => string;
+  /** Recent human-ruling precedents fed into the region reviewers' prompts. */
+  getPrecedents?: () => string[];
+  /** Read the live rulebook per region (UI overrides) so edits apply to the next review. */
+  getRulebook?: (region: string) => Rulebook | undefined;
 }
 
 export class PodBoardSession {
@@ -79,6 +83,8 @@ export class PodBoardSession {
       // Always host images so a regenerated base64 image cannot explode re-review prompts.
       hostImage: this.opts.hostImage ?? this.defaultHostImage,
       ...(this.opts.onPrecedent ? { logPrecedent: this.opts.onPrecedent } : {}),
+      ...(this.opts.getPrecedents ? { getPrecedents: this.opts.getPrecedents } : {}),
+      ...(this.opts.getRulebook ? { getRulebook: this.opts.getRulebook } : {}),
     });
 
     // The human posts the asset; the Conductor fans it to the pods and the cast

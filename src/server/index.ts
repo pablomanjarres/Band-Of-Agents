@@ -237,6 +237,8 @@ app.post('/api/reviews', async (c) => {
         onEvent,
         onPrecedent: (p) => store.appendPrecedent({ roomId, regions: [], decision: `${p.decision}: ${p.claim}` }),
         hostImage,
+        getPrecedents: recentPrecedents,
+        getRulebook: (region) => store.getRulebookOverride(region) ?? defaultRulebooks[region.toLowerCase() as RegionKey] ?? defaultRulebooks.us,
       })
     : new BoardSession({
         roomId,
