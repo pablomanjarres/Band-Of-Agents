@@ -411,3 +411,99 @@ P3 was greenlit by the user and is done. Both items were de-risked by mapping th
 `@band-ai/sdk` 0.1.6 surface: there is no /workspace file API (so shared context uses the room plus
 the /context endpoint, never the gated Memory tools), and the SDK already ships framework adapters
 (so cross-framework needed no new dependency). The full suite is 31 green and tsc is clean.
+
+---
+
+# Campaign review over band.ai (band path)
+
+GOAL: a CAMPAIGN review (and single-advertisement review) runs THROUGH the band
+transport, mirroring how CampaignSession decomposes a campaign locally. Per
+material, concurrent, no campaign/ad-wide gate. Reuse computeRollup. Keep local
++ single-asset band flows green.
+
+## Design
+The band path has ONE persistent set of agents connected to band.ai (BandBoard).
+A campaign is decomposed into per-material band rooms: the Intake creates one room
+per material (room bound to its material), posts that material's content (a saved
+campaign lookup keyed by room id) carrying the dossier + campaign/ad/material ids,
+and the existing coordinator/reviewers/reconcile/remediation run per room (the
+single-asset band flow, once per material). Every material across every ad
+negotiates concurrently in its own room (no gate). BandBoard observes each room,
+tags events with campaignId/advertisementId/materialId, collects verdicts, and a
+CampaignBandSession aggregates them into the per-ad + campaign rollup via
+computeRollup.
+
+## Steps
+- [x] 1. BandBoard: expose per-room observation + material context. Add
+      observeRoom(roomId, sink) so a campaign session pre-registers a tagged sink;
+      add a lookupMaterial(roomId) the coordinator uses to resolve the posted
+      material + dossier + ids for that room; store per-room campaign context.
+- [x] 2. CampaignBandSession (src/board/campaign-band.ts): given the BandBoard +
+      an IntakeControl, decompose the campaign (scoped to an ad when set) into
+      per-material rooms, post each, register a tagged per-material sink, collect
+      verdicts, await all rooms terminal, return computeRollup. submitDecision per
+      material posts the human ruling into that material's room (via the intake
+      proxy). No campaign/ad-wide gate.
+- [x] 3. FakeBandTransport: add createRoom/addParticipant/post-as-intake so the
+      band campaign flow is testable in-process (the intake control over the fake).
+      Build a fakeIntakeControl helper from a FakeBandTransport.
+- [x] 4. BandBoard: accept an injected transport (default RealBandTransport) so the
+      proof test can wire a FakeBandTransport. Keep real path unchanged.
+- [x] 5. Server: in BOARD_MODE=band, runCampaignReview drives CampaignBandSession
+      (Intake posts to band.ai, BandBoard observes); BOARD_MODE=local keeps
+      CampaignSession. Reuse the campaign-review SSE + rollup + decision endpoints.
+      POST /api/reviews campaign branch allowed in band mode (single-asset band
+      stays band.ai-only).
+- [x] 6. Page: band mode campaign review uses the same campaign-review endpoints,
+      so the UI is unchanged. Verify api/page path is mode-agnostic.
+- [x] 7. Proof test (test/band-campaign.test.ts): FakeBandTransport campaign review,
+      multi-ad multi-material, per-material verdicts ACROSS ads + rollup, assert
+      concurrency (a gated material does not hold up siblings/other ads).
+- [x] 8. typecheck + test green (baseline 161 + new), no regressions.
+
+## Review
+
+Implemented the campaign band flow as the union of CampaignSession's per-material
+decomposition and the existing BandBoard single-asset machinery. No new model
+roles, no new storage, no new transport.
+
+What changed:
+- src/agents/coordinator.ts: added optional lookupMaterial(roomId) so one connected
+  coordinator resolves the material posted into each per-material room (asset +
+  dossier + campaign/ad/material ids), engaging the per-material cascade + gate.
+- src/band/fake.ts: made the fake MULTI-ROOM (post/record/tools thread a roomId,
+  default = constructor room) so one fake hosts many material rooms with the same
+  connected agents (like one band.ai agent in many chats). Added addParticipant and
+  makeFakeIntakeControl (an IntakeControl over the fake) so the band campaign flow
+  is testable with no credentials.
+- src/board/band-session.ts (BandBoard): injectable transport factory + intake
+  control factory (test seams); observeRoom/registerMaterialRoom/releaseRoom;
+  coordinatorMention/reconcileMention/reviewerAgentIds; humanProxyHandle on
+  reconcile so a relayed human ruling is accepted; agentId() falls back to stable
+  ids when a transport is injected (no env needed in tests).
+- src/board/campaign-band.ts (NEW): CampaignBandSession, the band analog of
+  CampaignSession. Posts each material into its own band.ai room (scoped to one ad
+  when set), observes per-material verdicts, awaits all rooms terminal, returns
+  computeRollup. No campaign/ad-wide gate. submitDecision relays a per-material
+  human ruling into that material's room via the intake proxy.
+- src/server/index.ts: runCampaignReview branches on BOARD_MODE (band ->
+  CampaignBandSession against the connected BandBoard; local -> CampaignSession).
+  POST /api/reviews campaign branch now runs in BOTH modes; single-asset stays
+  band.ai-only in band mode. Reuses the campaign-review SSE + rollup + decision
+  endpoints unchanged. bandBoard is a module handle assigned in main().
+- web: UNCHANGED. The campaign-review UI (CampaignDetailPage -> /api/reviews +
+  /api/campaign-reviews/:id) is mode-agnostic and already drives the band path in
+  band mode. No mode gate on the Run review / Review this ad buttons.
+
+Tests (165 total, was 161; clean typecheck; deterministic 3/3 runs):
+- test/band-campaign.test.ts (NEW, 2): a multi-ad multi-material campaign over a
+  FakeBandTransport-backed BandBoard. Per-material verdicts ACROSS three ads + the
+  rollup; an escalated material rests at awaiting-decision WITHOUT gating siblings
+  (proof of no campaign/ad-wide gate); verdict/review events tagged with both ids;
+  per-material decision relay; plus a single-advertisement scope.
+- test/server-band-campaign.test.ts (NEW, 2): BOARD_MODE=band routing: single-asset
+  rejected (band.ai-only), campaign accepted + routed to the band path (degrades to
+  status:error with no board connected, proving the branch is reached). Inline
+  campaign so no shared on-disk state (no flakiness).
+- All existing band + local + single-asset tests stay green (the multi-room fake
+  change is backward compatible: roomId defaults to the constructor room).
