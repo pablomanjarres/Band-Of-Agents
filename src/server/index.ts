@@ -348,7 +348,7 @@ function makeCampaignOnEvent(record: CampaignReviewRecord): (event: BoardEvent) 
 // material is terminal (CampaignSession.run resolves), then becomes 'complete' or
 // 'awaiting-decision' (any material escalated) and a campaign-level status event
 // is emitted (no materialId) so the SSE consumer knows the whole campaign rested.
-function runCampaignReview(campaign: Campaign): string {
+function runCampaignReview(campaign: Campaign, advertisementId?: string): string {
   const id = randomUUID();
   const record: CampaignReviewRecord = {
     id,
@@ -372,6 +372,10 @@ function runCampaignReview(campaign: Campaign): string {
       const session = new CampaignSession({
         roomId: `campaign-${id}`,
         campaign,
+        // Optional scope: when present, only this advertisement's materials are
+        // reviewed (still concurrent, still per material); the rollup then covers
+        // just that ad. Absent => the unchanged whole-campaign review.
+        ...(advertisementId ? { advertisementId } : {}),
         brand,
         rulebooks: currentRulebooks(),
         models: boardModelsOrStub(),
@@ -418,8 +422,11 @@ app.post('/api/reviews', async (c) => {
   const body: unknown = await c.req.json().catch(() => ({}));
 
   // Campaign mode: a saved campaignId or an inline campaign runs every material
-  // concurrently. The single-asset payload below is unchanged (no regression).
-  const b = (body ?? {}) as { campaignId?: unknown; campaign?: unknown };
+  // concurrently. An optional advertisementId SCOPES the review to one ad's
+  // materials (still concurrent, still per material): fewer materials run, the
+  // rollup covers just that ad, no new gate. The single-asset payload below is
+  // unchanged (no regression).
+  const b = (body ?? {}) as { campaignId?: unknown; campaign?: unknown; advertisementId?: unknown };
   if (typeof b.campaignId === 'string' || (b.campaign && typeof b.campaign === 'object')) {
     let campaign: Campaign | undefined;
     if (typeof b.campaignId === 'string') {
@@ -430,10 +437,27 @@ app.post('/api/reviews', async (c) => {
       if (!parsedCampaign.success) return c.json({ error: parsedCampaign.error.flatten() }, 400);
       campaign = parsedCampaign.data;
     }
-    const allMaterials = campaign.advertisements.flatMap((ad) => ad.materials);
-    if (allMaterials.length === 0) return c.json({ error: 'campaign has no materials' }, 400);
-    const id = runCampaignReview(campaign);
-    return c.json({ id, kind: 'campaign', materials: allMaterials.map((m) => m.id) });
+    // Optional scope to a single advertisement. When present it must exist in the
+    // campaign (404 otherwise, mirroring the add-material path); the review then
+    // runs only that ad's materials.
+    const advertisementId = typeof b.advertisementId === 'string' ? b.advertisementId : undefined;
+    if (advertisementId !== undefined && !campaign.advertisements.some((ad) => ad.id === advertisementId)) {
+      return c.json({ error: `advertisement ${advertisementId} not found` }, 404);
+    }
+    const scopedMaterials = (advertisementId !== undefined
+      ? campaign.advertisements.filter((ad) => ad.id === advertisementId)
+      : campaign.advertisements
+    ).flatMap((ad) => ad.materials);
+    if (scopedMaterials.length === 0) {
+      return c.json({ error: advertisementId !== undefined ? `advertisement ${advertisementId} has no materials` : 'campaign has no materials' }, 400);
+    }
+    const id = runCampaignReview(campaign, advertisementId);
+    return c.json({
+      id,
+      kind: 'campaign',
+      ...(advertisementId !== undefined ? { advertisementId } : {}),
+      materials: scopedMaterials.map((m) => m.id),
+    });
   }
 
   const parsed = CreateReview.safeParse(body);

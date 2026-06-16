@@ -369,3 +369,161 @@ describe('campaign loads/validates and the worst-case rollup is correct', () => 
     expect(camp.advertisements[0]?.materials[0]?.kind).toBe('image');
   });
 });
+
+describe('scoping a campaign review to ONE advertisement (optional, no new gate)', () => {
+  // A three-ad campaign. Scoping to the middle ad must review ONLY its materials:
+  // the other ads are never touched, the rollup carries just the scoped ad, and
+  // the materials inside the scoped ad still run concurrently (one finishes while
+  // a sibling is parked). The unscoped run (control) still reviews everything.
+  function threeAdCampaign() {
+    return Campaign.parse({
+      id: 'camp-scope',
+      name: 'Scope',
+      markets: ['US'],
+      dossier: { approvedClaims: [], substantiation: '', approvedInfo: '', sources: [] },
+      advertisements: [
+        { id: 'ad-1', name: 'Ad One', materials: [{ id: 'a1-m1', kind: 'post', channel: 'x', markets: ['US'], copy: 'a1m1', claim: 'c' }] },
+        {
+          id: 'ad-2',
+          name: 'Ad Two',
+          materials: [
+            { id: 'a2-m1', kind: 'video', channel: 'social', markets: ['US'], copy: 'a2m1', claim: 'c' },
+            { id: 'a2-m2', kind: 'post', channel: 'x', markets: ['US'], copy: 'a2m2', claim: 'c' },
+          ],
+        },
+        { id: 'ad-3', name: 'Ad Three', materials: [{ id: 'a3-m1', kind: 'banner', channel: 'display', markets: ['US'], copy: 'a3m1', claim: 'c' }] },
+      ],
+    });
+  }
+
+  function cleanModels(): BoardModels {
+    const cleared = new StubModelClient(() => findings());
+    return {
+      us: cleared,
+      eu: cleared,
+      latam: cleared,
+      brand: cleared,
+      remediationCopy: new StubModelClient(() => ({ text: 'n/a' })),
+      image: { model: 'stub-image', complete: async () => ({ text: '' }) } satisfies ModelClient,
+    };
+  }
+
+  it('reviews ONLY the scoped advertisement\'s materials; the other ads are never touched', async () => {
+    const { brand, rulebooks } = brandAndRules();
+    const campaign = threeAdCampaign();
+    const events: BoardEvent[] = [];
+    const session = new CampaignSession({
+      roomId: 'room-scope',
+      campaign,
+      advertisementId: 'ad-2',
+      brand,
+      rulebooks,
+      models: cleanModels(),
+      onEvent: (e) => events.push(e),
+    });
+
+    // The scope is visible up front: materialIds() lists only ad-2's materials.
+    expect(session.materialIds().sort()).toEqual(['a2-m1', 'a2-m2']);
+
+    const rollup = await session.run();
+
+    // Only ad-2's two materials were ever intaken/reviewed; ad-1 and ad-3 never were.
+    const intaken = new Set(events.filter((e) => e.type === 'intake' && e.materialId).map((e) => e.materialId));
+    expect(intaken).toEqual(new Set(['a2-m1', 'a2-m2']));
+    const reviewedMats = new Set(events.filter((e) => e.type === 'review').map((e) => e.materialId));
+    expect(reviewedMats).toEqual(new Set(['a2-m1', 'a2-m2']));
+    // Belt-and-suspenders: no event for any other ad's material leaked through.
+    expect(events.some((e) => e.materialId === 'a1-m1' || e.materialId === 'a3-m1')).toBe(false);
+    // Every emitted event that is ad-tagged points at the scoped ad.
+    expect(events.filter((e) => e.advertisementId !== undefined).every((e) => e.advertisementId === 'ad-2')).toBe(true);
+
+    // The rollup covers ONLY the scoped advertisement.
+    expect(rollup.perAdvertisement.map((a) => a.advertisementId)).toEqual(['ad-2']);
+    expect(rollup.perMaterial.map((m) => m.materialId).sort()).toEqual(['a2-m1', 'a2-m2']);
+    expect(rollup.perMaterial.every((m) => m.advertisementId === 'ad-2')).toBe(true);
+    // Matrix cells are all the scoped ad's (2 materials x 4 regions = 8 cells).
+    expect(rollup.matrix.length).toBe(8);
+    expect(rollup.matrix.every((cell) => cell.advertisementId === 'ad-2')).toBe(true);
+  });
+
+  it('the scoped ad\'s materials still run CONCURRENTLY (one finishes while its sibling is parked)', async () => {
+    const { brand, rulebooks } = brandAndRules();
+    const campaign = threeAdCampaign();
+
+    // a2-m1's US reviewer parks on a gate; a2-m2 runs straight through. With no
+    // gate of any kind, a2-m2 must reach its verdict while a2-m1 is still parked.
+    let releaseGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const cleared = new StubModelClient(() => findings());
+    const usGated: ModelClient = {
+      model: 'us-gated',
+      complete: async (req) => {
+        if (materialIdOf(req) === 'a2-m1') await gate;
+        return findings();
+      },
+    };
+    const models: BoardModels = {
+      us: usGated,
+      eu: cleared,
+      latam: cleared,
+      brand: cleared,
+      remediationCopy: new StubModelClient(() => ({ text: 'n/a' })),
+      image: { model: 'stub-image', complete: async () => ({ text: '' }) } satisfies ModelClient,
+    };
+
+    const verdictsByMaterial = new Map<string, RegionVerdict[]>();
+    const session = new CampaignSession({
+      roomId: 'room-scope-conc',
+      campaign,
+      advertisementId: 'ad-2',
+      brand,
+      rulebooks,
+      models,
+      onEvent: (e) => {
+        if (e.type === 'verdict' && e.materialId) verdictsByMaterial.set(e.materialId, e.verdicts);
+      },
+    });
+
+    const done = session.run();
+    for (let i = 0; i < 200 && !verdictsByMaterial.has('a2-m2'); i++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    // Concurrency within the scoped ad: the sibling finished, the gated one has not.
+    expect(verdictsByMaterial.has('a2-m2')).toBe(true);
+    expect(verdictsByMaterial.has('a2-m1')).toBe(false);
+
+    releaseGate();
+    const rollup = await done;
+    expect(verdictsByMaterial.has('a2-m1')).toBe(true);
+    expect(rollup.perMaterial.length).toBe(2);
+  });
+
+  it('an unscoped run still reviews EVERY advertisement\'s materials (control, unchanged)', async () => {
+    const { brand, rulebooks } = brandAndRules();
+    const campaign = threeAdCampaign();
+    const events: BoardEvent[] = [];
+    const session = new CampaignSession({ roomId: 'room-unscoped', campaign, brand, rulebooks, models: cleanModels(), onEvent: (e) => events.push(e) });
+
+    expect(session.materialIds().sort()).toEqual(['a1-m1', 'a2-m1', 'a2-m2', 'a3-m1']);
+
+    const rollup = await session.run();
+    const intaken = new Set(events.filter((e) => e.type === 'intake' && e.materialId).map((e) => e.materialId));
+    expect(intaken).toEqual(new Set(['a1-m1', 'a2-m1', 'a2-m2', 'a3-m1']));
+    expect(rollup.perAdvertisement.map((a) => a.advertisementId).sort()).toEqual(['ad-1', 'ad-2', 'ad-3']);
+    expect(rollup.perMaterial.map((m) => m.materialId).sort()).toEqual(['a1-m1', 'a2-m1', 'a2-m2', 'a3-m1']);
+  });
+
+  it('scoping to an advertisement that is not in the campaign reviews nothing (empty rollup)', async () => {
+    const { brand, rulebooks } = brandAndRules();
+    const campaign = threeAdCampaign();
+    const events: BoardEvent[] = [];
+    const session = new CampaignSession({ roomId: 'room-scope-missing', campaign, advertisementId: 'ad-nope', brand, rulebooks, models: cleanModels(), onEvent: (e) => events.push(e) });
+    expect(session.materialIds()).toEqual([]);
+    const rollup = await session.run();
+    expect(events.length).toBe(0);
+    expect(rollup.perMaterial.length).toBe(0);
+    expect(rollup.perAdvertisement.length).toBe(0);
+  });
+});

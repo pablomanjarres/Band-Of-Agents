@@ -346,3 +346,68 @@ describe('campaign review traverses advertisements -> materials; SSE + rollup', 
     expect(res.status).toBe(400);
   });
 });
+
+describe('POST /api/reviews scoped to ONE advertisement (advertisementId)', () => {
+  it('reviews ONLY the scoped ad\'s materials; SSE + rollup cover just that ad', async () => {
+    const camp = seedCampaign([
+      { id: 'ad-hero', name: 'Hero', materials: [material('hero-a'), material('hero-b')] },
+      { id: 'ad-promo', name: 'Promo', materials: [material('promo-a')] },
+    ]);
+
+    const start = await json<{ id: string; kind: string; advertisementId?: string; materials: string[] }>(
+      await app.fetch(req('POST', '/api/reviews', { campaignId: camp.id, advertisementId: 'ad-promo' })),
+    );
+    expect(start.kind).toBe('campaign');
+    expect(start.advertisementId).toBe('ad-promo');
+    // Only the scoped ad's materials are announced (hero-a/hero-b excluded).
+    expect(new Set(start.materials)).toEqual(new Set(['promo-a']));
+
+    const events = await readCampaignSse(start.id);
+    // Only promo-a was intaken; the Hero ad's materials were never touched.
+    const intaken = new Set(events.filter((e) => e.type === 'intake' && e.materialId).map((e) => e.materialId));
+    expect(intaken).toEqual(new Set(['promo-a']));
+    expect(events.some((e) => e.materialId === 'hero-a' || e.materialId === 'hero-b')).toBe(false);
+    // Every ad-tagged event points at the scoped advertisement.
+    expect(events.filter((e) => e.advertisementId !== undefined).every((e) => e.advertisementId === 'ad-promo')).toBe(true);
+
+    const final = await waitForCampaignTerminal(start.id);
+    const rollup = final.rollup as {
+      perAdvertisement: Array<{ advertisementId: string }>;
+      matrix: Array<{ advertisementId: string; materialId: string }>;
+    };
+    // The rollup covers ONLY the scoped advertisement (1 material x 4 regions = 4 cells).
+    expect(rollup.perAdvertisement.map((a) => a.advertisementId)).toEqual(['ad-promo']);
+    expect(rollup.matrix.length).toBe(4);
+    expect(rollup.matrix.every((cell) => cell.advertisementId === 'ad-promo')).toBe(true);
+  });
+
+  it('404s when the advertisementId is not in the campaign (and starts no review)', async () => {
+    const camp = seedCampaign([{ id: 'ad-hero', name: 'Hero', materials: [material('hero-a')] }]);
+    const res = await app.fetch(req('POST', '/api/reviews', { campaignId: camp.id, advertisementId: 'ad-missing' }));
+    expect(res.status).toBe(404);
+  });
+
+  it('400s when the scoped advertisement has no materials', async () => {
+    const camp = seedCampaign([
+      { id: 'ad-full', name: 'Full', materials: [material('m1')] },
+      { id: 'ad-empty', name: 'Empty', materials: [] },
+    ]);
+    const res = await app.fetch(req('POST', '/api/reviews', { campaignId: camp.id, advertisementId: 'ad-empty' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('an unscoped campaign review still reviews EVERY ad\'s materials (control)', async () => {
+    const camp = seedCampaign([
+      { id: 'ad-hero', name: 'Hero', materials: [material('hero-a'), material('hero-b')] },
+      { id: 'ad-promo', name: 'Promo', materials: [material('promo-a')] },
+    ]);
+    const start = await json<{ id: string; materials: string[] }>(await app.fetch(req('POST', '/api/reviews', { campaignId: camp.id })));
+    expect(new Set(start.materials)).toEqual(new Set(['hero-a', 'hero-b', 'promo-a']));
+    const events = await readCampaignSse(start.id);
+    const intaken = new Set(events.filter((e) => e.type === 'intake' && e.materialId).map((e) => e.materialId));
+    expect(intaken).toEqual(new Set(['hero-a', 'hero-b', 'promo-a']));
+    const final = await waitForCampaignTerminal(start.id);
+    const rollup = final.rollup as { perAdvertisement: Array<{ advertisementId: string }> };
+    expect(rollup.perAdvertisement.map((a) => a.advertisementId).sort()).toEqual(['ad-hero', 'ad-promo']);
+  });
+});

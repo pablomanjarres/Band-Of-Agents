@@ -24,6 +24,14 @@ export interface CampaignSessionOptions {
   /** Room/campaign identifier; each material runs under `${roomId}::${adId}::${materialId}`. */
   roomId: string;
   campaign: Campaign;
+  /**
+   * Optional scope: when set, the session reviews ONLY this advertisement's
+   * materials (still one concurrent per-material BoardSession each, still no
+   * gate). When unset, every advertisement's materials are reviewed (the default,
+   * unchanged). A scoped run simply has fewer materials in flight; the rollup then
+   * naturally covers just this advertisement.
+   */
+  advertisementId?: string;
   brand: BrandDna;
   rulebooks: { us: Rulebook; eu: Rulebook; latam: Rulebook };
   models: BoardModels;
@@ -168,6 +176,11 @@ function compositeKey(advertisementId: string, materialId: string): string {
  * stop at awaiting-decision; the caller can drive a material's decision via
  * submitDecision(materialId, text) (or submitDecisionFor(adId, materialId, text)
  * when material ids are not unique across advertisements).
+ *
+ * Pass `advertisementId` in the options to SCOPE the run to a single
+ * advertisement: only that ad's materials are reviewed (still concurrently, still
+ * one BoardSession per material, still no gate) and the rollup naturally covers
+ * just that ad. Omit it for the unchanged whole-campaign behavior.
  */
 export class CampaignSession {
   private readonly sessions = new Map<string, BoardSession>();
@@ -181,15 +194,29 @@ export class CampaignSession {
 
   constructor(private readonly opts: CampaignSessionOptions) {}
 
-  /** The material ids that will be reviewed, in declared order (flattened across ads). */
-  materialIds(): string[] {
-    return this.opts.campaign.advertisements.flatMap((ad) => ad.materials.map((m) => m.id));
+  /**
+   * The advertisements actually in scope for this run. Unscoped (the default) this
+   * is every advertisement; with `advertisementId` set it is just that one ad (or
+   * none, if the id is not in the campaign). Everything downstream (the material
+   * fan-out, the material ids, the rollup's declared order) derives from this, so
+   * a scoped review simply runs fewer materials, still concurrently, still per
+   * material, with no new gate.
+   */
+  private scopedAdvertisements(): Advertisement[] {
+    const all = this.opts.campaign.advertisements;
+    if (this.opts.advertisementId === undefined) return all;
+    return all.filter((ad) => ad.id === this.opts.advertisementId);
   }
 
-  /** Start one BoardSession per material (across all ads) and await them all (concurrently). */
+  /** The material ids that will be reviewed, in declared order (flattened across the scoped ads). */
+  materialIds(): string[] {
+    return this.scopedAdvertisements().flatMap((ad) => ad.materials.map((m) => m.id));
+  }
+
+  /** Start one BoardSession per material (across the scoped ads) and await them all (concurrently). */
   async run(): Promise<CampaignRollup> {
     const { campaign, roomId, brand, rulebooks, models } = this.opts;
-    const runs = campaign.advertisements.flatMap((ad) =>
+    const runs = this.scopedAdvertisements().flatMap((ad) =>
       ad.materials.map((material) => this.runMaterial(roomId, campaign, ad, material, brand, rulebooks, models)),
     );
     await Promise.all(runs);
@@ -266,7 +293,10 @@ export class CampaignSession {
       materialId: this.materialOfKey.get(key) ?? key,
       verdicts: this.verdictsByKey.get(key) ?? [],
     }));
-    const adOrder = this.opts.campaign.advertisements.map((ad) => ({ id: ad.id, name: ad.name }));
+    // The declared order is scoped too: a single-advertisement run yields a rollup
+    // whose perAdvertisement covers only that ad. (computeRollup already drops ads
+    // with no verdicts, so this is belt-and-suspenders, and keeps the order right.)
+    const adOrder = this.scopedAdvertisements().map((ad) => ({ id: ad.id, name: ad.name }));
     return computeRollup(this.opts.campaign.id, perMaterial, adOrder);
   }
 }
