@@ -194,19 +194,65 @@ export async function addMaterial(
   return asJson<MaterialResponse>(res);
 }
 
-// Upload a video file (multipart). The server hosts it under data/videos/ and,
-// with campaignId + advertisementId + materialId, attaches the url to that
-// material so the next review perceives it (frames + vision + STT over SSE).
-export async function uploadVideo(
-  file: File,
-  opts?: { campaignId?: string; advertisementId?: string; materialId?: string },
-): Promise<VideoUploadResponse> {
-  const form = new FormData();
-  form.append('video', file);
-  if (opts?.campaignId) form.append('campaignId', opts.campaignId);
-  if (opts?.advertisementId) form.append('advertisementId', opts.advertisementId);
-  if (opts?.materialId) form.append('materialId', opts.materialId);
-  const res = await fetch('/api/videos', { method: 'POST', body: form });
+// Cloud Run rejects any single request body over 32 MiB, so a video above this
+// threshold is uploaded in sub-cap chunks and reassembled server-side. Smaller
+// files keep the original single multipart POST.
+const VIDEO_CHUNK_THRESHOLD = 20 * 1024 * 1024;
+const VIDEO_CHUNK_SIZE = 16 * 1024 * 1024;
+
+export interface UploadVideoOptions {
+  campaignId?: string;
+  advertisementId?: string;
+  materialId?: string;
+  /** Progress as a 0..1 fraction of bytes uploaded (the chunked path reports per chunk). */
+  onProgress?: (fraction: number) => void;
+}
+
+// Upload a video file. The server hosts it under data/videos/ and, with
+// campaignId + advertisementId + materialId, attaches the url to that material so
+// the next review perceives it (frames + vision + STT over SSE). Large files are
+// chunked (see VIDEO_CHUNK_THRESHOLD) so they clear Cloud Run's request-size cap.
+export async function uploadVideo(file: File, opts?: UploadVideoOptions): Promise<VideoUploadResponse> {
+  if (file.size <= VIDEO_CHUNK_THRESHOLD) {
+    const form = new FormData();
+    form.append('video', file);
+    if (opts?.campaignId) form.append('campaignId', opts.campaignId);
+    if (opts?.advertisementId) form.append('advertisementId', opts.advertisementId);
+    if (opts?.materialId) form.append('materialId', opts.materialId);
+    const res = await fetch('/api/videos', { method: 'POST', body: form });
+    const out = await asJson<VideoUploadResponse>(res);
+    opts?.onProgress?.(1);
+    return out;
+  }
+
+  // Chunked path: slice the file, POST each piece, then finalize (assemble +
+  // attach + transcribe) in one small JSON request.
+  const uploadId = crypto.randomUUID();
+  const total = Math.ceil(file.size / VIDEO_CHUNK_SIZE);
+  for (let i = 0; i < total; i++) {
+    const chunk = file.slice(i * VIDEO_CHUNK_SIZE, (i + 1) * VIDEO_CHUNK_SIZE);
+    const res = await fetch(`/api/videos/chunk?uploadId=${uploadId}&index=${i}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: chunk,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Chunk ${i + 1}/${total} failed (${res.status}): ${body || res.statusText}`);
+    }
+    opts?.onProgress?.((i + 1) / total);
+  }
+  const res = await fetch('/api/videos/finalize', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      uploadId,
+      fileName: file.name,
+      ...(opts?.campaignId ? { campaignId: opts.campaignId } : {}),
+      ...(opts?.advertisementId ? { advertisementId: opts.advertisementId } : {}),
+      ...(opts?.materialId ? { materialId: opts.materialId } : {}),
+    }),
+  });
   return asJson<VideoUploadResponse>(res);
 }
 

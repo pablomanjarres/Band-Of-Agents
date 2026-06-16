@@ -31,6 +31,7 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
   const [imageUrl, setImageUrl] = useState('');
   const [uploadName, setUploadName] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
   // 'transcribing' while the just-added video is being transcribed; the result then
   // reflects whether a transcript was captured.
   const [transcribing, setTranscribing] = useState(false);
@@ -44,9 +45,14 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
 
   async function handleVideo(file: File) {
     setUploading(true);
+    setUploadPct(0);
     setError(null);
     try {
-      const res = await uploadVideo(file, { campaignId: campaign.id, advertisementId });
+      const res = await uploadVideo(file, {
+        campaignId: campaign.id,
+        advertisementId,
+        onProgress: (f) => setUploadPct(Math.round(f * 100)),
+      });
       setVideoUrl(res.videoUrl);
       setVideoFile(file);
       setUploadName(file.name);
@@ -54,6 +60,7 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
       setError(err instanceof Error ? err.message : 'Failed to upload the video.');
     } finally {
       setUploading(false);
+      setUploadPct(null);
     }
   }
 
@@ -143,6 +150,15 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
       ) : (
         <Dropzone accent="teal" accept="image/*" label="Drop an image, or click to choose" hint="shown in the material and reviewed by the vision pass" busy={uploading} doneName={uploadName} onFile={handleImage} />
       )}
+
+      {uploading && uploadPct !== null ? (
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-3">
+            <div className="h-full rounded-full bg-accent transition-all duration-200" style={{ width: `${uploadPct}%` }} />
+          </div>
+          <span className="font-mono text-[11px] text-faint">Uploading {uploadPct}%</span>
+        </div>
+      ) : null}
 
       <div>
         <label className={labelClass} htmlFor="m-copy">Copy</label>

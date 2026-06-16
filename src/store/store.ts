@@ -6,7 +6,7 @@
 // Deliberately dependency-free (node:fs) and behind a small interface so it can
 // become SQLite later without touching the server.
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { BoardEvent, BoardStatus } from '../board/events';
@@ -32,6 +32,7 @@ export class Store {
   private readonly imagesDir: string;
   private readonly rulebooksDir: string;
   private readonly videosDir: string;
+  private readonly chunksDir: string;
   // Called with the absolute path of each file just written, so a backup layer
   // (e.g. GCS mirror on Cloud Run) can persist it. Stays out of the read/write
   // hot path's correctness: it is fire-and-forget on the caller's side.
@@ -42,8 +43,9 @@ export class Store {
     this.imagesDir = join(dir, 'images');
     this.rulebooksDir = join(dir, 'rulebooks');
     this.videosDir = join(dir, 'videos');
+    this.chunksDir = join(dir, 'videos', '.chunks');
     this.onWrite = onWrite;
-    for (const d of [this.dir, this.imagesDir, this.rulebooksDir, this.videosDir]) {
+    for (const d of [this.dir, this.imagesDir, this.rulebooksDir, this.videosDir, this.chunksDir]) {
       if (!existsSync(d)) mkdirSync(d, { recursive: true });
     }
   }
@@ -123,6 +125,42 @@ export class Store {
     const p = join(this.videosDir, safe);
     if (!existsSync(p)) return null;
     return readFileSync(p);
+  }
+
+  // --- Chunked video upload ------------------------------------------------
+  // A video larger than Cloud Run's 32 MiB per-request cap is uploaded in pieces.
+  // Each chunk lands in data/videos/.chunks/<uploadId>/<index>.part; on finalize
+  // the parts are concatenated (in index order) into one hosted video.
+
+  /** Write one chunk of an in-progress upload to its part file. */
+  writeVideoChunk(uploadId: string, index: number, bytes: Uint8Array): void {
+    const safe = uploadId.replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!safe || !Number.isInteger(index) || index < 0) throw new Error('invalid chunk');
+    const dir = join(this.chunksDir, safe);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${index}.part`), Buffer.from(bytes));
+  }
+
+  /**
+   * Concatenate an upload's chunks (in index order) into a single hosted video and
+   * remove the temp parts. Returns the served url, or undefined when no chunks exist.
+   */
+  assembleVideoChunks(uploadId: string, ext = 'mp4'): string | undefined {
+    const safe = uploadId.replace(/[^a-zA-Z0-9_-]/g, '');
+    const dir = join(this.chunksDir, safe);
+    if (!safe || !existsSync(dir)) return undefined;
+    const parts = readdirSync(dir)
+      .filter((f) => f.endsWith('.part'))
+      .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+    if (parts.length === 0) return undefined;
+    const safeExt = /^[a-z0-9]+$/i.test(ext) ? ext.toLowerCase() : 'mp4';
+    const name = `${randomUUID()}.${safeExt}`;
+    const out = join(this.videosDir, name);
+    // Append part by part so the whole video is never held in memory at once.
+    writeFileSync(out, Buffer.alloc(0));
+    for (const p of parts) appendFileSync(out, readFileSync(join(dir, p)));
+    rmSync(dir, { recursive: true, force: true });
+    return `/api/videos/${name}`;
   }
 
   saveReview(review: StoredReview): void {
