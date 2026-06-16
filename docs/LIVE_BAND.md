@@ -59,12 +59,12 @@ Adjudicator: deadlock, escalating
 MODEL_MODE=vertex pnpm agents
 ```
 
-This connects the 17-agent cast to band.ai and keeps the process alive. Each agent needs its own `PREFIX_AGENT_ID` / `PREFIX_API_KEY` in `.env` (one prefix per role: `CONDUCTOR`, `CLAIMS_LEAD`, `SCOUT`, `CLAIM_EVIDENCE`, `PRECEDENT`, `DISCLOSURE`, `REG_LEAD`, `US`, `EU`, `LATAM`, `BRAND_LEAD`, `BRAND_VOICE`, `CHANNEL`, `VISUAL`, `MEDIATOR`, `REMEDIATION`, `ADJUDICATOR`).
+By default this connects the **compact 10-agent cast** to band.ai (Claims and Brand are single reviewers; the Regulatory pod keeps its US/EU/LATAM debate), so it fits a 14-agent room. Each connected agent needs its own `PREFIX_AGENT_ID` / `PREFIX_API_KEY` in `.env`. The 10 prefixes used: `CONDUCTOR`, `CLAIMS_LEAD` (the solo Claims Reviewer), `REG_LEAD`, `US`, `EU`, `LATAM`, `BRAND_LEAD` (the solo Brand Reviewer), `MEDIATOR`, `REMEDIATION`, `ADJUDICATOR`. (The full 17-agent cast adds `SCOUT`, `CLAIM_EVIDENCE`, `PRECEDENT`, `DISCLOSURE`, `BRAND_VOICE`, `CHANNEL`, `VISUAL`; drop `compact` in `src/run/agents.ts` to use it.)
 
 Then in `app.band.ai`:
 
 1. Create a room.
-2. Add the agents plus yourself as the human reviewer. A room holds 14 agents plus you, and the cast is 17, so add the 14 core agents: Conductor, Risk Adjudicator, the three pod leads (Claims Lead, Reg Lead, Brand Lead), all three regional reviewers (US, EU, LATAM), Claim & Evidence, Disclosure, Brand Voice, Visual, Mediator, Remediation. Scout, Precedent and Channel Fit are optional extras if your plan allows more than 14. Each pod just needs its lead and at least one member, so the review still concludes.
+2. Add the 10 agents plus yourself as the human reviewer (the Compliance Lead): Conductor, Risk Adjudicator, Claims Reviewer, Reg Lead, US Reviewer, EU Reviewer, LATAM Reviewer, Brand Reviewer, Mediator, Remediation.
 3. Post `@Conductor review <campaign name>`.
 
 `MODEL_MODE=vertex` routes every agent through Gemini on Vertex: one GCP credential, no AIML key, no AWS / Bedrock.

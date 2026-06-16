@@ -91,6 +91,9 @@ async function main(): Promise<void> {
   const getPrecedents = () => store.listPrecedents().slice(-6).map((p) => `${p.regions.join('/')}: ${p.decision}`);
 
   const transport = new CredentialedTransport(new RealBandTransport());
+  // Compact cast (10 agents): Claims and Brand are single solo reviewers, the
+  // Regulatory pod keeps its US/EU/LATAM debate. Fits a 14-agent Band.ai room with
+  // headroom. Drop `compact` to connect the full 17-agent cast.
   await connectPodBoardAgents(transport, {
     brand,
     rulebooks: { us: usRules, eu: euRules, latam: latamRules },
@@ -98,10 +101,11 @@ async function main(): Promise<void> {
     lookupCampaign,
     getRulebook,
     getPrecedents,
+    compact: true,
   });
 
   console.log(
-    'Agents connected to band.ai. In the room, @mention the Conductor with a marketing asset. Ctrl+C to stop.',
+    'Compact cast connected to band.ai (10 agents). In the room, @mention the Conductor with a campaign. Ctrl+C to stop.',
   );
 
   // Live spend readout: print the running estimate (Bedrock + Vertex + Featherless

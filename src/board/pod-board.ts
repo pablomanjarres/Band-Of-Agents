@@ -41,7 +41,55 @@ export interface PodBoardConfig {
   getRulebook?: (region: string) => Rulebook | undefined;
   /** Recent human-ruling precedents fed into the region reviewers' prompts. */
   getPrecedents?: () => string[];
+  /**
+   * Compact cast: collapse the Claims and Brand pods to a single solo reviewer each
+   * (one agent that reviews and files its pod finding), keeping the Regulatory pod's
+   * debate multi-agent. Takes the cast from 17 agents to 10, to fit a smaller Band.ai
+   * room. Default is the full cast.
+   */
+  compact?: boolean;
 }
+
+// Findings schema for the solo (compact) pod reviewers.
+const FINDINGS_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['findings'],
+  properties: {
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['category', 'severity', 'claim', 'rationale'],
+        properties: {
+          category: { type: 'string' },
+          severity: { type: 'string', enum: ['block', 'warn', 'info'] },
+          claim: { type: 'string' },
+          rationale: { type: 'string' },
+          ruleId: { type: 'string' },
+          requiredDisclosure: { type: ['string', 'null'] },
+        },
+      },
+    },
+  },
+} as const;
+
+// One solo reviewer carries the whole Claims pod's concerns: evidence, precedent,
+// and required disclosures.
+const CLAIMS_SOLO_SYSTEM = [
+  'You are the Claims reviewer for a marketing-compliance board. This is a demo, NOT legal advice.',
+  'Check every claim in the asset against its own evidence: flag claims unsupported by the asset substantiation, claims that need a disclosure (put the exact disclosure text in requiredDisclosure), and note relevant precedent as info findings. Quote the exact offending claim span.',
+  'Return JSON {"findings":[{"category","severity":"block"|"warn"|"info","claim","rationale","ruleId"?,"requiredDisclosure"?}]}. If every claim is supported, return {"findings":[]}.',
+].join('\n\n');
+
+// One solo reviewer carries the whole Brand pod's concerns: voice, channel, visual.
+const brandSoloSystem = (brand: BrandDna): string =>
+  [
+    'You are the Brand reviewer for a marketing-compliance board.',
+    `Check the asset against the brand DNA: off-voice or forbidden phrasing, channel and format fit, and visual/image compliance. Brand voice: ${brand.voice.join(', ')}. Forbidden phrases: ${brand.forbiddenPhrases.join(', ')}. Quote the exact offending span.`,
+    'Return JSON {"findings":[{"category","severity":"block"|"warn"|"info","claim","rationale","ruleId"?}]}. If on-brand, return {"findings":[]}.',
+  ].join('\n\n');
 
 // Connects the full pods -> board -> spine cast to any transport (fake or real).
 export async function connectPodBoardAgents(t: BandTransport, cfg: PodBoardConfig): Promise<void> {
@@ -51,12 +99,16 @@ export async function connectPodBoardAgents(t: BandTransport, cfg: PodBoardConfi
 
   await t.connectAgent({ agentId: 'cond', name: 'Conductor', handle: '@conductor', onMessage: makeConductor({ podLeadHandles: ['@claims-lead', '@reg-lead', '@brand-lead'], primeHandles: ['@remediation'], hub, ...(cfg.lookupCampaign ? { lookupCampaign: cfg.lookupCampaign } : {}) }) });
 
-  // Claims pod
-  await t.connectAgent({ agentId: 'claimslead', name: 'Claims Lead', handle: '@claims-lead', onMessage: makePodLead({ pod: 'claims', members: ['@scout', '@claim-evidence', '@precedent', '@disclosure'], memberKeys: ['scout', 'claim-evidence', 'precedent', 'disclosure'], reportToHandle: '@adjudicator', debate: false, hub }) });
-  await t.connectAgent({ agentId: 'scout', name: 'Scout', handle: '@scout', onMessage: makeScout(m.scout, hub) });
-  await t.connectAgent({ agentId: 'ce', name: 'Claim & Evidence', handle: '@claim-evidence', onMessage: makeClaimEvidence(m.claim, hub) });
-  await t.connectAgent({ agentId: 'prec', name: 'Precedent', handle: '@precedent', onMessage: makePrecedent(m.precedent, hub) });
-  await t.connectAgent({ agentId: 'disc', name: 'Disclosure', handle: '@disclosure', onMessage: makeDisclosure(m.disclosure, hub) });
+  // Claims pod: full (lead + 4 members) or, when compact, one solo reviewer.
+  if (cfg.compact) {
+    await t.connectAgent({ agentId: 'claimslead', name: 'Claims Reviewer', handle: '@claims-lead', onMessage: makePodLead({ pod: 'claims', members: [], memberKeys: [], reportToHandle: '@adjudicator', debate: false, hub, solo: { model: m.claim, system: CLAIMS_SOLO_SYSTEM, jsonSchema: FINDINGS_JSON_SCHEMA } }) });
+  } else {
+    await t.connectAgent({ agentId: 'claimslead', name: 'Claims Lead', handle: '@claims-lead', onMessage: makePodLead({ pod: 'claims', members: ['@scout', '@claim-evidence', '@precedent', '@disclosure'], memberKeys: ['scout', 'claim-evidence', 'precedent', 'disclosure'], reportToHandle: '@adjudicator', debate: false, hub }) });
+    await t.connectAgent({ agentId: 'scout', name: 'Scout', handle: '@scout', onMessage: makeScout(m.scout, hub) });
+    await t.connectAgent({ agentId: 'ce', name: 'Claim & Evidence', handle: '@claim-evidence', onMessage: makeClaimEvidence(m.claim, hub) });
+    await t.connectAgent({ agentId: 'prec', name: 'Precedent', handle: '@precedent', onMessage: makePrecedent(m.precedent, hub) });
+    await t.connectAgent({ agentId: 'disc', name: 'Disclosure', handle: '@disclosure', onMessage: makeDisclosure(m.disclosure, hub) });
+  }
 
   // Regulatory pod (debates)
   await t.connectAgent({ agentId: 'reglead', name: 'Reg Lead', handle: '@reg-lead', onMessage: makePodLead({ pod: 'regulatory', members: ['@us-reviewer', '@eu-reviewer', '@latam-reviewer'], memberKeys: ['US', 'EU', 'LATAM'], reportToHandle: '@adjudicator', debate: true, hub }) });
@@ -65,11 +117,15 @@ export async function connectPodBoardAgents(t: BandTransport, cfg: PodBoardConfi
   await t.connectAgent({ agentId: 'eu', name: 'EU Reviewer', handle: '@eu-reviewer', onMessage: makeRegionReviewer({ region: 'EU', reviewerName: 'EU Reviewer', rulebook: cfg.rulebooks.eu, brand: cfg.brand, model: m.eu, reportToHandle: '@reg-lead', getRulebook: () => cfg.getRulebook?.('EU') ?? cfg.rulebooks.eu, hub, ...precedents }) });
   await t.connectAgent({ agentId: 'latam', name: 'LATAM Reviewer', handle: '@latam-reviewer', onMessage: makeRegionReviewer({ region: 'LATAM', reviewerName: 'LATAM Reviewer', rulebook: cfg.rulebooks.latam, brand: cfg.brand, model: m.latam, reportToHandle: '@reg-lead', getRulebook: () => cfg.getRulebook?.('LATAM') ?? cfg.rulebooks.latam, hub, ...precedents }) });
 
-  // Brand pod
-  await t.connectAgent({ agentId: 'brandlead', name: 'Brand Lead', handle: '@brand-lead', onMessage: makePodLead({ pod: 'brand', members: ['@brand-voice', '@channel', '@visual'], memberKeys: ['brand-voice', 'channel', 'visual'], reportToHandle: '@adjudicator', debate: false, hub }) });
-  await t.connectAgent({ agentId: 'bv', name: 'Brand Voice', handle: '@brand-voice', onMessage: makeBrandVoice(m.brand, hub) });
-  await t.connectAgent({ agentId: 'ch', name: 'Channel Fit', handle: '@channel', onMessage: makeChannel(m.channel, hub) });
-  await t.connectAgent({ agentId: 'vis', name: 'Visual', handle: '@visual', onMessage: makeVisual(m.visual, hub) });
+  // Brand pod: full (lead + 3 members) or, when compact, one solo reviewer.
+  if (cfg.compact) {
+    await t.connectAgent({ agentId: 'brandlead', name: 'Brand Reviewer', handle: '@brand-lead', onMessage: makePodLead({ pod: 'brand', members: [], memberKeys: [], reportToHandle: '@adjudicator', debate: false, hub, solo: { model: m.brand, system: brandSoloSystem(cfg.brand), jsonSchema: FINDINGS_JSON_SCHEMA } }) });
+  } else {
+    await t.connectAgent({ agentId: 'brandlead', name: 'Brand Lead', handle: '@brand-lead', onMessage: makePodLead({ pod: 'brand', members: ['@brand-voice', '@channel', '@visual'], memberKeys: ['brand-voice', 'channel', 'visual'], reportToHandle: '@adjudicator', debate: false, hub }) });
+    await t.connectAgent({ agentId: 'bv', name: 'Brand Voice', handle: '@brand-voice', onMessage: makeBrandVoice(m.brand, hub) });
+    await t.connectAgent({ agentId: 'ch', name: 'Channel Fit', handle: '@channel', onMessage: makeChannel(m.channel, hub) });
+    await t.connectAgent({ agentId: 'vis', name: 'Visual', handle: '@visual', onMessage: makeVisual(m.visual, hub) });
+  }
 
   // Board resolvers
   await t.connectAgent({ agentId: 'med', name: 'Mediator', handle: '@mediator', onMessage: makeMediator({ model: m.mediator, reportToHandle: '@adjudicator', hub }) });

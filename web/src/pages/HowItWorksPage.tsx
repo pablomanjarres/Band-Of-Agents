@@ -80,9 +80,9 @@ const STEPS: { n: string; title: string; body: string; example: string; kind: Ex
   },
   {
     n: '5',
-    title: 'Each pod deliberates in parallel',
-    body: 'Every pod lead delegates to its members (Claims: scout, evidence, precedent, disclosure; Regulatory: US/EU/LATAM; Brand: voice, channel, visual), who perceive the media and file findings.',
-    example: 'Claims Lead: claims pod deliberating (4 members)',
+    title: 'Each pod reviews in parallel',
+    body: 'The Regulatory lead delegates to the US, EU and LATAM reviewers; the Claims and Brand reviewers each review on their own. All file findings to the board.',
+    example: 'Claims Reviewer: claims pod filed: 2 findings',
     kind: 'auto',
   },
   {
@@ -123,8 +123,8 @@ const AGENTS: { name: string; role: string; when: string; tone: 'accent' | 'warn
     tone: 'accent',
   },
   {
-    name: 'Claims pod',
-    role: 'Lead plus Scout, Claim & Evidence, Precedent and Disclosure. Maps the risky claims, tests them against the evidence and prior rulings, and drafts any required disclosures.',
+    name: 'Claims reviewer',
+    role: 'Checks every claim against the evidence: flags unsupported claims, weighs prior rulings, and drafts any required disclosures.',
     when: 'Auto',
     tone: 'accent',
   },
@@ -135,8 +135,8 @@ const AGENTS: { name: string; role: string; when: string; tone: 'accent' | 'warn
     tone: 'accent',
   },
   {
-    name: 'Brand pod',
-    role: 'Lead plus Brand Voice, Channel Fit and Visual. Checks tone, format and imagery against the brand DNA.',
+    name: 'Brand reviewer',
+    role: 'Checks voice, channel fit and imagery against the brand DNA.',
     when: 'Auto',
     tone: 'accent',
   },
@@ -172,19 +172,16 @@ const WHEN_TONE: Record<'accent' | 'warn' | 'human', string> = {
   human: 'bg-human/10 text-human ring-human/25',
 };
 
-// A Band.ai room holds 14 agents plus you, and the full cast is 17. These are the
-// 14 to add: every pod keeps its lead, the regulatory debate keeps all 3 regions,
-// and the spine + board are intact. Each pod needs its lead and at least one member.
+// The compact 10-agent cast to add to a Band.ai room (the room cap is 14 + you).
+// Claims and Brand are single reviewers; the Regulatory pod keeps its US/EU/LATAM
+// debate. The full 17-agent cast still exists, this just fits a room with headroom.
 const ROOM_AGENTS: { group: string; members: string[] }[] = [
   { group: 'Spine', members: ['Conductor', 'Risk Adjudicator'] },
-  { group: 'Claims pod', members: ['Claims Lead', 'Claim & Evidence', 'Disclosure'] },
+  { group: 'Claims', members: ['Claims Reviewer'] },
   { group: 'Regulatory pod', members: ['Reg Lead', 'US Reviewer', 'EU Reviewer', 'LATAM Reviewer'] },
-  { group: 'Brand pod', members: ['Brand Lead', 'Brand Voice', 'Visual'] },
+  { group: 'Brand', members: ['Brand Reviewer'] },
   { group: 'Board', members: ['Mediator', 'Remediation'] },
 ];
-// The remaining 3 of the 17. They add depth but the pods run without them, so leave
-// them out unless your plan allows more than 14 agents in a room.
-const OPTIONAL_AGENTS = ['Scout', 'Precedent', 'Channel Fit'];
 
 const codeChip = 'rounded bg-bg-soft px-1.5 py-0.5 font-mono text-[12px] text-accent ring-1 ring-inset ring-border';
 
@@ -321,8 +318,9 @@ export function HowItWorksPage() {
           ))}
         </div>
         <p className="mx-auto mt-5 max-w-2xl text-center text-xs leading-relaxed text-faint">
-          Seventeen agents in all, and fourteen fit a room plus you: three pods filing to a shared board, with a Risk
-          Adjudicator on the decision spine. The portal&apos;s quick Run review uses a lighter Coordinator and Reconcile cast for a fast per-region verdict.
+          Ten agents in the compact cast: Claims and Brand are single reviewers, the Regulatory pod keeps its
+          US/EU/LATAM debate, all filing to a shared board with a Risk Adjudicator on the spine (the full 17-agent
+          cast is still available). The portal&apos;s quick Run review uses a lighter Coordinator and Reconcile cast for a fast per-region verdict.
         </p>
       </section>
 
@@ -330,12 +328,12 @@ export function HowItWorksPage() {
       <section>
         <div className="mb-6 text-center">
           <p className="eyebrow mb-2">Set up the room</p>
-          <h2 className="font-display text-3xl text-fg">Add these 14 agents to your Band.ai room</h2>
+          <h2 className="font-display text-3xl text-fg">Add these 10 agents to your Band.ai room</h2>
           <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-            A Band.ai room holds 14 agents plus you. Connect the cast with{' '}
-            <code className={codeChip}>{'MODEL_MODE=vertex pnpm agents'}</code>, add the 14 below to the room, and
-            join as the Compliance Lead yourself. Every pod keeps its lead and at least one member, so the review
-            still concludes.
+            A Band.ai room holds 14 agents plus you, so the cast is compressed to 10: Claims and Brand are single
+            reviewers, and the Regulatory pod keeps its three-region debate. Connect them with{' '}
+            <code className={codeChip}>{'MODEL_MODE=vertex pnpm agents'}</code>, add the 10 below, and join as the
+            Compliance Lead yourself.
           </p>
         </div>
         <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -362,11 +360,7 @@ export function HowItWorksPage() {
             </ul>
           </div>
         </div>
-        <p className="mx-auto mt-4 max-w-2xl text-center text-xs text-faint">
-          Optional, only if your plan allows more than 14 agents: {OPTIONAL_AGENTS.join(', ')}. They add depth, but
-          the pods run without them.
-        </p>
-        <p className="mx-auto mt-3 max-w-2xl text-center text-sm text-muted">
+        <p className="mx-auto mt-5 max-w-2xl text-center text-sm text-muted">
           Then post <code className={codeChip}>{'@Conductor review <campaign name>'}</code> in the room. You only
           ever tag the Conductor; it runs the rest.
         </p>

@@ -1,6 +1,7 @@
 // src/agents/pod-lead.ts
 import type { AgentHandler, Participant, RoomTools } from '../band/types';
-import type { Finding } from '../domain/types';
+import type { ContentAsset, Finding } from '../domain/types';
+import type { ModelClient } from '../models/client';
 import type { ConflictItem, PodFinding } from '../domain/board';
 import type { PodHub } from '../board/pod-hub';
 import { findParticipant, matchParticipant } from './handles';
@@ -13,6 +14,12 @@ export interface PodLeadOptions {
   reportToHandle: string;   // '@adjudicator'
   debate?: boolean;         // run a one-round rebuttal when a conflict is detected
   hub?: PodHub;             // when set, read the asset from the hub and dispatch plain English
+  /**
+   * Solo mode: the pod has no members. Instead of recruiting, the lead reviews the
+   * asset itself in one model call and files the pod finding. Used to compress a pod
+   * (e.g. Claims, Brand) down to a single agent for a smaller Band.ai room.
+   */
+  solo?: { model: ModelClient; system: string; jsonSchema: unknown };
 }
 
 interface MemberReply { key: string; findings: Finding[] }
@@ -81,6 +88,52 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
     expectedKeys.delete(roomId);
   };
 
+  const topPodFindings = (findings: Finding[]): string =>
+    findings
+      .slice(0, 2)
+      .map((f) => {
+        const s = f.rationale || f.category || f.ruleId || 'issue';
+        return s.length > 90 ? `${s.slice(0, 87)}...` : s;
+      })
+      .join('; ');
+
+  // Solo mode: the lead reviews the asset itself (one model call) and files the pod
+  // finding, with no members. Graceful on a model error so the spine still gets a
+  // finding and the review concludes.
+  const reviewSoloAndFile = async (roomId: string, tools: RoomTools, participants: Participant[], asset: ContentAsset): Promise<void> => {
+    await tools.sendEvent(`${opts.pod} pod reviewing`, 'recruited', { pod: opts.pod });
+    let findings: Finding[] = [];
+    try {
+      const res = await opts.solo!.model.complete({
+        system: opts.solo!.system,
+        messages: [{ role: 'user', content: `Asset (JSON):\n${JSON.stringify(asset, null, 2)}` }],
+        jsonSchema: opts.solo!.jsonSchema,
+      });
+      const payload = res.json && typeof res.json === 'object' ? (res.json as Record<string, unknown>) : {};
+      findings = (Array.isArray(payload['findings']) ? payload['findings'] : []) as Finding[];
+    } catch (err) {
+      console.warn(`[${opts.pod}] solo review failed (continuing):`, (err as Error)?.message ?? err);
+    }
+    const pf: PodFinding = {
+      kind: 'pod-finding',
+      pod: opts.pod,
+      summary: `${opts.pod} pod: ${findings.length} findings, 0 conflict(s)`,
+      findings,
+      conflicts: [],
+    };
+    if (opts.hub) opts.hub.setFinding(roomId, opts.pod, findings);
+    await tools.sendEvent(pf.summary, 'pod-finding', { pod: opts.pod, conflicts: 0 });
+    const target = matchParticipant(participants, opts.reportToHandle, 'agent');
+    if (!target) return;
+    if (opts.hub) {
+      opts.hub.setPodFinding(roomId, opts.pod, pf);
+      const detail = findings.length ? `: ${topPodFindings(findings)}` : '';
+      await tools.sendMessage(`${opts.pod} pod filed: ${findings.length} finding(s), 0 conflict(s)${detail}.`, [{ id: target.id, handle: target.handle }]);
+    } else {
+      await tools.sendMessage(JSON.stringify(pf), [{ id: target.id, handle: target.handle }]);
+    }
+  };
+
   return async (message, tools) => {
     const roomId = message.roomId;
     const participants = await tools.getParticipants();
@@ -101,6 +154,11 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
     if (!isMemberReply) {
       const asset = tryParseAsset(message.content) ?? opts.hub?.asset(roomId);
       if (!asset) return;
+      // Solo pod: review the asset directly and file, with no member recruitment.
+      if (opts.solo) {
+        await reviewSoloAndFile(roomId, tools, participants, asset);
+        return;
+      }
       replies.set(roomId, new Map());
       const present: string[] = [];
       const mentions: Array<{ id: string; handle: string }> = [];
