@@ -207,8 +207,8 @@ async function runSingleDemo(): Promise<void> {
   }
 }
 
-// Opt-in pods -> board -> spine run: npm run local pods
-async function runPodsDemo(): Promise<void> {
+// Opt-in pods -> board -> spine run: npm run local pods (add "compact" for the 10-agent cast)
+async function runPodsDemo(compact = false): Promise<void> {
   const brand = loadBrandDna(`${ASSETS}brand-dna.json`);
   const usRules = loadRulebook(`${ASSETS}rulebook.us.json`);
   const euRules = loadRulebook(`${ASSETS}rulebook.eu.json`);
@@ -243,7 +243,7 @@ async function runPodsDemo(): Promise<void> {
     },
   });
   room.addUser('lead', 'Compliance Lead', '@compliance-lead');
-  await connectPodBoardAgents(room, { brand, rulebooks: { us: usRules, eu: euRules, latam: latamRules }, models });
+  await connectPodBoardAgents(room, { brand, rulebooks: { us: usRules, eu: euRules, latam: latamRules }, models, ...(compact ? { compact: true } : {}) });
 
   console.log(`\n# Pods -> board -> spine review (local fake-Band demo, NOT legal advice)`);
   console.log(`# Asset: ${asset.id}; markets US/EU/LATAM + brand consistency\n`);
@@ -274,7 +274,7 @@ async function main(): Promise<void> {
   if (process.argv.includes('single')) {
     await runSingleDemo();
   } else if (process.argv.includes('pods')) {
-    await runPodsDemo();
+    await runPodsDemo(process.argv.includes('compact'));
   } else {
     await runCampaignDemo();
   }
