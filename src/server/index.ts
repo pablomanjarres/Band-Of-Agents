@@ -26,6 +26,7 @@ import { Advertisement as AdvertisementSchema, Campaign as CampaignSchema, Conte
 import type { Advertisement, Campaign, ContentAsset, Material, Rulebook } from '../domain/types';
 import { NewArtifact as NewArtifactSchema } from '../domain/artifact';
 import { BoardSession, realBoardModels, realPerceptionModels, type BoardModels } from '../board/session';
+import { transcribeVideoMaterial } from '../perception/transcribe';
 import { PodBoardSession } from '../board/pod-session';
 import { realPodBoardModels } from '../board/pod-board';
 import { type ModelClient, type SttClient } from '../models/client';
@@ -301,6 +302,36 @@ function addMaterialToCampaign(camp: Campaign, material: Material, advertisement
     ad.id === targetId ? { ...ad, materials: [...ad.materials, material] } : ad,
   );
   return { ...camp, advertisements };
+}
+
+/**
+ * Run the upload-time transcription step on one material and PERSIST the resulting
+ * perception (transcript + sampled keyframes) back into the stored campaign, so
+ * GET /api/campaigns/:id returns it and the material detail can show the
+ * transcript. Reuses the same perception config a review uses (so the STT client
+ * and the videoUrl->local-file resolver match), and re-reads the campaign before
+ * writing so a concurrent edit is not clobbered. Fully graceful: with no STT
+ * provider, no ffmpeg, or no audio track the transcript is just left empty and the
+ * campaign is still (re)saved with the videoUrl intact. Returns true when a
+ * non-empty transcript was produced. Never throws.
+ */
+async function attachTranscript(campaignId: string, materialId: string, campWithVideo: Campaign): Promise<boolean> {
+  try {
+    const material = allMaterials(campWithVideo).find((m) => m.id === materialId);
+    if (!material) return false;
+    const perception = await transcribeVideoMaterial(material, {
+      ...(perceptionConfig.stt ? { sttModel: perceptionConfig.stt } : {}),
+      resolveVideoPath: perceptionConfig.resolveVideoPath,
+      hostImage: (u) => store.hostImage(u) ?? u,
+    });
+    // Re-read so we patch the latest persisted campaign, then save the perception.
+    const latest = store.getCampaign(campaignId) ?? campWithVideo;
+    store.saveCampaign(patchMaterial(latest, materialId, (m) => ({ ...m, perception })));
+    return Boolean(perception.transcript && perception.transcript.trim().length > 0);
+  } catch (err) {
+    console.warn('[videos] transcription failed (continuing):', (err as Error)?.message ?? String(err));
+    return false;
+  }
 }
 
 function makeOnEvent(record: ReviewRecord): (event: BoardEvent) => void {
@@ -611,9 +642,13 @@ app.get('/api/videos/:name', (c) => {
 
 // Multipart video upload. Hosts the file under data/videos/ and returns its served
 // url. When campaignId + materialId are included (form fields), the uploaded url is
-// also attached to that material's videoUrl so the next campaign review perceives
-// it. The actual perception (frames + vision + STT) runs server-side when a review
-// is started and streams 'perceiving' over the existing SSE.
+// attached to that material's videoUrl AND the video is transcribed at upload time
+// (audio extracted with ffmpeg, run through the STT client), persisting
+// perception.transcript on the material so the material detail can show it right
+// away. The review-time perception pre-pass (frames + vision + STT) still runs when
+// a review is started and streams 'perceiving' over the existing SSE; it can refine
+// this transcript. Transcription is fully graceful: no STT provider, no ffmpeg, or
+// no audio track simply leaves the transcript empty and the upload still succeeds.
 app.post('/api/videos', async (c) => {
   let form: FormData;
   try {
@@ -629,11 +664,22 @@ app.post('/api/videos', async (c) => {
 
   const campaignId = typeof form.get('campaignId') === 'string' ? (form.get('campaignId') as string) : '';
   const materialId = typeof form.get('materialId') === 'string' ? (form.get('materialId') as string) : '';
+  let transcribed = false;
   if (campaignId && materialId) {
     const camp = store.getCampaign(campaignId);
-    if (camp) store.saveCampaign(patchMaterial(camp, materialId, (m) => ({ ...m, videoUrl })));
+    if (camp) {
+      // Attach the hosted url first so the material is durable even if the
+      // (best-effort) transcription below fails or finds no audio.
+      const withVideo = patchMaterial(camp, materialId, (m) => ({ ...m, videoUrl }));
+      store.saveCampaign(withVideo);
+      // Transcribe at upload time so the material detail can show a transcript
+      // without waiting for a review. Every step is graceful: no STT provider, no
+      // ffmpeg, or no audio track simply leaves the transcript empty. Re-read the
+      // campaign before persisting so a concurrent edit is not clobbered.
+      transcribed = await attachTranscript(campaignId, materialId, withVideo);
+    }
   }
-  return c.json({ videoUrl, ...(campaignId ? { campaignId } : {}), ...(materialId ? { materialId } : {}) });
+  return c.json({ videoUrl, ...(campaignId ? { campaignId } : {}), ...(materialId ? { materialId } : {}), transcribed });
 });
 
 // Multipart image upload. Hosts the file under data/images/ and returns its served

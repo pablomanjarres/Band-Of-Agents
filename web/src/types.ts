@@ -334,6 +334,8 @@ export interface VideoUploadResponse {
   campaignId?: string;
   advertisementId?: string;
   materialId?: string;
+  /** True when a non-empty transcript was produced and persisted on the material. */
+  transcribed?: boolean;
 }
 
 /** Response for POST /api/images (multipart upload). */

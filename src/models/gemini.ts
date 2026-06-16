@@ -1,5 +1,5 @@
 import { GoogleGenAI, Modality, type Content, type Part } from '@google/genai';
-import type { CompleteRequest, CompleteResult, ImageRequest, ImageResult, Msg, ModelClient } from './client';
+import type { CompleteRequest, CompleteResult, ImageRequest, ImageResult, Msg, ModelClient, SttClient, SttRequest, SttResult } from './client';
 import { hasImage } from './client';
 import { withRetry } from './retry';
 
@@ -100,5 +100,67 @@ export class GeminiModelClient implements ModelClient {
       if (typeof data === 'string' && data.length > 0) return { b64: data };
     }
     return {};
+  }
+}
+
+
+export interface GeminiSttOptions {
+  model: string;
+  vertexai?: boolean;
+  project?: string;
+  location?: string;
+  apiKey?: string;
+}
+
+// Speech-to-text via Gemini. Gemini is multimodal, so audio bytes can be sent as
+// an inlineData part next to a "transcribe verbatim" instruction and the model
+// returns the spoken words as text. This is the dev/Vertex transcription path
+// (Bedrock has no Whisper endpoint), so MODEL_MODE=dev gets a working STT client
+// even with no AIML key. It shares the same auth seam as GeminiModelClient
+// (Vertex ADC or a Gemini API key) and degrades to an empty transcript on any
+// error, so a missing key / unreachable provider never throws.
+export class GeminiSttClient implements SttClient {
+  readonly model: string;
+  private readonly ai: GoogleGenAI;
+
+  constructor(opts: GeminiSttOptions) {
+    this.model = opts.model;
+    const useVertex = opts.vertexai ?? (process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true');
+    this.ai = useVertex
+      ? new GoogleGenAI({
+          vertexai: true,
+          project: opts.project ?? process.env.GOOGLE_CLOUD_PROJECT,
+          location: opts.location ?? process.env.GOOGLE_CLOUD_LOCATION ?? 'us-central1',
+        })
+      : new GoogleGenAI({ apiKey: opts.apiKey ?? process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY });
+  }
+
+  async transcribe(req: SttRequest): Promise<SttResult> {
+    // Empty audio means nothing to transcribe: return an empty transcript rather
+    // than spending a call (mirrors the perception caller passing zero bytes when
+    // no local file resolved).
+    if (!req.audio || req.audio.byteLength === 0) return { text: '' };
+    const data = Buffer.from(req.audio).toString('base64');
+    const mimeType = req.contentType ?? 'audio/mp4';
+    try {
+      const res = await withRetry(() =>
+        this.ai.models.generateContent({
+          model: this.model,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: 'Transcribe this audio verbatim. Return only the spoken words as plain text, with no commentary, labels, or timestamps. If there is no speech, return an empty string.' },
+                { inlineData: { data, mimeType } },
+              ],
+            },
+          ],
+        }),
+      );
+      const text = res.text ?? '';
+      return { text: typeof text === 'string' ? text.trim() : '' };
+    } catch {
+      return { text: '' };
+    }
   }
 }

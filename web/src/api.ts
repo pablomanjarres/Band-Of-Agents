@@ -210,6 +210,33 @@ export async function uploadVideo(
   return asJson<VideoUploadResponse>(res);
 }
 
+// Re-run upload-time transcription for a material that ALREADY has a hosted video
+// but no transcript yet. There is no separate transcribe route: the server only
+// transcribes inside POST /api/videos (with a materialId), so we fetch the material's
+// existing video bytes back from its same-origin url and re-post them with the
+// campaign/material ids. The server re-attaches the (unchanged) videoUrl and runs the
+// graceful STT pass, persisting perception.transcript. The caller then refreshes the
+// campaign (GET /api/campaigns/:id) to pick it up. Returns transcribed:boolean.
+export async function transcribeMaterial(opts: {
+  campaignId: string;
+  advertisementId?: string;
+  materialId: string;
+  videoUrl: string;
+}): Promise<VideoUploadResponse> {
+  const videoRes = await fetch(opts.videoUrl);
+  if (!videoRes.ok) {
+    throw new Error(`Could not read the stored video (${videoRes.status}).`);
+  }
+  const blob = await videoRes.blob();
+  const name = opts.videoUrl.split('/').pop() || 'video.mp4';
+  const file = new File([blob], name, { type: blob.type || 'video/mp4' });
+  return uploadVideo(file, {
+    campaignId: opts.campaignId,
+    ...(opts.advertisementId ? { advertisementId: opts.advertisementId } : {}),
+    materialId: opts.materialId,
+  });
+}
+
 // Upload an image file (multipart). The server hosts it under data/images/ and
 // returns the served url, used as a material's imageUrl / perception frame.
 export async function uploadImage(file: File): Promise<ImageUploadResponse> {

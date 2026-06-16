@@ -187,6 +187,9 @@ export function CampaignDetailPage() {
   const detailMaterial = detailMaterialId
     ? campaign.advertisements.flatMap((a) => a.materials).find((m) => m.id === detailMaterialId)
     : undefined;
+  const detailAdId = detailMaterialId
+    ? campaign.advertisements.find((a) => a.materials.some((m) => m.id === detailMaterialId))?.id
+    : undefined;
   const detailLane = detailMaterialId ? board.lanes[detailMaterialId] : undefined;
   const debateLane = debateMaterialId ? board.lanes[debateMaterialId] : undefined;
 
@@ -344,9 +347,15 @@ export function CampaignDetailPage() {
         <MaterialDetail
           material={detailMaterial}
           {...(detailLane ? { board: detailLane.board } : {})}
+          campaignId={campaign.id}
+          {...(detailAdId ? { advertisementId: detailAdId } : {})}
           reviewed={reviewing}
           onClose={() => setDetailMaterialId(undefined)}
           onViewDebate={() => setDebateMaterialId(detailMaterial.id)}
+          onTranscribed={async () => {
+            const refreshed = await getCampaign(campaign.id);
+            refreshCampaign(refreshed.campaign);
+          }}
         />
       ) : null}
 

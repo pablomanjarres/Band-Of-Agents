@@ -1,7 +1,7 @@
 import type { ModelClient, SttClient } from './client';
 import { AimlModelClient, AimlSttClient, DEFAULT_STT_MODEL } from './aiml';
 import { BedrockModelClient } from './bedrock';
-import { GeminiModelClient } from './gemini';
+import { GeminiModelClient, GeminiSttClient } from './gemini';
 import { FeatherlessModelClient } from './featherless';
 import { meter } from './spend';
 
@@ -59,6 +59,10 @@ const PERCEPTION_STT_AIML = () => process.env.AIML_STT_MODEL ?? DEFAULT_STT_MODE
 // dev-mode (cost-saver) perception models: Gemini sees, Whisper-on-AIML still
 // hears (Bedrock has no Whisper endpoint, so STT stays on AIML when a key exists).
 const PERCEPTION_VISION_DEV = 'gemini-2.5-flash';
+// dev-mode (cost-saver) STT model: Gemini can transcribe audio (inlineData), so a
+// dev run with no AIML key still gets a working STT client (Bedrock has no Whisper
+// endpoint). Env-overridable so the exact Gemini slug can change without a code edit.
+const PERCEPTION_STT_DEV = () => process.env.GEMINI_STT_MODEL ?? 'gemini-2.5-flash';
 
 export function activeMode(): ModelMode {
   return process.env.MODEL_MODE === 'dev' ? 'dev' : 'aiml';
@@ -108,13 +112,20 @@ export function visionModelFor(mode: ModelMode = activeMode()): ModelClient | un
 }
 
 // The speech-to-text client for the perception pre-pass (Whisper-class). AIML is
-// the only transcription endpoint here, so even dev mode uses AIML when a key
-// exists; returns undefined when none is set so STT degrades to a pasted
-// transcript (or none) rather than throwing.
-export function sttClientFor(_mode: ModelMode = activeMode()): SttClient | undefined {
+// the preferred transcription endpoint (a real Whisper model), so it is used in
+// BOTH modes whenever an AIML key exists. In dev mode with no AIML key we fall
+// back to Gemini, which can transcribe audio via an inlineData part (Bedrock has
+// no Whisper endpoint): this keeps a dev run transcribing with only GCP/Gemini
+// auth. In aiml mode with no key there is no STT, so it returns undefined and STT
+// degrades to a pasted transcript (or none) rather than throwing. This mirrors
+// modelFor's graceful provider fallback: the route is described as AIML, the
+// runtime simply degrades to the next reachable provider.
+export function sttClientFor(mode: ModelMode = activeMode()): SttClient | undefined {
   const apiKey = process.env.AIML_API_KEY;
-  if (!apiKey) return undefined;
-  return new AimlSttClient({ apiKey, model: PERCEPTION_STT_AIML() });
+  if (apiKey) return new AimlSttClient({ apiKey, model: PERCEPTION_STT_AIML() });
+  // dev mode, no AIML key: Gemini transcribes (Vertex ADC or a Gemini API key).
+  if (mode === 'dev') return new GeminiSttClient({ model: PERCEPTION_STT_DEV() });
+  return undefined;
 }
 
 // Both perception models in one call, each optional (absent when unreachable) so

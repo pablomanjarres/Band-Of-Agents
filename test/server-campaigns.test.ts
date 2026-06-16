@@ -12,6 +12,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -28,14 +29,36 @@ import type { BoardEvent } from '../src/board/events';
 const DATA_DIR = new URL('../data/', import.meta.url).pathname;
 const CAMPAIGNS_FILE = join(DATA_DIR, 'campaigns.json');
 const IMAGES_DIR = join(DATA_DIR, 'images');
+const VIDEOS_DIR = join(DATA_DIR, 'videos');
+
+// Upload-time transcription needs a real video file with an audio track to extract.
+// Synthesized with ffmpeg; when ffmpeg is absent the transcription assertions
+// self-skip (the upload itself must still succeed, which is asserted unconditionally).
+const hasFfmpeg = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
+let toneMp4: Uint8Array | null = null; // a clip WITH an audio track
+let silentMp4: Uint8Array | null = null; // a clip with NO audio track
+function synthBytes(args: string[]): Uint8Array | null {
+  const out = join(DATA_DIR, `synth-${randomUUID().slice(0, 8)}.mp4`);
+  const r = spawnSync('ffmpeg', ['-y', ...args, out], { stdio: 'ignore' });
+  if (r.status !== 0 || !existsSync(out)) return null;
+  const bytes = new Uint8Array(readFileSync(out));
+  rmSync(out, { force: true });
+  return bytes;
+}
 
 // Snapshot data/campaigns.json + the images dir so the suite never leaks test
 // campaigns into the real seed or strays image files (both are restored after).
 let snapshot: string | null = null;
 let imagesBefore = new Set<string>();
+let videosBefore = new Set<string>();
 beforeAll(() => {
   snapshot = existsSync(CAMPAIGNS_FILE) ? readFileSync(CAMPAIGNS_FILE, 'utf8') : null;
   imagesBefore = new Set(existsSync(IMAGES_DIR) ? readdirSync(IMAGES_DIR) : []);
+  videosBefore = new Set(existsSync(VIDEOS_DIR) ? readdirSync(VIDEOS_DIR) : []);
+  if (hasFfmpeg) {
+    toneMp4 = synthBytes(['-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-f', 'lavfi', '-i', 'color=c=blue:s=320x240:d=1', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac']);
+    silentMp4 = synthBytes(['-f', 'lavfi', '-i', 'color=c=red:s=160x120:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p']);
+  }
 });
 afterAll(() => {
   if (snapshot === null) {
@@ -47,6 +70,12 @@ afterAll(() => {
   if (existsSync(IMAGES_DIR)) {
     for (const f of readdirSync(IMAGES_DIR)) {
       if (!imagesBefore.has(f)) rmSync(join(IMAGES_DIR, f));
+    }
+  }
+  // Remove any video files the upload tests created, keep the rest.
+  if (existsSync(VIDEOS_DIR)) {
+    for (const f of readdirSync(VIDEOS_DIR)) {
+      if (!videosBefore.has(f)) rmSync(join(VIDEOS_DIR, f));
     }
   }
 });
@@ -409,5 +438,77 @@ describe('POST /api/reviews scoped to ONE advertisement (advertisementId)', () =
     const final = await waitForCampaignTerminal(start.id);
     const rollup = final.rollup as { perAdvertisement: Array<{ advertisementId: string }> };
     expect(rollup.perAdvertisement.map((a) => a.advertisementId).sort()).toEqual(['ad-hero', 'ad-promo']);
+  });
+});
+
+
+// --- POST /api/videos: host the upload AND transcribe at upload time ----------
+// In this suite KEY_FREE_LOCAL is on (no AIML key), so the server's perception STT
+// is the deterministic demo StubSttClient. Uploading a real clip WITH an audio
+// track therefore yields a canned transcript that is PERSISTED on the material, so
+// GET /api/campaigns/:id returns it. A clip with NO audio (or no ffmpeg) leaves the
+// transcript empty but the upload still succeeds (graceful degradation).
+
+const DEMO_STUB_TRANSCRIPT =
+  'Feeling run down? Northwind Immune plus helps maintain your immune response so you can feel your best, every day. Nine out of ten users felt the difference in two weeks. As part of a varied, balanced diet and a healthy lifestyle.';
+
+function uploadVideo(bytes: Uint8Array, filename: string, fields: Record<string, string> = {}): Request {
+  const form = new FormData();
+  form.set('video', new File([bytes], filename, { type: 'video/mp4' }));
+  for (const [k, v] of Object.entries(fields)) form.set(k, v);
+  return new Request(`${BASE}/api/videos`, { method: 'POST', body: form });
+}
+
+describe('POST /api/videos hosts the upload and transcribes onto the material', () => {
+  it('attaches videoUrl AND persists perception.transcript (GET /api/campaigns returns it)', async () => {
+    const camp = seedCampaign([{ id: 'ad-a', name: 'Ad A', materials: [material('vid-mat', 'video')] }]);
+    if (!hasFfmpeg || !toneMp4) {
+      // No ffmpeg: at least prove the upload succeeds and attaches the videoUrl.
+      const res = await app.fetch(uploadVideo(new Uint8Array([1, 2, 3, 4]), 'clip.mp4', { campaignId: camp.id, materialId: 'vid-mat' }));
+      expect(res.status).toBe(200);
+      const got = store.getCampaign(camp.id)!;
+      const mat = got.advertisements[0]!.materials.find((m) => m.id === 'vid-mat')!;
+      expect(typeof mat.videoUrl).toBe('string');
+      return;
+    }
+    const res = await app.fetch(uploadVideo(toneMp4, 'clip.mp4', { campaignId: camp.id, materialId: 'vid-mat' }));
+    expect(res.status).toBe(200);
+    const body = await json<{ videoUrl: string; transcribed: boolean }>(res);
+    expect(body.videoUrl).toMatch(/^\/api\/videos\//);
+    expect(body.transcribed).toBe(true);
+
+    // The transcript is PERSISTED: a fresh GET /api/campaigns/:id returns it.
+    const detail = await json<{ campaign: { advertisements: Array<{ materials: Array<{ id: string; videoUrl?: string; perception?: { transcript?: string } }> }> } }>(
+      await app.fetch(req('GET', `/api/campaigns/${camp.id}`)),
+    );
+    const mat = detail.campaign.advertisements[0]!.materials.find((m) => m.id === 'vid-mat')!;
+    expect(mat.videoUrl).toBe(body.videoUrl);
+    expect(mat.perception?.transcript).toBe(DEMO_STUB_TRANSCRIPT);
+  });
+
+  it('a clip with NO audio track persists the videoUrl with an empty transcript (no crash)', async () => {
+    if (!hasFfmpeg || !silentMp4) return;
+    const camp = seedCampaign([{ id: 'ad-a', name: 'Ad A', materials: [material('silent-mat', 'video')] }]);
+    const res = await app.fetch(uploadVideo(silentMp4, 'silent.mp4', { campaignId: camp.id, materialId: 'silent-mat' }));
+    expect(res.status).toBe(200);
+    const body = await json<{ transcribed: boolean }>(res);
+    expect(body.transcribed).toBe(false);
+    const got = store.getCampaign(camp.id)!;
+    const mat = got.advertisements[0]!.materials.find((m) => m.id === 'silent-mat')!;
+    expect(typeof mat.videoUrl).toBe('string'); // upload still succeeded
+    expect(mat.perception?.transcript ?? '').toBe(''); // no audio => empty transcript
+  });
+
+  it('uploads with no campaign/material coordinates still host the video (no transcription)', async () => {
+    const res = await app.fetch(uploadVideo(toneMp4 ?? new Uint8Array([1, 2, 3, 4]), 'loose.mp4'));
+    expect(res.status).toBe(200);
+    const body = await json<{ videoUrl: string; transcribed: boolean }>(res);
+    expect(body.videoUrl).toMatch(/^\/api\/videos\//);
+    expect(body.transcribed).toBe(false); // no material to attach a transcript to
+  });
+
+  it('400s an empty video file', async () => {
+    const res = await app.fetch(uploadVideo(new Uint8Array(0), 'empty.mp4'));
+    expect(res.status).toBe(400);
   });
 });

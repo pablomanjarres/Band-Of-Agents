@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { addMaterial, uploadImage, uploadVideo } from '../api';
+import { addMaterial, getCampaign, uploadImage, uploadVideo } from '../api';
 import type { Campaign, MaterialKind } from '../types';
 import { Dropzone } from './Dropzone';
 
@@ -25,9 +25,15 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
   const [copy, setCopy] = useState('');
   const [claim, setClaim] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
+  // Held so we can re-post the same bytes with the new materialId after the material
+  // is created, which is what triggers the server's upload-time transcription.
+  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [imageUrl, setImageUrl] = useState('');
   const [uploadName, setUploadName] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  // 'transcribing' while the just-added video is being transcribed; the result then
+  // reflects whether a transcript was captured.
+  const [transcribing, setTranscribing] = useState(false);
   const [markets, setMarkets] = useState<string[]>(defaultMarkets);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +48,7 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
     try {
       const res = await uploadVideo(file, { campaignId: campaign.id, advertisementId });
       setVideoUrl(res.videoUrl);
+      setVideoFile(file);
       setUploadName(file.name);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to upload the video.');
@@ -83,7 +90,31 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
         ...(kind === 'video' && videoUrl.trim() ? { videoUrl: videoUrl.trim() } : {}),
         ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}),
       });
-      onAdded(res.campaign);
+
+      // For a freshly added video, transcribe now: the material did not exist when
+      // the file was uploaded, so the server could not attach a transcript yet. Re-post
+      // the held bytes with the new materialId to run the (graceful) upload-time STT,
+      // then re-read the campaign so the material carries perception.transcript. Any
+      // transcription failure is non-fatal: the material is already added.
+      let finalCampaign = res.campaign;
+      if (kind === 'video' && videoFile && res.material.id) {
+        setTranscribing(true);
+        try {
+          await uploadVideo(videoFile, {
+            campaignId: campaign.id,
+            advertisementId,
+            materialId: res.material.id,
+          });
+          const refreshed = await getCampaign(campaign.id);
+          finalCampaign = refreshed.campaign;
+        } catch {
+          // Keep the material; the transcript can still be produced on the next review
+          // or via the manual Transcribe button on the material detail.
+        } finally {
+          setTranscribing(false);
+        }
+      }
+      onAdded(finalCampaign);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add material.');
     } finally {
@@ -108,7 +139,7 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
 
       {/* Real upload: video for video kinds, image for image/banner kinds. */}
       {kind === 'video' ? (
-        <Dropzone accent="violet" accept="video/*" label="Drop a video, or click to choose" hint="perceived (frames + transcript) on the next review" busy={uploading} doneName={uploadName} onFile={handleVideo} />
+        <Dropzone accent="violet" accept="video/*" label="Drop a video, or click to choose" hint="transcribed when added; frames + vision follow on the next review" busy={uploading} doneName={uploadName} onFile={handleVideo} />
       ) : (
         <Dropzone accent="teal" accept="image/*" label="Drop an image, or click to choose" hint="shown in the material and reviewed by the vision pass" busy={uploading} doneName={uploadName} onFile={handleImage} />
       )}
@@ -153,12 +184,18 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
       {error ? <p className="text-sm text-danger">{error}</p> : null}
 
       <div className="flex items-center gap-2">
-        <button type="submit" disabled={saving || uploading} className="btn btn-primary">
-          {saving ? 'Adding…' : 'Add material'}
+        <button type="submit" disabled={saving || uploading || transcribing} className="btn btn-primary">
+          {transcribing ? 'Transcribing…' : saving ? 'Adding…' : 'Add material'}
         </button>
-        <button type="button" onClick={onCancel} className="btn btn-ghost px-4 py-2">
+        <button type="button" onClick={onCancel} disabled={transcribing} className="btn btn-ghost px-4 py-2">
           Cancel
         </button>
+        {transcribing ? (
+          <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-faint">
+            <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-accent" />
+            Transcribing the video…
+          </span>
+        ) : null}
       </div>
     </form>
   );
