@@ -93,7 +93,9 @@ export class Store {
   hostImageBytes(bytes: Uint8Array, ext = 'png'): string {
     const safeExt = /^[a-z0-9]+$/i.test(ext) ? ext.toLowerCase() : 'png';
     const name = `${randomUUID()}.${safeExt}`;
-    writeFileSync(join(this.imagesDir, name), Buffer.from(bytes));
+    const p = join(this.imagesDir, name);
+    writeFileSync(p, Buffer.from(bytes));
+    this.onWrite?.(p); // mirror to GCS so an uploaded image survives a redeploy
     return `/api/images/${name}`;
   }
 
@@ -106,7 +108,9 @@ export class Store {
   hostVideo(bytes: Uint8Array, ext = 'mp4'): string {
     const safeExt = /^[a-z0-9]+$/i.test(ext) ? ext.toLowerCase() : 'mp4';
     const name = `${randomUUID()}.${safeExt}`;
-    writeFileSync(join(this.videosDir, name), Buffer.from(bytes));
+    const p = join(this.videosDir, name);
+    writeFileSync(p, Buffer.from(bytes));
+    this.onWrite?.(p); // mirror to GCS so an uploaded video survives a redeploy
     return `/api/videos/${name}`;
   }
 
@@ -160,6 +164,7 @@ export class Store {
     writeFileSync(out, Buffer.alloc(0));
     for (const p of parts) appendFileSync(out, readFileSync(join(dir, p)));
     rmSync(dir, { recursive: true, force: true });
+    this.onWrite?.(out); // mirror the assembled video to GCS so it survives a redeploy
     return `/api/videos/${name}`;
   }
 
