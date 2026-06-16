@@ -53,89 +53,115 @@ const STEPS: { n: string; title: string; body: string; example: string; kind: Ex
   {
     n: '1',
     title: 'Add your campaign',
-    body: 'Create a campaign, then add advertisements and drop materials into each (video, post, image, banner) with their copy and the claim they make.',
-    example: 'Upload hero.mp4, paste the copy + the claim it makes',
+    body: 'Create a campaign, then add advertisements and materials (video, post, image, banner) with their copy and the claim each one makes.',
+    example: 'Upload the asset, paste its copy + the claim it makes',
     kind: 'post',
   },
   {
     n: '2',
     title: 'Fill the dossier once',
-    body: 'Add the approved claims and substantiation at the campaign level. It cascades into every reviewer of every material, so they all judge against the same ground truth.',
+    body: 'Add the approved claims and substantiation at the campaign level. It cascades to every agent in every pod, so they all judge against the same ground truth.',
     example: 'Approved claim: "Clinically supported to help maintain a healthy immune response" + trial refs',
     kind: 'post',
   },
   {
     n: '3',
-    title: 'Kick off the review',
-    body: 'In the portal, click Run review (or Review this ad). In a Band.ai room, tag the Coordinator with the campaign name.',
-    example: '@Coordinator review the Immune+ Q3 campaign',
+    title: 'Kick off: tag the Conductor',
+    body: 'In the Band.ai room, @mention the Conductor with the campaign. The Conductor is the only agent you talk to; it runs everyone else.',
+    example: '@Conductor review the Immune+ Q3 campaign',
     kind: 'post',
   },
   {
     n: '4',
-    title: 'The Coordinator recruits',
-    body: 'It pulls in the reviewers for the markets you target and tells them to report to Reconcile. You never tag the individual reviewers yourself.',
-    example: '@US @EU @LATAM @Brand review this and report to @Reconcile',
+    title: 'The Conductor fans out to three pods',
+    body: 'It dispatches the asset to the Claims, Regulatory and Brand pods at once, and owns the single remediation recommit later.',
+    example: 'Reviewing the campaign for US, EU, LATAM plus brand. Pods, please run your reviews.',
     kind: 'auto',
   },
   {
     n: '5',
-    title: 'Reviewers check in parallel',
-    body: 'Each market reviewer checks against its own rulebook; Brand checks voice and consistency. They file findings to the shared board at the same time.',
-    example: 'EU Reviewer: 4 findings, 3 blocking',
+    title: 'Each pod deliberates in parallel',
+    body: 'Every pod lead delegates to its members (Claims: scout, evidence, precedent, disclosure; Regulatory: US/EU/LATAM; Brand: voice, channel, visual), who perceive the media and file findings.',
+    example: 'Claims Lead: claims pod deliberating (4 members)',
     kind: 'auto',
   },
   {
     n: '6',
-    title: 'Reconcile decides',
-    body: 'Once every review is in, Reconcile posts a verdict per region: publish, adapt, or escalate. Adapt is handed to Remediation; an escalate comes to you.',
-    example: 'Verdicts: US=escalate, EU=publish, LATAM=publish, Brand=publish',
+    title: 'The regions debate the conflicts',
+    body: 'When regions clash on a claim, the Regulatory lead runs a one-round rebuttal: each blocking region holds its block or concedes, on its own rulebook.',
+    example: 'EU Reviewer rebuts on "clinically proven to boost immunity": hold',
     kind: 'auto',
   },
   {
     n: '7',
-    title: 'Remediation fixes, or you rule',
-    body: 'Remediation rewrites the adapt regions and resubmits for a re-review. On a genuine deadlock, Reconcile asks you for the final call, and your decision is logged as precedent.',
-    example: 'Hold US: drop the auto-renewal, resubmit with clear pricing',
+    title: 'Pods file findings to the board',
+    body: 'Each pod files one consolidated finding, carrying its issues and any unresolved conflicts, to the shared board.',
+    example: 'regulatory pod filed: 8 findings, 3 conflicts',
+    kind: 'auto',
+  },
+  {
+    n: '8',
+    title: 'The board reconciles',
+    body: 'The Risk Adjudicator scores the board and asks the Mediator to broker the conflicts; if that fails, one Remediation pass rewrites the copy and regenerates a localized image for re-review.',
+    example: 'Mediator: no movement -> Adjudicator: remediate (attempt 1)',
+    kind: 'auto',
+  },
+  {
+    n: '9',
+    title: 'Terminal verdict',
+    body: 'The spine lands on published or spiked. A genuine deadlock escalates to you, and your ruling is logged as precedent for next time.',
+    example: 'Publish with: "These statements have not been evaluated by the FDA."',
     kind: 'you',
   },
 ];
 
 const AGENTS: { name: string; role: string; when: string; tone: 'accent' | 'warn' | 'human' }[] = [
   {
-    name: 'Coordinator',
-    role: 'Chairs the review. Recruits the right reviewers for the markets you target and points them at their rulebooks and Reconcile.',
+    name: 'Conductor',
+    role: 'Fans the asset out to the three pods and owns the single remediation recommit loop. The only agent you tag.',
     when: 'Tag to start',
     tone: 'accent',
   },
   {
-    name: 'US / EU / LATAM',
-    role: "One reviewer per market. Each checks the content against that region's regulatory rulebook and files findings.",
-    when: 'Auto, per market',
+    name: 'Claims pod',
+    role: 'Lead plus Scout, Claim & Evidence, Precedent and Disclosure. Maps the risky claims, tests them against the evidence and prior rulings, and drafts any required disclosures.',
+    when: 'Auto',
     tone: 'accent',
   },
   {
-    name: 'Brand',
-    role: 'Checks voice, tone and consistency against the brand DNA, independent of the regional rules.',
-    when: 'Auto, always',
+    name: 'Regulatory pod',
+    role: 'Lead plus the US, EU and LATAM reviewers. Each judges against its own rulebook; on a clash they run a rebuttal round and either hold or concede.',
+    when: 'Auto · debates',
     tone: 'accent',
   },
   {
-    name: 'Reconcile',
-    role: 'Collects every review, decides the per-region verdict, and routes the room: adapt to Remediation, deadlocks to you.',
-    when: 'Auto, gives the verdict',
+    name: 'Brand pod',
+    role: 'Lead plus Brand Voice, Channel Fit and Visual. Checks tone, format and imagery against the brand DNA.',
+    when: 'Auto',
+    tone: 'accent',
+  },
+  {
+    name: 'Mediator',
+    role: 'Brokers cross-pod conflicts on the board into the smallest resolution that satisfies every mandate, or reports a deadlock.',
+    when: 'Auto · on conflict',
     tone: 'warn',
   },
   {
     name: 'Remediation',
-    role: 'Rewrites non-compliant copy (and can regenerate an image) for adapt regions, then resubmits for a re-review.',
-    when: 'Auto, on adapt',
+    role: 'Rewrites the blocked copy and regenerates a localized, on-brand image, then recommits the revised asset for one re-review.',
+    when: 'Auto · on a fixable block',
+    tone: 'warn',
+  },
+  {
+    name: 'Risk Adjudicator',
+    role: 'Scores the board, runs the mediation and remediation cycle, and drives the terminal decision: published, spiked, or escalated.',
+    when: 'Auto · gives the verdict',
     tone: 'warn',
   },
   {
     name: 'Compliance lead (you)',
-    role: 'Rules on genuine deadlocks the agents could not resolve. Your call is recorded as precedent for next time.',
-    when: 'On escalate',
+    role: 'Rules on a genuine deadlock the agents could not resolve. Your ruling is logged as precedent.',
+    when: 'On deadlock',
     tone: 'human',
   },
 ];
@@ -258,7 +284,7 @@ export function HowItWorksPage() {
           <p className="eyebrow mb-2">The cast</p>
           <h2 className="font-display text-3xl text-fg">What each agent does</h2>
           <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted">
-            You only ever tag the Coordinator. It brings in everyone else, and the rest run themselves.
+            You only ever tag the Conductor. It fans out to the three pods, and they run themselves.
           </p>
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -279,8 +305,8 @@ export function HowItWorksPage() {
           ))}
         </div>
         <p className="mx-auto mt-5 max-w-2xl text-center text-xs leading-relaxed text-faint">
-          There is also a deeper "pods" topology (a Conductor, pod leads, a Mediator and a Risk Adjudicator) for the
-          full debate showcase. The cast above is the one that returns a clean per-region verdict.
+          Seventeen agents in all: three pods filing to a shared board, with a Risk Adjudicator on the decision spine.
+          The portal&apos;s quick Run review uses a lighter Coordinator and Reconcile cast for a fast per-region verdict.
         </p>
       </section>
 
