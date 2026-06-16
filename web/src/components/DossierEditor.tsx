@@ -17,9 +17,11 @@ type SaveState =
 
 const SOURCE_KINDS: DossierSource['kind'][] = ['md', 'json', 'text'];
 
-const labelClass = 'block text-xs font-medium uppercase tracking-wide text-slate-500';
+const labelClass = 'block font-mono text-[10px] font-medium uppercase tracking-wider text-faint';
 const inputClass =
-  'mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400';
+  'mt-1.5 w-full rounded-xl border border-border-strong bg-bg-soft/70 p-2 text-sm text-fg placeholder:text-faint transition-colors focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/25';
+const cellInputClass =
+  'rounded-lg border border-border-strong bg-bg-soft/70 p-1.5 text-sm text-fg placeholder:text-faint transition-colors focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/25';
 
 // One line per approved claim keeps the editor simple; blank lines are dropped.
 function claimsToText(claims: string[]): string {
@@ -95,11 +97,11 @@ export function DossierEditor({ campaign, onSaved }: DossierEditorProps) {
   }
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="surface rounded-2xl p-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-slate-900">Campaign dossier</h2>
-          <p className="mt-0.5 text-xs text-slate-400">
+          <h2 className="font-display text-xl text-fg">Campaign dossier</h2>
+          <p className="mt-0.5 text-xs text-muted">
             The shared source-of-truth. Editing it re-grounds every material&apos;s review.
           </p>
         </div>
@@ -107,19 +109,19 @@ export function DossierEditor({ campaign, onSaved }: DossierEditorProps) {
           type="button"
           onClick={handleSave}
           disabled={save.kind === 'saving'}
-          className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="btn btn-primary"
         >
-          {save.kind === 'saving' ? 'Saving.' : 'Save dossier'}
+          {save.kind === 'saving' ? 'Saving…' : 'Save dossier'}
         </button>
       </div>
 
       {save.kind === 'saved' ? (
-        <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 ring-1 ring-inset ring-emerald-200">
+        <p className="mt-3 rounded-xl bg-human/10 px-3 py-2 text-sm text-human ring-1 ring-inset ring-human/25">
           Dossier saved. It cascades into the next review of every material.
         </p>
       ) : null}
       {save.kind === 'error' ? (
-        <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-inset ring-red-200">
+        <p className="mt-3 rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger ring-1 ring-inset ring-danger/25">
           {save.message}
         </p>
       ) : null}
@@ -127,7 +129,7 @@ export function DossierEditor({ campaign, onSaved }: DossierEditorProps) {
       <div className="mt-4 space-y-4">
         <div>
           <label className={labelClass} htmlFor="approvedClaims">
-            Approved claims <span className="font-normal lowercase text-slate-400">(one per line)</span>
+            Approved claims <span className="font-normal lowercase text-faint">(one per line)</span>
           </label>
           <textarea
             id="approvedClaims"
@@ -182,7 +184,7 @@ export function DossierEditor({ campaign, onSaved }: DossierEditorProps) {
             <button
               type="button"
               onClick={addSource}
-              className="rounded-lg border border-dashed border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+              className="rounded-lg border border-dashed border-border-strong bg-surface/40 px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:border-accent/50 hover:text-fg"
             >
               + Add source
             </button>
@@ -198,17 +200,17 @@ export function DossierEditor({ campaign, onSaved }: DossierEditorProps) {
             />
           </div>
           {sources.length === 0 ? (
-            <p className="mt-2 text-xs text-slate-400">No reference sources attached.</p>
+            <p className="mt-2 text-xs text-faint">No reference sources attached.</p>
           ) : (
             <ul className="mt-2 space-y-3">
               {sources.map((src, index) => (
-                <li key={index} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <li key={index} className="rounded-xl border border-border bg-bg-soft/50 p-3">
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
                       value={src.name}
                       onChange={(event) => updateSource(index, { name: event.target.value })}
-                      className="flex-1 rounded-lg border border-slate-300 bg-white p-1.5 text-sm text-slate-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      className={`flex-1 ${cellInputClass}`}
                       placeholder="Source name (e.g. EFSA-claims.md)"
                     />
                     <select
@@ -216,7 +218,7 @@ export function DossierEditor({ campaign, onSaved }: DossierEditorProps) {
                       onChange={(event) =>
                         updateSource(index, { kind: event.target.value as DossierSource['kind'] })
                       }
-                      className="rounded-lg border border-slate-300 bg-white p-1.5 text-sm text-slate-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      className={cellInputClass}
                     >
                       {SOURCE_KINDS.map((kind) => (
                         <option key={kind} value={kind}>
@@ -227,7 +229,7 @@ export function DossierEditor({ campaign, onSaved }: DossierEditorProps) {
                     <button
                       type="button"
                       onClick={() => removeSource(index)}
-                      className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50"
+                      className="rounded-lg px-2 py-1 text-xs font-medium text-danger transition-colors hover:bg-danger/10"
                     >
                       Remove
                     </button>
@@ -236,7 +238,7 @@ export function DossierEditor({ campaign, onSaved }: DossierEditorProps) {
                     value={src.content}
                     onChange={(event) => updateSource(index, { content: event.target.value })}
                     rows={2}
-                    className="mt-2 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                    className={`mt-2 w-full ${cellInputClass}`}
                     placeholder="Source content excerpt the reviewers should ground on."
                   />
                 </li>

@@ -1,9 +1,9 @@
 import type { Severity } from '../types';
 
 const STYLES: Record<Severity, string> = {
-  block: 'bg-red-100 text-red-700 ring-red-200',
-  warn: 'bg-amber-100 text-amber-700 ring-amber-200',
-  info: 'bg-slate-100 text-slate-600 ring-slate-200',
+  block: 'bg-danger/10 text-danger ring-danger/25',
+  warn: 'bg-warn/10 text-warn ring-warn/25',
+  info: 'bg-surface-3 text-muted ring-border-strong',
 };
 
 const LABELS: Record<Severity, string> = {
@@ -15,7 +15,7 @@ const LABELS: Record<Severity, string> = {
 export function SeverityChip({ severity }: { severity: Severity }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ring-1 ring-inset ${STYLES[severity]}`}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${STYLES[severity]}`}
     >
       {LABELS[severity]}
     </span>

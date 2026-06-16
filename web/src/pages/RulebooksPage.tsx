@@ -33,11 +33,11 @@ type Source =
 
 const SEVERITY_OPTIONS: Severity[] = ['block', 'warn', 'info'];
 
-const labelClass = 'block text-xs font-medium uppercase tracking-wide text-slate-500';
+const labelClass = 'block font-mono text-[10px] font-medium uppercase tracking-wider text-faint';
 const inputClass =
-  'mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400';
+  'mt-1.5 w-full rounded-xl border border-border-strong bg-bg-soft/70 p-2 text-sm text-fg placeholder:text-faint transition-colors focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/25';
 const cellInputClass =
-  'w-full rounded-md border border-slate-300 bg-white p-1.5 text-sm text-slate-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400';
+  'w-full rounded-md border border-border-strong bg-bg-soft/70 p-1.5 text-sm text-fg placeholder:text-faint transition-colors focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/25';
 
 function blankRule(region: string): Rule {
   return {
@@ -262,11 +262,11 @@ export function RulebooksPage() {
   }
 
   if (load.kind === 'loading') {
-    return <p className="text-sm text-slate-500">Loading rulebooks.</p>;
+    return <p className="text-sm text-muted">Loading rulebooks…</p>;
   }
 
   if (load.kind === 'error') {
-    return <p className="text-sm text-red-600">{load.message}</p>;
+    return <p className="text-sm text-danger">{load.message}</p>;
   }
 
   const isProposal = source.kind !== 'store';
@@ -274,11 +274,12 @@ export function RulebooksPage() {
   const saveLabel = isProposal ? 'Save & apply' : 'Save rulebook';
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Rulebooks</h1>
-          <p className="mt-0.5 text-xs text-slate-400">
+          <p className="eyebrow mb-2.5">Governance</p>
+          <h1 className="font-display text-4xl leading-none text-fg">Rulebooks</h1>
+          <p className="mt-2 text-sm text-muted">
             Import a file, start from a preset, or edit by hand. Nothing applies until you save.
           </p>
         </div>
@@ -286,13 +287,13 @@ export function RulebooksPage() {
           type="button"
           onClick={handleSave}
           disabled={!draft || save.kind === 'saving'}
-          className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="btn btn-primary shrink-0"
         >
-          {save.kind === 'saving' ? 'Saving.' : saveLabel}
+          {save.kind === 'saving' ? 'Saving…' : saveLabel}
         </button>
       </div>
 
-      <div className="flex items-center gap-1 border-b border-slate-200">
+      <div className="flex items-center gap-1 border-b border-border">
         {regions.map((book) => {
           const isActive = book.region === region;
           return (
@@ -300,10 +301,10 @@ export function RulebooksPage() {
               key={book.region}
               type="button"
               onClick={() => setRegion(book.region)}
-              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+              className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 isActive
-                  ? 'border-indigo-600 text-indigo-700'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
+                  ? 'border-accent text-fg'
+                  : 'border-transparent text-muted hover:text-fg'
               }`}
             >
               {book.label}
@@ -313,11 +314,11 @@ export function RulebooksPage() {
       </div>
 
       {/* Quick setup: file import + preset picker. Both load an editable preview. */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-900">Quick setup</h2>
-        <p className="mt-0.5 text-xs text-slate-400">
+      <section className="surface rounded-2xl p-5">
+        <h2 className="font-display text-xl text-fg">Quick setup</h2>
+        <p className="mt-0.5 text-xs text-muted">
           Drop a rulebook file or pick a preset to populate the editor below for{' '}
-          <span className="font-medium text-slate-500">{region}</span>. Review, then save.
+          <span className="font-medium text-fg">{region}</span>. Review, then save.
         </p>
 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -337,16 +338,16 @@ export function RulebooksPage() {
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') fileInputRef.current?.click();
               }}
-              className={`mt-1 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-6 text-center transition ${
+              className={`mt-1.5 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-6 text-center transition ${
                 dragOver
-                  ? 'border-indigo-400 bg-indigo-50/60'
-                  : 'border-slate-300 bg-slate-50 hover:bg-slate-100'
+                  ? 'border-accent/60 bg-accent/[0.08]'
+                  : 'border-border-strong bg-bg-soft/50 hover:bg-surface-3/60'
               } ${importing ? 'pointer-events-none opacity-60' : ''}`}
             >
-              <span className="text-sm font-medium text-slate-700">
-                {importing ? `Importing ${importState.what}.` : 'Drop a .md or .json file'}
+              <span className="text-sm font-medium text-fg">
+                {importing ? `Importing ${importState.what}…` : 'Drop a .md or .json file'}
               </span>
-              <span className="mt-1 text-xs text-slate-400">
+              <span className="mt-1 text-xs text-faint">
                 or click to choose. JSON is exact; Markdown is parsed by AI into rules.
               </span>
               <input
@@ -358,7 +359,7 @@ export function RulebooksPage() {
               />
             </div>
             {importState.kind === 'error' ? (
-              <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-inset ring-red-200">
+              <p className="mt-2 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger ring-1 ring-inset ring-danger/25">
                 {importState.message}
               </p>
             ) : null}
@@ -385,7 +386,7 @@ export function RulebooksPage() {
                 </option>
               ))}
             </select>
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-faint">
               Curated starting points (US FTC, EU health claims, LATAM). Loaded for review, not
               applied until you save.
             </p>
@@ -395,7 +396,7 @@ export function RulebooksPage() {
 
       {/* Banner reflecting the current source / save status. */}
       {source.kind === 'file' ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg bg-indigo-50 px-3 py-2 text-sm text-indigo-800 ring-1 ring-inset ring-indigo-200">
+        <div className="flex items-center justify-between gap-3 rounded-xl bg-accent/10 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25">
           <span>
             Previewing <span className="font-semibold">{source.ruleCount}</span> rule
             {source.ruleCount === 1 ? '' : 's'} imported from{' '}
@@ -404,14 +405,14 @@ export function RulebooksPage() {
           <button
             type="button"
             onClick={discardProposal}
-            className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
+            className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-accent transition-colors hover:bg-accent/15"
           >
             Discard
           </button>
         </div>
       ) : null}
       {source.kind === 'preset' ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg bg-indigo-50 px-3 py-2 text-sm text-indigo-800 ring-1 ring-inset ring-indigo-200">
+        <div className="flex items-center justify-between gap-3 rounded-xl bg-accent/10 px-3 py-2 text-sm text-accent ring-1 ring-inset ring-accent/25">
           <span>
             Previewing preset <span className="font-semibold">{source.label}</span> (
             {source.ruleCount} rule{source.ruleCount === 1 ? '' : 's'}). Review and save to apply.
@@ -419,7 +420,7 @@ export function RulebooksPage() {
           <button
             type="button"
             onClick={discardProposal}
-            className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
+            className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-accent transition-colors hover:bg-accent/15"
           >
             Discard
           </button>
@@ -427,60 +428,60 @@ export function RulebooksPage() {
       ) : null}
 
       {save.kind === 'saved' ? (
-        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 ring-1 ring-inset ring-emerald-200">
+        <p className="rounded-xl bg-human/10 px-3 py-2 text-sm text-human ring-1 ring-inset ring-human/25">
           Rulebook saved. It applies to the next review.
         </p>
       ) : null}
       {save.kind === 'error' ? (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-inset ring-red-200">
+        <p className="rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger ring-1 ring-inset ring-danger/25">
           {save.message}
         </p>
       ) : null}
 
       {!draft ? (
-        <p className="text-sm text-slate-500">Loading rulebook.</p>
+        <p className="text-sm text-muted">Loading rulebook…</p>
       ) : (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              {isProposal ? 'Editable preview' : 'Rules'} - {draft.rules.length}{' '}
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-wider text-faint">
+              {isProposal ? 'Editable preview' : 'Rules'} · {draft.rules.length}{' '}
               {draft.rules.length === 1 ? 'rule' : 'rules'}
             </span>
-            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-500">
+            <span className="inline-flex items-center rounded-full bg-surface-3 px-2.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wider text-muted ring-1 ring-inset ring-border-strong">
               Not legal advice
             </span>
           </div>
 
           {draft.rules.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+            <div className="rounded-2xl border border-dashed border-border-strong bg-surface/40 p-10 text-center text-sm text-muted">
               No rules yet. Import a file, pick a preset, or add one below.
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="surface overflow-x-auto rounded-2xl">
               <table className="w-full border-collapse text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-left">
-                    <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <tr className="border-b border-border bg-bg-soft/50 text-left">
+                    <th className="px-3 py-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-faint">
                       ID
                     </th>
-                    <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-faint">
                       Category
                     </th>
-                    <th className="w-28 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="w-28 px-3 py-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-faint">
                       Severity
                     </th>
-                    <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-faint">
                       Check
                     </th>
-                    <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-faint">
                       Required disclosure
                     </th>
-                    <th className="px-3 py-2.5" aria-label="actions" />
+                    <th className="px-3 py-3" aria-label="actions" />
                   </tr>
                 </thead>
                 <tbody>
                   {draft.rules.map((rule, index) => (
-                    <tr key={rule.id} className="border-b border-slate-100 align-top last:border-0">
+                    <tr key={rule.id} className="border-b border-border align-top last:border-0">
                       <td className="px-3 py-2">
                         <input
                           type="text"
@@ -545,7 +546,7 @@ export function RulebooksPage() {
                         <button
                           type="button"
                           onClick={() => removeRule(index)}
-                          className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50"
+                          className="rounded-lg px-2 py-1 text-xs font-medium text-danger transition-colors hover:bg-danger/10"
                         >
                           Remove
                         </button>
@@ -560,7 +561,7 @@ export function RulebooksPage() {
           <button
             type="button"
             onClick={addRule}
-            className="inline-flex items-center rounded-lg border border-dashed border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-dashed border-border-strong bg-surface/40 px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-accent/50 hover:text-fg"
           >
             + Add rule manually
           </button>

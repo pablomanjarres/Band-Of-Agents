@@ -10,10 +10,10 @@ interface CampaignMatrixProps {
 }
 
 const KIND_TONE: Record<string, string> = {
-  video: 'bg-violet-100 text-violet-700',
-  post: 'bg-sky-100 text-sky-700',
-  image: 'bg-teal-100 text-teal-700',
-  banner: 'bg-amber-100 text-amber-700',
+  video: 'bg-violet-500/15 text-violet-300 ring-1 ring-inset ring-violet-400/30',
+  post: 'bg-sky-500/15 text-sky-300 ring-1 ring-inset ring-sky-400/30',
+  image: 'bg-teal-500/15 text-teal-300 ring-1 ring-inset ring-teal-400/30',
+  banner: 'bg-warn/15 text-warn ring-1 ring-inset ring-warn/30',
 };
 
 // The material x region matrix is the campaign centerpiece: each row is a
@@ -23,24 +23,24 @@ const KIND_TONE: Record<string, string> = {
 export function CampaignMatrix({ rows, onSelect, selectedMaterialId }: CampaignMatrixProps) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+      <div className="rounded-2xl border border-dashed border-border-strong bg-surface/40 p-8 text-center text-sm text-muted">
         No materials yet. Add one to populate the matrix.
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="surface overflow-x-auto rounded-2xl">
       <table className="w-full border-collapse text-sm">
         <thead>
-          <tr className="border-b border-slate-200 bg-slate-50 text-left">
-            <th className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <tr className="border-b border-border bg-bg-soft/50 text-left">
+            <th className="px-4 py-3 font-mono text-[10px] font-semibold uppercase tracking-wider text-faint">
               Material
             </th>
             {REGION_ORDER.map((region) => (
               <th
                 key={region}
-                className="px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-slate-500"
+                className="px-4 py-3 text-center font-mono text-[10px] font-semibold uppercase tracking-wider text-faint"
               >
                 {region}
               </th>
@@ -53,8 +53,8 @@ export function CampaignMatrix({ rows, onSelect, selectedMaterialId }: CampaignM
             return (
               <tr
                 key={row.materialId}
-                className={`border-b border-slate-100 last:border-0 ${
-                  isSelected ? 'bg-indigo-50/60' : 'hover:bg-slate-50'
+                className={`border-b border-border last:border-0 ${
+                  isSelected ? 'bg-accent/[0.07]' : 'hover:bg-surface-2/60'
                 }`}
               >
                 <th scope="row" className="px-4 py-3 text-left align-top font-medium">
@@ -65,17 +65,17 @@ export function CampaignMatrix({ rows, onSelect, selectedMaterialId }: CampaignM
                   >
                     <span className="flex items-center gap-2">
                       <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                          KIND_TONE[row.material.kind] ?? 'bg-slate-100 text-slate-600'
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider ${
+                          KIND_TONE[row.material.kind] ?? 'bg-surface-3 text-muted ring-1 ring-inset ring-border-strong'
                         }`}
                       >
                         {row.material.kind}
                       </span>
-                      <span className="text-slate-800 group-hover:text-indigo-700">
+                      <span className="text-fg group-hover:text-accent">
                         {row.material.name ?? row.material.id}
                       </span>
                     </span>
-                    <span className="max-w-xs truncate text-xs font-normal text-slate-400">
+                    <span className="max-w-xs truncate text-xs font-normal text-faint">
                       {row.material.claim || row.material.copy}
                     </span>
                   </button>
@@ -88,14 +88,14 @@ export function CampaignMatrix({ rows, onSelect, selectedMaterialId }: CampaignM
                       <button
                         type="button"
                         onClick={() => onSelect(row.materialId)}
-                        className="inline-flex flex-col items-center gap-1 rounded-lg px-2 py-1 transition hover:bg-white"
+                        className="inline-flex flex-col items-center gap-1 rounded-lg px-2 py-1 transition-colors hover:bg-surface-3"
                         title={cell?.rationale ?? `${region} - ${status}`}
                       >
                         <VerdictBadge status={status} pulse />
                         {cell && (cell.blocking > 0 || cell.findings > 0) ? (
                           <span
-                            className={`text-[10px] font-semibold ${
-                              cell.blocking > 0 ? 'text-red-600' : 'text-amber-600'
+                            className={`font-mono text-[10px] font-semibold ${
+                              cell.blocking > 0 ? 'text-danger' : 'text-warn'
                             }`}
                           >
                             {cell.blocking > 0
@@ -103,7 +103,7 @@ export function CampaignMatrix({ rows, onSelect, selectedMaterialId }: CampaignM
                               : `${cell.findings} finding${cell.findings === 1 ? '' : 's'}`}
                           </span>
                         ) : (
-                          <span className="text-[10px] text-slate-300">-</span>
+                          <span className="text-[10px] text-faint">-</span>
                         )}
                       </button>
                     </td>
