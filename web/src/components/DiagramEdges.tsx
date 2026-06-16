@@ -49,13 +49,13 @@ const EDGES: EdgeSpec[] = [
 ];
 
 const TONE_ACTIVE: Record<EdgeSpec['tone'], string> = {
-  ai: '#818cf8',
-  human: '#34d399',
-  outcome: '#cbd5e1',
-  context: '#94a3b8',
+  ai: '#818cf8', // accent / indigo-400
+  human: '#34d399', // human / emerald-400
+  outcome: '#a1a1ac', // muted
+  context: '#71717c', // faint
 };
 
-const INACTIVE = '#334155';
+const INACTIVE = '#2a2a31'; // ~border-strong, reads as quiet wiring on the canvas
 
 function anchor(rect: NodeRect, side: Side): Point {
   switch (side) {
@@ -103,7 +103,7 @@ export function DiagramEdges({ rects, activeEdges, width, height }: DiagramEdges
     >
       <defs>
         <marker id="arrow-active" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#e2e8f0" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#f4f4f7" />
         </marker>
         <marker id="arrow-idle" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M 0 0 L 10 5 L 0 10 z" fill={INACTIVE} />
@@ -156,10 +156,10 @@ export function DiagramEdges({ rects, activeEdges, width, height }: DiagramEdges
                   width={edge.label.length * 6.8 + 12}
                   height={18}
                   rx={9}
-                  fill="#0f172a"
+                  fill="#16161b"
                   stroke={isActive ? stroke : INACTIVE}
                   strokeWidth={1}
-                  opacity={isActive ? 0.95 : 0.7}
+                  opacity={isActive ? 0.95 : 0.8}
                 />
                 <text
                   x={0}
@@ -167,7 +167,8 @@ export function DiagramEdges({ rects, activeEdges, width, height }: DiagramEdges
                   textAnchor="middle"
                   fontSize={11}
                   fontWeight={600}
-                  fill={isActive ? '#e2e8f0' : '#94a3b8'}
+                  fontFamily="'JetBrains Mono', ui-monospace, monospace"
+                  fill={isActive ? '#f4f4f7' : '#a1a1ac'}
                 >
                   {edge.label}
                 </text>

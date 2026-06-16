@@ -17,32 +17,32 @@ interface DiagramNodeProps {
 
 // Base palette per visual family on the dark canvas (idle / dimmed look).
 const VARIANT_BASE: Record<NodeVariant, string> = {
-  context: 'border-slate-600/70 bg-slate-800/70 text-slate-200',
-  ai: 'border-indigo-500/40 bg-indigo-950/50 text-indigo-100',
-  human: 'border-emerald-500/40 bg-emerald-950/40 text-emerald-100',
-  outcome: 'border-slate-600/60 bg-slate-800/60 text-slate-200',
+  context: 'border-border-strong bg-surface-2 text-fg',
+  ai: 'border-accent/40 bg-accent/[0.08] text-fg',
+  human: 'border-human/40 bg-human/[0.07] text-fg',
+  outcome: 'border-border-strong bg-surface-2 text-fg',
 };
 
 // Glow ring colour when a node is "active" (mid-flight).
 const VARIANT_ACTIVE_RING: Record<NodeVariant, string> = {
-  context: 'ring-slate-400/40',
-  ai: 'ring-indigo-400/60',
-  human: 'ring-emerald-400/60',
-  outcome: 'ring-slate-400/40',
+  context: 'ring-muted/40',
+  ai: 'ring-accent/60',
+  human: 'ring-human/60',
+  outcome: 'ring-muted/40',
 };
 
 // Verdict palette overrides an agent node once a decision lands.
 const VERDICT_STYLE: Record<VerdictDecision, string> = {
-  publish: 'border-emerald-400/70 bg-emerald-950/50 text-emerald-100',
-  adapt: 'border-amber-400/70 bg-amber-950/50 text-amber-100',
-  escalate: 'border-red-400/70 bg-red-950/50 text-red-100',
+  publish: 'border-human/60 bg-human/[0.1] text-fg',
+  adapt: 'border-warn/60 bg-warn/[0.1] text-fg',
+  escalate: 'border-danger/60 bg-danger/[0.1] text-fg',
 };
 
 const SUBTITLE_TONE: Record<NodeVariant, string> = {
-  context: 'text-slate-400',
-  ai: 'text-indigo-300/80',
-  human: 'text-emerald-300/80',
-  outcome: 'text-slate-400',
+  context: 'text-faint',
+  ai: 'text-accent/80',
+  human: 'text-human/80',
+  outcome: 'text-faint',
 };
 
 export function DiagramNode({
@@ -64,9 +64,9 @@ export function DiagramNode({
     <div
       ref={nodeRef}
       className={[
-        'relative rounded-xl border px-3 py-2 shadow-lg backdrop-blur-sm transition-all duration-500',
+        'relative rounded-xl border px-3 py-2.5 shadow-[inset_0_1px_0_rgb(255_255_255/0.05),0_10px_30px_-12px_rgb(0_0_0/0.8)] backdrop-blur-sm transition-all duration-500',
         palette,
-        dimmed ? 'opacity-45 saturate-50' : 'opacity-100',
+        dimmed ? 'opacity-40 saturate-[0.6]' : 'opacity-100',
         active ? `ring-2 ${VARIANT_ACTIVE_RING[variant]}` : 'ring-0',
         className ?? '',
       ].join(' ')}

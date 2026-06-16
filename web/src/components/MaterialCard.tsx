@@ -10,17 +10,17 @@ interface MaterialCardProps {
 }
 
 const KIND_TONE: Record<MaterialKind, string> = {
-  video: 'bg-violet-100 text-violet-700',
-  post: 'bg-sky-100 text-sky-700',
-  image: 'bg-teal-100 text-teal-700',
-  banner: 'bg-amber-100 text-amber-700',
+  video: 'bg-violet-500/15 text-violet-300 ring-1 ring-inset ring-violet-400/30',
+  post: 'bg-sky-500/15 text-sky-300 ring-1 ring-inset ring-sky-400/30',
+  image: 'bg-teal-500/15 text-teal-300 ring-1 ring-inset ring-teal-400/30',
+  banner: 'bg-warn/15 text-warn ring-1 ring-inset ring-warn/30',
 };
 
 const STATUS_DOT: Record<RegionStatus, string> = {
-  reviewing: 'animate-pulse-soft bg-amber-400',
-  publish: 'bg-emerald-500',
-  adapt: 'bg-amber-500',
-  escalate: 'bg-red-500',
+  reviewing: 'animate-pulse-soft bg-warn',
+  publish: 'bg-human',
+  adapt: 'bg-warn',
+  escalate: 'bg-danger',
 };
 
 export function MaterialCard({ material, cells, onClick, selected }: MaterialCardProps) {
@@ -31,19 +31,19 @@ export function MaterialCard({ material, cells, onClick, selected }: MaterialCar
     <button
       type="button"
       onClick={onClick}
-      className={`group flex flex-col overflow-hidden rounded-xl border text-left shadow-sm transition hover:shadow-md ${
-        selected ? 'border-indigo-400 ring-2 ring-indigo-200' : 'border-slate-200 hover:border-slate-300'
+      className={`surface group flex flex-col overflow-hidden rounded-2xl text-left transition-all hover:-translate-y-0.5 ${
+        selected ? 'border-accent/60 ring-2 ring-accent/25' : 'hover:border-border-strong'
       }`}
     >
-      <div className="relative aspect-video w-full bg-slate-100">
+      <div className="relative aspect-video w-full bg-bg-soft">
         {poster ? (
           <img src={poster} alt={material.name ?? material.id} className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-slate-300">
+          <div className="flex h-full w-full items-center justify-center text-faint">
             <KindGlyph kind={material.kind} />
           </div>
         )}
-        <span className={`absolute left-2 top-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${KIND_TONE[material.kind]}`}>
+        <span className={`absolute left-2 top-2 inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider ${KIND_TONE[material.kind]}`}>
           {material.kind}
         </span>
         {material.videoUrl ? (
@@ -55,8 +55,8 @@ export function MaterialCard({ material, cells, onClick, selected }: MaterialCar
 
       <div className="flex flex-1 flex-col gap-2 p-3">
         <div>
-          <p className="truncate text-sm font-semibold text-slate-800">{material.name ?? material.id}</p>
-          <p className="mt-0.5 line-clamp-2 text-xs text-slate-400">{material.claim || material.copy || 'no copy'}</p>
+          <p className="truncate text-sm font-semibold text-fg">{material.name ?? material.id}</p>
+          <p className="mt-0.5 line-clamp-2 text-xs text-muted">{material.claim || material.copy || 'no copy'}</p>
         </div>
 
         <div className="mt-auto flex flex-wrap gap-1.5">
@@ -66,16 +66,16 @@ export function MaterialCard({ material, cells, onClick, selected }: MaterialCar
             return (
               <span
                 key={region}
-                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-500"
+                className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-soft/60 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted"
                 title={status ? `${region}: ${status}` : `${region}: not reviewed`}
               >
-                <span className={`h-1.5 w-1.5 rounded-full ${status ? STATUS_DOT[status] : 'bg-slate-300'}`} />
+                <span className={`h-1.5 w-1.5 rounded-full ${status ? STATUS_DOT[status] : 'bg-surface-3'}`} />
                 {region}
-                {cell && cell.findings > 0 ? <span className="text-slate-400">{cell.findings}</span> : null}
+                {cell && cell.findings > 0 ? <span className="text-faint">{cell.findings}</span> : null}
               </span>
             );
           })}
-          {!reviewed ? <span className="text-[10px] text-slate-300">not reviewed</span> : null}
+          {!reviewed ? <span className="text-[10px] text-faint">not reviewed</span> : null}
         </div>
       </div>
     </button>

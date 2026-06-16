@@ -10,9 +10,9 @@ interface AdvertisementTabsProps {
 }
 
 const DECISION_DOT: Record<VerdictDecision, string> = {
-  publish: 'bg-emerald-500',
-  adapt: 'bg-amber-500',
-  escalate: 'bg-red-500',
+  publish: 'bg-human',
+  adapt: 'bg-warn',
+  escalate: 'bg-danger',
 };
 
 /**
@@ -31,15 +31,15 @@ export function AdvertisementTabs({ advertisements, selectedId, onSelect, onAdd,
             key={ad.id}
             type="button"
             onClick={() => onSelect(ad.id)}
-            className={`group inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-medium shadow-sm transition ${
+            className={`group inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-medium transition-all ${
               active
-                ? 'border-indigo-300 bg-indigo-50 text-indigo-800'
-                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                ? 'border-accent/50 bg-accent/10 text-accent shadow-[inset_0_1px_0_rgb(255_255_255/0.05)]'
+                : 'border-border-strong bg-surface/60 text-muted hover:border-border-strong hover:text-fg'
             }`}
           >
             {worst ? <span className={`h-2 w-2 rounded-full ${DECISION_DOT[worst]}`} /> : null}
             <span className="max-w-[12rem] truncate">{ad.name}</span>
-            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${active ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>
+            <span className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] font-semibold ${active ? 'bg-accent/15 text-accent' : 'bg-surface-3 text-faint'}`}>
               {ad.materials.length}
             </span>
           </button>
@@ -48,7 +48,7 @@ export function AdvertisementTabs({ advertisements, selectedId, onSelect, onAdd,
       <button
         type="button"
         onClick={onAdd}
-        className="inline-flex items-center gap-1 rounded-xl border border-dashed border-slate-300 px-3.5 py-2 text-sm font-medium text-slate-500 transition hover:border-indigo-300 hover:text-indigo-600"
+        className="inline-flex items-center gap-1 rounded-xl border border-dashed border-border-strong px-3.5 py-2 text-sm font-medium text-muted transition-colors hover:border-accent/50 hover:text-fg"
       >
         + Advertisement
       </button>

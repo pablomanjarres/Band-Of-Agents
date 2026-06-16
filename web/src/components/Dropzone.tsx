@@ -18,10 +18,10 @@ type Accent = 'violet' | 'indigo' | 'teal' | 'slate';
 
 // Static class strings per accent (Tailwind cannot see dynamically built names).
 const ACCENT: Record<Accent, { idle: string; over: string; icon: string }> = {
-  violet: { idle: 'border-violet-300 hover:border-violet-400 hover:bg-violet-50/60', over: 'border-violet-500 bg-violet-50 ring-2 ring-violet-300', icon: 'text-violet-500' },
-  indigo: { idle: 'border-indigo-300 hover:border-indigo-400 hover:bg-indigo-50/60', over: 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-300', icon: 'text-indigo-500' },
-  teal: { idle: 'border-teal-300 hover:border-teal-400 hover:bg-teal-50/60', over: 'border-teal-500 bg-teal-50 ring-2 ring-teal-300', icon: 'text-teal-500' },
-  slate: { idle: 'border-slate-300 hover:border-slate-400 hover:bg-slate-50', over: 'border-slate-500 bg-slate-100 ring-2 ring-slate-300', icon: 'text-slate-500' },
+  violet: { idle: 'border-violet-400/30 hover:border-violet-400/60 hover:bg-violet-500/[0.06]', over: 'border-violet-400/70 bg-violet-500/10 ring-2 ring-violet-400/40', icon: 'text-violet-300' },
+  indigo: { idle: 'border-accent/30 hover:border-accent/60 hover:bg-accent/[0.06]', over: 'border-accent/70 bg-accent/10 ring-2 ring-accent/40', icon: 'text-accent' },
+  teal: { idle: 'border-teal-400/30 hover:border-teal-400/60 hover:bg-teal-500/[0.06]', over: 'border-teal-400/70 bg-teal-500/10 ring-2 ring-teal-400/40', icon: 'text-teal-300' },
+  slate: { idle: 'border-border-strong hover:border-border-strong hover:bg-surface-3/60', over: 'border-muted/60 bg-surface-3 ring-2 ring-border-strong', icon: 'text-muted' },
 };
 
 /**
@@ -82,13 +82,13 @@ export function Dropzone({ accept, label, hint, busy, onFile, accent = 'indigo',
         <path d="M12 16V4m0 0L8 8m4-4 4 4" />
         <path d="M20 16.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1.5" />
       </svg>
-      <span className="text-sm font-semibold text-slate-700">
-        {busy ? 'Uploading.' : doneName ? `${doneName} uploaded` : label}
+      <span className="text-sm font-semibold text-fg">
+        {busy ? 'Uploading…' : doneName ? `${doneName} uploaded` : label}
       </span>
-      {hint && !busy ? <span className="text-xs text-slate-400">{hint}</span> : null}
+      {hint && !busy ? <span className="text-xs text-faint">{hint}</span> : null}
       {doneName && !busy ? (
-        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> ready
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-human">
+          <span className="h-1.5 w-1.5 rounded-full bg-human" /> ready
         </span>
       ) : null}
     </div>

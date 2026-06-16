@@ -23,9 +23,9 @@ export class ErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     if (this.state.error) {
       return (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="rounded-2xl border border-danger/30 bg-danger/[0.07] p-4 text-sm text-danger">
           <p className="font-semibold">Something went wrong rendering this view.</p>
-          <p className="mt-1 break-all font-mono text-xs">{this.state.error.message}</p>
+          <p className="mt-1 break-all font-mono text-xs text-danger/80">{this.state.error.message}</p>
         </div>
       );
     }

@@ -1,13 +1,209 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-html,
-body,
-#root {
-  height: 100%;
+/*
+  Design tokens. Dark-first, warm near-black canvas with zinc surfaces, in the
+  spirit of the cortex + nella systems. Colours are stored as space-separated RGB
+  triples so Tailwind can apply its own <alpha-value> (text-accent/40 etc).
+*/
+:root {
+  color-scheme: dark;
+
+  /* Canvas + surfaces */
+  --bg: 9 9 12; /* app canvas */
+  --bg-soft: 14 14 18; /* sunken wells */
+  --surface: 22 22 27; /* cards / panels */
+  --surface-2: 30 30 37; /* elevated cards */
+  --surface-3: 38 38 46; /* inputs, hover */
+
+  /* Lines */
+  --border: 39 39 47;
+  --border-strong: 56 56 66;
+
+  /* Text */
+  --fg: 244 244 247; /* near-white */
+  --muted: 161 161 172; /* zinc-400 */
+  --faint: 113 113 124; /* zinc-500 */
+
+  /* Semantic agent palette (carries meaning in the pipeline) */
+  --accent: 129 140 248; /* indigo-400  -> AI agents */
+  --accent-strong: 99 102 241; /* indigo-500 */
+  --human: 52 211 153; /* emerald-400 -> human */
+  --warn: 251 191 36; /* amber-400   -> adapt */
+  --danger: 248 113 113; /* red-400     -> escalate */
+
+  --radius: 0.875rem;
 }
 
-body {
-  @apply bg-slate-100 text-slate-900 antialiased;
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-bg text-fg antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01';
+    /* Atmosphere: two soft colour pools bleeding in from the corners over a
+       near-black base, so the canvas never reads as a flat block. */
+    background-color: rgb(var(--bg));
+    background-image:
+      radial-gradient(60rem 40rem at 12% -10%, rgba(99, 102, 241, 0.1), transparent 60%),
+      radial-gradient(50rem 36rem at 100% 0%, rgba(16, 185, 129, 0.06), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  /* Fine film grain over the whole app for texture / depth. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  ::selection {
+    background: rgb(var(--accent) / 0.28);
+    color: rgb(var(--fg));
+  }
+
+  /* Dark, slim scrollbars to match the canvas. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--surface-3)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgb(var(--surface-3));
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--border-strong));
+    background-clip: padding-box;
+  }
+}
+
+@layer components {
+  /*
+    Surface: the signature card. A hairline border, a 1px inner top highlight
+    that reads as a soft bevel, and layered drop shadows for depth.
+  */
+  .surface {
+    background-color: rgb(var(--surface));
+    border: 1px solid rgb(var(--border));
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.04),
+      0 1px 2px rgb(0 0 0 / 0.5),
+      0 16px 40px -18px rgb(0 0 0 / 0.7);
+  }
+
+  .surface-2 {
+    background-color: rgb(var(--surface-2));
+    border: 1px solid rgb(var(--border-strong));
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.05),
+      0 2px 4px rgb(0 0 0 / 0.5),
+      0 22px 48px -20px rgb(0 0 0 / 0.75);
+  }
+
+  /* Frosted glass for the top bar and floating chips. */
+  .glass {
+    background-color: rgb(var(--bg-soft) / 0.7);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid rgb(var(--border) / 0.8);
+  }
+
+  /* Editorial display type: Instrument Serif, optionally italic. */
+  .font-display {
+    font-family: 'Instrument Serif', Georgia, serif;
+    letter-spacing: -0.01em;
+  }
+
+  /* Tiny mono labels, cortex-style section eyebrows. */
+  .eyebrow {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgb(var(--faint));
+  }
+
+  /* Zinc -> white text gradient for big headings. */
+  .text-gradient {
+    background: linear-gradient(135deg, rgb(var(--fg)) 0%, rgb(161 161 172) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Primary action button. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200;
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    background: linear-gradient(180deg, rgb(var(--accent-strong)) 0%, rgb(79 70 229) 100%);
+    color: white;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.18),
+      0 8px 24px -10px rgb(var(--accent-strong) / 0.65);
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(0.5px);
+  }
+  .btn-ghost {
+    @apply border text-muted;
+    border-color: rgb(var(--border-strong));
+    background-color: rgb(var(--surface-2) / 0.6);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    color: rgb(var(--fg));
+    background-color: rgb(var(--surface-3));
+  }
+}
+
+@layer utilities {
+  /* Staggered entrance: set --d via inline style for the delay. */
+  .rise {
+    opacity: 0;
+    animation: rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation-delay: var(--d, 0ms);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rise {
+      animation: none;
+      opacity: 1;
+    }
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

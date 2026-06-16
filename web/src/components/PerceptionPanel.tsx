@@ -14,9 +14,9 @@ const STAGE_LABEL: Record<PerceivingLane['perceiving']['stage'], string> = {
 };
 
 const STAGE_TONE: Record<PerceivingLane['perceiving']['stage'], string> = {
-  vision: 'bg-violet-500',
-  stt: 'bg-sky-500',
-  done: 'bg-emerald-500',
+  vision: 'bg-violet-400',
+  stt: 'bg-sky-400',
+  done: 'bg-human',
 };
 
 /**
@@ -34,9 +34,9 @@ export function PerceptionPanel({ lanes }: PerceptionPanelProps) {
       <div className="flex items-center gap-2">
         <span className="relative flex h-2.5 w-2.5">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-75" />
-          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-violet-500" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-violet-400" />
         </span>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h2 className="eyebrow !text-violet-300/80">
           Analyzing {lanes.length === 1 ? 'material' : `${lanes.length} materials`}
         </h2>
       </div>
@@ -59,10 +59,10 @@ function PerceptionCard({ lane }: { lane: PerceivingLane }) {
   const transcript = useTranscriptReveal(lane);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-violet-200 bg-gradient-to-b from-violet-50/80 to-white shadow-sm">
+    <div className="overflow-hidden rounded-2xl border border-violet-400/25 bg-violet-500/[0.06] shadow-[inset_0_1px_0_rgb(255_255_255/0.04),0_0_28px_-16px_rgb(167_139_250/0.55)]">
       {/* The cycling keyframe: a new frameUrl every tick is the model literally
           reading that frame. The key swaps the node so the fade re-triggers. */}
-      <div className="relative aspect-video w-full bg-slate-900">
+      <div className="relative aspect-video w-full bg-bg">
         {perceiving.frameUrl ? (
           <img
             key={perceiving.frameUrl}
@@ -71,8 +71,8 @@ function PerceptionCard({ lane }: { lane: PerceivingLane }) {
             className="h-full w-full animate-frame-in object-cover"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">
-            {stage === 'stt' ? 'Listening to audio.' : 'Sampling frames.'}
+          <div className="flex h-full w-full items-center justify-center text-xs text-faint">
+            {stage === 'stt' ? 'Listening to audio…' : 'Sampling frames…'}
           </div>
         )}
         <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur">
@@ -88,24 +88,24 @@ function PerceptionCard({ lane }: { lane: PerceivingLane }) {
 
       <div className="space-y-3 p-3">
         <div className="flex items-center justify-between gap-2">
-          <p className="min-w-0 truncate text-sm font-semibold text-slate-800">
+          <p className="min-w-0 truncate text-sm font-semibold text-fg">
             {material.name ?? material.id}
           </p>
-          <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700">
+          <span className="shrink-0 rounded-full bg-violet-500/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-violet-300 ring-1 ring-inset ring-violet-400/30">
             {material.kind}
           </span>
         </div>
 
         {/* Progress bar (index/total). Smooth width transition as ticks arrive. */}
         <div className="space-y-1">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
             <div
               className={`h-full rounded-full transition-all duration-500 ease-out ${STAGE_TONE[stage]}`}
               style={{ width: `${pct}%` }}
             />
           </div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">
-            {stage === 'done' ? 'Cascading to reviewers.' : `${pct}% analyzed`}
+          <p className="font-mono text-[10px] uppercase tracking-wider text-faint">
+            {stage === 'done' ? 'Cascading to reviewers…' : `${pct}% analyzed`}
           </p>
         </div>
 
@@ -116,15 +116,15 @@ function PerceptionCard({ lane }: { lane: PerceivingLane }) {
         {/* Transcript typing in. Sourced from the material's perception (the stream
             carries frame ticks, not transcript text); revealed progressively. */}
         {transcript !== undefined ? (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-            <p className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              <span className={`h-1.5 w-1.5 rounded-full ${stage === 'stt' ? 'animate-pulse-soft bg-sky-500' : 'bg-slate-400'}`} />
+          <div className="rounded-lg border border-border bg-bg-soft/70 p-2.5">
+            <p className="mb-1 flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-faint">
+              <span className={`h-1.5 w-1.5 rounded-full ${stage === 'stt' ? 'animate-pulse-soft bg-sky-400' : 'bg-muted'}`} />
               Transcript
             </p>
-            <p className="text-xs leading-relaxed text-slate-600">
+            <p className="text-xs leading-relaxed text-muted">
               {transcript.text}
               {!transcript.complete ? (
-                <span className="ml-0.5 inline-block h-3 w-1 animate-pulse-soft bg-slate-400 align-middle" />
+                <span className="ml-0.5 inline-block h-3 w-1 animate-pulse-soft bg-muted align-middle" />
               ) : null}
             </p>
           </div>
@@ -152,10 +152,10 @@ function WatchingBadges({ material, settled }: { material: Material; settled: bo
       {regions.map((region) => (
         <span
           key={region}
-          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 shadow-sm"
+          className="inline-flex items-center gap-1 rounded-full border border-border bg-surface/60 px-2 py-0.5 font-mono text-[10px] font-medium text-muted"
         >
           <span
-            className={`h-1.5 w-1.5 rounded-full ${settled ? 'bg-emerald-500' : 'animate-pulse-soft bg-amber-400'}`}
+            className={`h-1.5 w-1.5 rounded-full ${settled ? 'bg-human' : 'animate-pulse-soft bg-warn'}`}
           />
           {region} {settled ? 'ready' : 'watching'}
         </span>

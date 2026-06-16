@@ -17,10 +17,11 @@ export function BoardView({ state }: BoardViewProps) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Compliance Board</h1>
+          <p className="eyebrow mb-2">Compliance board</p>
+          <h1 className="font-display text-3xl leading-none text-fg">Lumavida review</h1>
           {state.asset ? (
-            <p className="text-sm text-slate-500">
-              {state.asset.channel} - {state.asset.markets.join(', ') || 'no markets'}
+            <p className="mt-1.5 font-mono text-[11px] text-faint">
+              {state.asset.channel} · {state.asset.markets.join(', ') || 'no markets'}
             </p>
           ) : null}
         </div>
@@ -36,11 +37,11 @@ export function BoardView({ state }: BoardViewProps) {
         <button
           type="button"
           onClick={() => setShowTimeline((open) => !open)}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+          className="btn btn-ghost"
         >
-          <span className={`transition-transform ${showTimeline ? 'rotate-90' : ''}`}>&rsaquo;</span>
+          <span className={`transition-transform ${showTimeline ? 'rotate-90' : ''}`}>›</span>
           {showTimeline ? 'Hide event timeline' : 'Show event timeline'}
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+          <span className="rounded-full bg-surface-3 px-2 py-0.5 font-mono text-[10px] text-muted ring-1 ring-inset ring-border-strong">
             {state.events.length}
           </span>
         </button>

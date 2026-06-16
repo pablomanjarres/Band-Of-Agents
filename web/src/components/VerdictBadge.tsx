@@ -4,10 +4,10 @@ import type { VerdictDecision } from '../types';
 // Shared verdict styling for campaign rows/cells/badges. "reviewing" is the
 // not-yet-decided state; the three real verdicts mirror StatusChip's palette.
 const STYLES: Record<RegionStatus, string> = {
-  publish: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
-  adapt: 'bg-amber-100 text-amber-700 ring-amber-200',
-  escalate: 'bg-red-100 text-red-700 ring-red-200',
-  reviewing: 'bg-slate-200 text-slate-600 ring-slate-300',
+  publish: 'bg-human/10 text-human ring-human/25',
+  adapt: 'bg-warn/10 text-warn ring-warn/25',
+  escalate: 'bg-danger/10 text-danger ring-danger/25',
+  reviewing: 'bg-surface-3 text-muted ring-border-strong',
 };
 
 const LABELS: Record<RegionStatus, string> = {
@@ -39,7 +39,7 @@ export function VerdictBadge({
 export function AggregateBadge({ decision }: { decision?: VerdictDecision }) {
   if (!decision) {
     return (
-      <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-500 ring-1 ring-inset ring-slate-200">
+      <span className="inline-flex items-center rounded-full bg-surface-3 px-2.5 py-0.5 text-xs font-medium text-muted ring-1 ring-inset ring-border-strong">
         not reviewed
       </span>
     );

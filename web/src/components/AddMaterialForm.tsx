@@ -14,9 +14,9 @@ interface AddMaterialFormProps {
 const MATERIAL_KINDS: MaterialKind[] = ['video', 'post', 'image', 'banner'];
 const MARKET_OPTIONS = ['US', 'EU', 'LATAM'] as const;
 
-const labelClass = 'block text-xs font-medium uppercase tracking-wide text-slate-500';
+const labelClass = 'block font-mono text-[10px] font-medium uppercase tracking-wider text-faint';
 const inputClass =
-  'mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400';
+  'mt-1.5 w-full rounded-xl border border-border-strong bg-bg-soft/70 p-2 text-sm text-fg placeholder:text-faint transition-colors focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/25';
 
 export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onAdded, onCancel }: AddMaterialFormProps) {
   const [name, setName] = useState('');
@@ -92,7 +92,7 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+    <form onSubmit={handleSubmit} className="surface space-y-3 rounded-2xl p-4">
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className={labelClass} htmlFor="m-name">Name</label>
@@ -129,23 +129,34 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
         <div>
           <span className={labelClass}>Markets</span>
           <div className="mt-1 flex flex-wrap gap-2">
-            {MARKET_OPTIONS.map((market) => (
-              <label key={market} className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-700 shadow-sm">
-                <input type="checkbox" checked={markets.includes(market)} onChange={() => toggleMarket(market)} className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-400" />
-                {market}
-              </label>
-            ))}
+            {MARKET_OPTIONS.map((market) => {
+              const checked = markets.includes(market);
+              return (
+                <label
+                  key={market}
+                  className={[
+                    'inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all',
+                    checked
+                      ? 'border-accent/50 bg-accent/10 text-accent'
+                      : 'border-border-strong bg-bg-soft/60 text-muted hover:text-fg',
+                  ].join(' ')}
+                >
+                  <input type="checkbox" checked={checked} onChange={() => toggleMarket(market)} className="h-3.5 w-3.5 rounded border-border-strong bg-bg-soft text-accent-strong focus:ring-accent/40 focus:ring-offset-0" />
+                  {market}
+                </label>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {error ? <p className="text-sm text-danger">{error}</p> : null}
 
       <div className="flex items-center gap-2">
-        <button type="submit" disabled={saving || uploading} className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">
-          {saving ? 'Adding.' : 'Add material'}
+        <button type="submit" disabled={saving || uploading} className="btn btn-primary">
+          {saving ? 'Adding…' : 'Add material'}
         </button>
-        <button type="button" onClick={onCancel} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">
+        <button type="button" onClick={onCancel} className="btn btn-ghost px-4 py-2">
           Cancel
         </button>
       </div>
