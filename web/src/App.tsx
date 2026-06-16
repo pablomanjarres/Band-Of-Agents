@@ -1,4 +1,5 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { ArtifactViewerPage } from './pages/ArtifactViewerPage';
 import { CampaignDetailPage } from './pages/CampaignDetailPage';
 import { CampaignsPage } from './pages/CampaignsPage';
 import { HistoryPage } from './pages/HistoryPage';
@@ -8,6 +9,7 @@ import { PlaceholderPage } from './pages/PlaceholderPage';
 import { ReplayBoardPage } from './pages/ReplayBoardPage';
 import { RulebooksPage } from './pages/RulebooksPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { SpendTracker } from './components/SpendTracker';
 
 // Campaign-first navigation. The old single-asset "Compose" flow is gone: a review
 // is always a campaign (a product with its advertisements and their materials), so
@@ -29,24 +31,27 @@ function Nav() {
           </span>
           <span className="text-sm font-semibold text-slate-800">Band Review Board</span>
         </NavLink>
-        <nav className="flex items-center gap-1">
-          {NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                `rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                  isActive
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
-                }`
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
+        <div className="flex items-center gap-3">
+          <nav className="flex items-center gap-1">
+            {NAV_ITEMS.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  `rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                    isActive
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                  }`
+                }
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
+          <SpendTracker />
+        </div>
       </div>
     </header>
   );
@@ -62,6 +67,7 @@ export default function App() {
             <Route path="/" element={<Navigate to="/campaigns" replace />} />
             <Route path="/campaigns" element={<CampaignsPage />} />
             <Route path="/campaigns/:id" element={<CampaignDetailPage />} />
+            <Route path="/a/:id" element={<ArtifactViewerPage />} />
             <Route path="/reviews/:id" element={<LiveBoardPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/history/:id" element={<ReplayBoardPage />} />

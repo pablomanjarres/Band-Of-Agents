@@ -13,7 +13,9 @@ import { makeRegionReviewer } from '../agents/region-reviewer';
 import { makeBrandReviewer } from '../agents/brand-reviewer';
 import { makeRemediation } from '../agents/remediation';
 import { makeReconcile, type Precedent } from '../agents/reconcile';
+import { buildCrossFrameworkAdapter, CROSS_FRAMEWORK_BRAND_PROMPT } from '../band/cross-framework';
 import type { BrandDna, ContentAsset, Rulebook } from '../domain/types';
+import type { NewArtifact } from '../domain/artifact';
 import { translateActivity, type BoardEvent } from './events';
 import { SharedBoard } from './shared';
 import type { BoardModels } from './session';
@@ -29,6 +31,8 @@ export interface BandBoardOptions {
   models: BoardModels;
   humanHandle?: string;
   hostImage?: (url: string) => string;
+  /** Register an artifact and get a dashboard viewer URL agents paste into the room. */
+  publishArtifact?: (input: NewArtifact) => { id: string; url: string };
   getPrecedents?: () => string[];
   /** Current rulebook per region from the store, so UI edits apply to the next review. */
   getRulebook?: (region: string) => Rulebook;
@@ -74,6 +78,12 @@ export class BandBoard {
         intakeAgentHandle: INTAKE_HANDLE,
         remediationHandle: REMEDIATION_HANDLE,
         reconcileHandle: RECONCILE_HANDLE,
+        // Recruit only the reviewers the asset's markets target (Brand always joins).
+        regionHandles: {
+          US: '@pablomanjarres/us-reviewer',
+          EU: '@pablomanjarres/eu-reviewer',
+          LATAM: '@pablomanjarres/latam-reviewer',
+        },
         ...(this.opts.lookupCampaign ? { lookupCampaign: this.opts.lookupCampaign } : {}),
       }),
     });
@@ -110,7 +120,7 @@ export class BandBoard {
       name: 'Remediation',
       handle: REMEDIATION_HANDLE,
       envPrefix: 'REMEDIATION',
-      onMessage: makeRemediation({ board, brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: COORDINATOR_HANDLE, ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}) }),
+      onMessage: makeRemediation({ board, brand, copyModel: models.remediationCopy, imageModel: models.image, reportToHandle: COORDINATOR_HANDLE, ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}), ...(this.opts.publishArtifact ? { publishArtifact: this.opts.publishArtifact } : {}) }),
     });
     await this.transport.connectAgent({
       agentId: requireEnv('RECONCILE_AGENT_ID'),
@@ -120,12 +130,31 @@ export class BandBoard {
       onMessage: makeReconcile({
         board,
         expectedRegions: ['US', 'EU', 'LATAM', 'BRAND'],
+        // Wait only for the market-bound regions the asset targets; Brand is always expected.
+        marketRegions: ['US', 'EU', 'LATAM'],
         coordinatorHandle: COORDINATOR_HANDLE,
         remediationHandle: REMEDIATION_HANDLE,
         ...(this.opts.humanHandle ? { humanHandle: this.opts.humanHandle } : {}),
         ...(this.opts.logPrecedent ? { logPrecedent: this.opts.logPrecedent } : {}),
+        ...(this.opts.publishArtifact ? { publishArtifact: this.opts.publishArtifact } : {}),
       }),
     });
+
+    // Cross-framework advisor (opt-in via XFRAMEWORK_AGENT_ID + AIML_API_KEY): one
+    // reviewer running on the SDK's OpenAI tool-calling framework instead of the
+    // GenericAdapter, so the room visibly spans frameworks, not just models. It
+    // coordinates via the room tools (narrates a thought, posts a brand-voice
+    // finding, @mentions reconcile); it does not file a structured board verdict.
+    if (process.env.XFRAMEWORK_AGENT_ID && process.env.AIML_API_KEY) {
+      await this.transport.connectFrameworkAgent({
+        name: 'Brand Voice (OpenAI framework)',
+        envPrefix: 'XFRAMEWORK',
+        adapter: buildCrossFrameworkAdapter({
+          apiKey: process.env.AIML_API_KEY,
+          systemPrompt: CROSS_FRAMEWORK_BRAND_PROMPT,
+        }),
+      });
+    }
   }
 
   /** Plain-English room chatter -> timeline log lines. Structured diagram state comes from the board. */

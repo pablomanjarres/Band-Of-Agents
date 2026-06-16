@@ -4,6 +4,48 @@ Plan derived from `docs/superpowers/specs/2026-06-13-multi-region-review-board-d
 Walking skeleton: prove each rung end to end (run it, show output) before the next.
 Platform: band.ai. Stack: TypeScript, Node 22+, pnpm, ESM. No commits/remote (per user).
 
+## Orchestration redesign (active): Blackboard pods on a decision spine
+Full plan: `docs/superpowers/plans/2026-06-14-blackboard-pods-and-spine.md` (design: `docs/superpowers/specs/2026-06-14-orchestration-redesign-proposals.md`, Proposal 4). Replaces the scatter-gather (coordinator broadcast + deterministic reconcile) with pods that debate, a board that reconciles, and a spine that ends in a terminal state.
+- [x] Phase 0: board domain schemas (work-items, pod findings, conflicts, adjudication).
+- [x] Phase 1: knowledge-source shell, pod-lead, Regulatory debate (rebuttal round).
+- [x] Phase 2: Claims and Brand pod members.
+- [x] Phase 3: Mediator at the board.
+- [x] Phase 4: Conductor + Risk Adjudicator (the decision spine).
+- [x] Phase 5: routing, board events, full wiring, walking-skeleton integration, real Band.
+- [x] Phase 6 (optional): web live-board diagram (pods + board + spine).
+
+### Review (2026-06-14): blackboard pods/board/spine implemented on branch `blackboard-pods`
+Implemented end to end via TDD, one commit per task (19 task commits, exact plan messages,
+no co-author trailers, no em dashes). Built on a worktree branched off `orchestration-redesign`.
+- Tests: 35 passing across 22 files (was 19/11). Root + web typecheck clean (noUncheckedIndexedAccess).
+- `pnpm local` proves the full flow on the fake transport: intake to 3 pods, the Regulatory
+  debate (Reg Lead challenges EU with the US peer rationale, EU holds), one conflict-bearing
+  PodFinding, Adjudicator consults the Mediator (no movement), one remediation recommit, deadlock
+  escalation to the human, terminal SPIKED. The conflict is genuine (verified), not a linear pipeline.
+- Phase 5.6 wires the same cast on RealBandTransport (typechecked). Live `pnpm agents` is the only
+  remaining manual step: needs 17 band.ai agents registered (handles in src/run/agents.ts) plus their
+  PREFIX_AGENT_ID/PREFIX_API_KEY in `.env`. The web live-board visual (`pnpm --dir web dev`) is also
+  a manual check; the diagram model (web/src/pipeline.ts) is a pure derivation and typechecks.
+- Known MVP simplifications (carried from the plan, not regressions): Claims/Brand pod members run
+  concurrently (the genuine debate is the Regulatory rebuttal round); the demo exercises the HOLD
+  branch, the CONCEDE-downgrade branch exists in code but is not hit by the default run.
+
+### Update (2026-06-15): merged to main + wired into the app on real models
+- Merged to `main` via PR #5. Reconciled with main's SharedBoard refactor: kept main's board-mode
+  region-reviewer/remediation, split the pods' message-passing copies into pod-region-reviewer.ts and
+  pod-remediation.ts. Combined suite green.
+- Real models verified (dev: Bedrock + Vertex + Featherless + Nano Banana). The full pods flow runs
+  end to end on live LLMs to a terminal (EU holds, 3 conflicts, mediate, remediate, escalate, spiked).
+- Fixed a bug only a live run surfaced: regenerated base64 images flowed unhosted into the recommit
+  round and blew past the model context (~1.9M tokens). PodBoardSession now always hosts images.
+- Wired into the product: PodBoardSession + realPodBoardModels; the server runs the pods topology with
+  BOARD_TOPOLOGY=pods over the same SSE path; web UI built and served.
+- README rewritten for the pods topology + risk-shield framing; .env.example carries the pods cast.
+- Tests: 54 passing across 31 files; typecheck clean (root + web).
+- Open: live band.ai pods needs the 13 new agents registered (+ keys in .env); optional AIML key for
+  the aiml path; pod-reviewer parity with main (vision, shared context, task binding, live rulebook,
+  precedent) is a follow-up.
+
 ## Phase 0: Scaffolding -- DONE
 - [x] pnpm + TypeScript ESM project (package.json, tsconfig, vitest, MIT LICENSE, README).
 - [x] Domain types + zod schemas.
@@ -290,3 +332,82 @@ drop legacy Compose, material click shows the material (not the agent diagram).
 
 ## Rung D + E review (advertisement tier + UI redesign)
 - 2026-06-15: 3-tier model (Campaign -> Advertisement -> Material) shipped and committed (ea6508c backend, 18316b3 web). Backend 89/89 tests, tsc clean; web build green. Redesign: campaign-first nav (Compose removed), full-width 2-pane workspace (LEFT = live video-processing rail, MAIN = advertisement tabs + materials grid), clicking a material opens a slide-over of THE MATERIAL (media preview, copy, claim, perception, per-region verdicts) with "View debate" for the agent diagram, real drag-and-drop uploads (video/image for materials, .md/.json/.txt for dossier sources), add advertisements/materials anytime, New campaign creator. Live-verified on localhost:8791: campaigns API returns 3 ads / 7 materials; a campaign review runs concurrently with perceiving frames + a correct per-advertisement rollup (Retargeting = US escalate from the banner). Pushed; Vercel frontend deploy re-runs green.
+---
+
+# Feature gaps execution (2026-06-14, branch feature-gaps)
+
+Source: `.private/FEATURE_GAPS_TODO.md` (derived from the BAND_FEATURE_USAGE audit).
+Method: TDD per gap (write a failing test on the FakeBandTransport, then minimal code,
+then green), granular commits, `tsc --noEmit` + `vitest run` green after each gap.
+Baseline before any change: 19 tests pass, tsc clean.
+
+Guardrail (from the punch list): depth over breadth. Land P1 first, reassess against the
+demo, then P2. P3 is stretch only and must not risk the verified demo.
+
+## P1 (do first: highest lift, smallest change) -- DONE
+- [x] P1.1 Target-region recruitment: coordinator filters recruited reviewers by
+      `asset.markets` (opt-in `regionHandles`); `addParticipant` pulls in a targeted region
+      agent not yet in the room. Reconcile waits only for recruited regions (opt-in
+      `marketRegions`) so a single-market asset does not hang. Wired into band mode.
+      Tests: target-region.test.ts, target-region-reconcile.test.ts.
+- [x] P1.2 Bind room to task: `createRoom(taskId)` forwards the asset id to `createChat`
+      via the testable `buildIntakeControl` helper; intake-probe binds a task id. Live
+      band.ai persistence of task_id remains a manual probe. Test: intake-task-binding.test.ts.
+
+Reassess checkpoint (guardrail): 24 tests green, tsc clean. The verified demo is intact
+(all original 19 tests pass; new behavior is opt-in and additive; local BoardSession demo
+unchanged). Proceeding to P2.
+
+## P2 (then reassess against the demo) -- DONE
+- [x] P2.3 Emit `task`-typed events for per-region progress: region reviewers (and now the
+      brand reviewer, for consistency) open and close their review on Band's `task` channel.
+      `task` was already in the transport's allowed set, so no transport change. Tests:
+      region-task-event.test.ts.
+- [x] P2.4 Vision reviewer reads the campaign image (third AIML modality): optional `images`
+      on the model request, AIML adapter sends OpenAI `image_url` parts, a standalone vision
+      reviewer files an IMAGE-lane finding and reports to Reconcile. Kept out of the production
+      board wiring on purpose (would force a vision model into BoardModels and break the suite);
+      live wiring is the follow-up. Test: vision-reviewer.test.ts.
+
+## P3 (stretch) -- DONE (greenlit by the user)
+- [x] P3.5 Band-native shared context. The SDK 0.1.6 has no /workspace file API and its Memory
+      tools are gated, so the shared context (brand DNA + rulebooks) is published into the room as
+      a tagged message and rehydrated via the /context endpoint (getChatContext), not a local
+      store. Added the pure, tested primitive (codec + latest-wins selector + makeBandSharedContext)
+      and the live capability RealBandTransport.connectContext. Test: shared-context.test.ts.
+      Wiring each reviewer to rehydrate from /context per review is the remaining live step.
+- [x] P3.6 Cross-framework reviewer. The SDK ships framework adapters, so NO external dependency
+      was needed: one reviewer runs on the SDK's OpenAI tool-calling adapter (a different
+      FrameworkAdapter than the GenericAdapter the other agents use), routed through AIML via a
+      custom client factory. Added buildCrossFrameworkAdapter + RealBandTransport.connectFrameworkAgent,
+      wired opt-in into band mode (gated on XFRAMEWORK_AGENT_ID, default off). Test: cross-framework.test.ts.
+
+## Review (feature gaps, 2026-06-14)
+Shipped P1 + P2 on branch `feature-gaps`, branched from `worktree-band-review-board`, with strict
+TDD (a failing test on the FakeBandTransport, then minimal code, then green) and granular commits.
+Baseline was 19 tests; the suite is now 31 (12 new), with `tsc --noEmit` clean after every change.
+
+Verified by two adversarial review workflows (P1/P2: 5 skeptics; P3: 3 skeptics): every gap
+returned correct/doneWhenMet, no regression, conventions OK, and zero non-low issues. The original
+19 tests all still pass, so the verified demo is intact; every new behavior is opt-in and additive.
+
+What is proven on the fake-transport / unit proxy, and what remains for a live band.ai/AIML run:
+- P1.1 targeting and dynamic addParticipant: proven at the coordinator and reconcile level.
+  Live remains: confirm a dynamically added region agent actually joins and reviews in a real room.
+- P1.2 task binding: forwarding of the asset id into `createChat(taskId)` is unit-proven; live
+  remains: confirm band.ai persists the task_id (run `pnpm exec tsx src/run/intake-probe.ts`).
+- P2.3 task events: proven the events carry `messageType: 'task'`; live remains: confirm they
+  render under Band's task channel in app.band.ai.
+- P2.4 vision: proven the reviewer is fed the image and files an image-level finding; live remains:
+  a real AIML vision slug (e.g. `google/gemini-2.5-pro`) on an asset with a real imageUrl, and the
+  optional production wiring (a vision agent + `IMAGE` in expectedRegions).
+- P3.5 shared context: the publish/rehydrate primitive is unit-proven; live remains: wire reviewers
+  to rehydrate from /context per review (needs room membership and a live room).
+- P3.6 cross-framework: adapter construction and AIML routing are unit-proven; live remains: create
+  a band.ai agent for the XFRAMEWORK prefix and confirm the OpenAI-framework reviewer coordinates
+  in a real room.
+
+P3 was greenlit by the user and is done. Both items were de-risked by mapping the actual
+`@band-ai/sdk` 0.1.6 surface: there is no /workspace file API (so shared context uses the room plus
+the /context endpoint, never the gated Memory tools), and the SDK already ships framework adapters
+(so cross-framework needed no new dependency). The full suite is 31 green and tsc is clean.

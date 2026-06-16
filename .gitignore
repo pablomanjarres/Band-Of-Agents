@@ -147,3 +147,8 @@ vite.config.ts.timestamp-*
 
 # Private local context (briefs, rubric); never committed, never pushed
 /.private/
+
+# Orchestration proposal scratch artifacts (visual decks for review; not committed)
+orchestration-proposals.html
+/scratch/
+.vercel

@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import type { BoardEvent, BoardStatus } from '../board/events';
 import type { Campaign, ContentAsset, Material, Rulebook } from '../domain/types';
 import { Campaign as CampaignSchema, normalizeCampaign } from '../domain/types';
+import type { Artifact } from '../domain/artifact';
 import type { Precedent } from '../agents/reconcile';
 
 export interface StoredReview {
@@ -31,12 +32,17 @@ export class Store {
   private readonly imagesDir: string;
   private readonly rulebooksDir: string;
   private readonly videosDir: string;
+  // Called with the absolute path of each file just written, so a backup layer
+  // (e.g. GCS mirror on Cloud Run) can persist it. Stays out of the read/write
+  // hot path's correctness: it is fire-and-forget on the caller's side.
+  private readonly onWrite?: (absPath: string) => void;
 
-  constructor(dir: string) {
+  constructor(dir: string, onWrite?: (absPath: string) => void) {
     this.dir = dir;
     this.imagesDir = join(dir, 'images');
     this.rulebooksDir = join(dir, 'rulebooks');
     this.videosDir = join(dir, 'videos');
+    this.onWrite = onWrite;
     for (const d of [this.dir, this.imagesDir, this.rulebooksDir, this.videosDir]) {
       if (!existsSync(d)) mkdirSync(d, { recursive: true });
     }
@@ -53,7 +59,9 @@ export class Store {
   }
 
   private writeJson(file: string, value: unknown): void {
-    writeFileSync(join(this.dir, file), JSON.stringify(value, null, 2));
+    const p = join(this.dir, file);
+    writeFileSync(p, JSON.stringify(value, null, 2));
+    this.onWrite?.(p);
   }
 
   /** Decode a base64 data URL to a hosted image file; pass through hosted URLs. */
@@ -66,7 +74,9 @@ export class Store {
     if (!data) return url;
     const ext = mime === 'image/png' ? 'png' : mime === 'image/jpeg' ? 'jpg' : 'img';
     const name = `${randomUUID()}.${ext}`;
-    writeFileSync(join(this.imagesDir, name), Buffer.from(data, 'base64'));
+    const p = join(this.imagesDir, name);
+    writeFileSync(p, Buffer.from(data, 'base64'));
+    this.onWrite?.(p);
     return `/api/images/${name}`;
   }
 
@@ -222,7 +232,22 @@ export class Store {
   }
 
   saveRulebookOverride(region: string, rulebook: Rulebook): void {
-    writeFileSync(join(this.rulebooksDir, `${region.toLowerCase()}.json`), JSON.stringify(rulebook, null, 2));
+    const p = join(this.rulebooksDir, `${region.toLowerCase()}.json`);
+    writeFileSync(p, JSON.stringify(rulebook, null, 2));
+    this.onWrite?.(p);
+  }
+
+  // Artifacts: things an agent produced (images, structured docs) that Band
+  // cannot show inline. Stored small (images keep their hosted /api/images path
+  // in `src`, never base64), served back to the dashboard viewer by id.
+  saveArtifact(artifact: Artifact): void {
+    const all = this.readJson<Artifact[]>('artifacts.json', []).filter((a) => a.id !== artifact.id);
+    all.push(artifact);
+    this.writeJson('artifacts.json', all);
+  }
+
+  getArtifact(id: string): Artifact | undefined {
+    return this.readJson<Artifact[]>('artifacts.json', []).find((a) => a.id === id);
   }
 }
 

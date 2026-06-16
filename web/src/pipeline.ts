@@ -1,195 +1,185 @@
-// Pure selector that derives the live pipeline diagram model from the board
-// state. Every node and edge is computed from the existing BoardState (which is
-// itself folded from BoardEvents), so the diagram stays a dumb renderer and the
-// mapping is testable in isolation. Repeated review / verdict rounds simply
-// re-derive the same node ids, keeping the animation idempotent.
+// Pure selector that derives the live board diagram model from the board state.
+// Every node and edge is computed from the existing BoardState (which is itself
+// folded from BoardEvents), so the diagram stays a dumb renderer and the mapping
+// is testable in isolation. The topology is the pods -> board -> spine shape:
+// three deliberation pods file findings to a shared board, where a Mediator and
+// a Risk Adjudicator drive a terminal verdict, with one recommit loop back to
+// the asset. Re-deriving from the same state keeps the animation idempotent.
 
-import type { BoardState, RegionState, RegionStatus } from './boardState';
-import { REGION_ORDER } from './boardState';
-import type { VerdictDecision } from './types';
+import type { BoardPhase, BoardState, PodState } from './boardState';
 
 // Visual family for a node. Drives its colour palette in DiagramNode.
 export type NodeVariant = 'context' | 'ai' | 'human' | 'outcome';
 
-// Lifecycle of a node, independent of its variant. A region node additionally
-// carries a verdict (publish | adapt | escalate) once it leaves "reviewing".
+// Lifecycle of a node, independent of its variant.
 export type NodeActivity = 'idle' | 'active' | 'done';
+
+// The three pods, in fixed left-rail order.
+export const POD_ORDER = ['claims', 'regulatory', 'brand'] as const;
+export type PodName = (typeof POD_ORDER)[number];
 
 // Stable identifiers for every node in the diagram.
 export type NodeId =
-  | 'context'
-  | 'coordinator'
-  | 'reconcile'
-  | 'remediation'
-  | 'publish'
-  | 'compliance'
-  | `agent:${string}`;
+  | 'asset'
+  | 'pod:claims'
+  | 'pod:regulatory'
+  | 'pod:brand'
+  | 'board'
+  | 'adjudicator'
+  | 'published'
+  | 'spiked'
+  | 'human';
 
-export interface AgentNodeModel {
-  id: NodeId;
-  region: string;
+// A pod container node: lit once it has filed its consolidated finding, and
+// annotated with the number of cross-pod conflicts it carried.
+export interface PodNodeModel {
+  id: Extract<NodeId, `pod:${string}`>;
+  pod: PodName;
   title: string;
   subtitle: string;
+  members: string;
   activity: NodeActivity;
-  // Present once a verdict has landed for this region.
-  verdict?: VerdictDecision;
-  blocking: number;
-  findings: number;
-  reviewerName?: string;
+  filed: boolean;
+  conflicts: number;
 }
 
 // Identifiers for every drawn edge. Used both as React keys and as the
 // activation lookup in the diagram overlay.
 export type EdgeId =
-  | 'context-coordinator'
-  | 'coordinator-agents'
-  | 'agents-reconcile'
-  | 'reconcile-remediation'
-  | 'reconcile-publish'
-  | 'reconcile-compliance'
-  | 'remediation-agents'
-  | 'compliance-context';
+  | 'asset-claims'
+  | 'asset-regulatory'
+  | 'asset-brand'
+  | 'claims-board'
+  | 'regulatory-board'
+  | 'brand-board'
+  | 'board-adjudicator'
+  | 'adjudicator-published'
+  | 'adjudicator-spiked'
+  | 'adjudicator-human'
+  | 'adjudicator-asset'; // the recommit loop
 
 export interface PipelineModel {
-  context: { activity: NodeActivity; pulse: boolean };
-  coordinator: { activity: NodeActivity; recruitCount?: number; reReview: boolean };
-  agents: AgentNodeModel[];
-  reconcile: { activity: NodeActivity; conflict: boolean; summary?: string };
-  remediation: { activity: NodeActivity };
-  publish: { activity: NodeActivity; regions: string[] };
-  compliance: { activity: NodeActivity; awaitingDecision: boolean };
+  asset: { activity: NodeActivity; assetId?: string };
+  pods: PodNodeModel[];
+  board: { activity: NodeActivity; conflicts: number; mediating: boolean };
+  adjudicator: { activity: NodeActivity; decision?: string };
+  published: { activity: NodeActivity };
+  spiked: { activity: NodeActivity };
+  human: { activity: NodeActivity; awaitingDecision: boolean };
+  phase: BoardPhase;
+  // The terminal the spine landed in, if any.
+  terminal?: 'published' | 'spiked' | 'escalated';
   // Set of edge ids that are currently "lit".
   activeEdges: ReadonlySet<EdgeId>;
 }
 
-const AGENT_META: Record<string, { title: string; subtitle: string }> = {
-  US: { title: 'US agent', subtitle: 'US ad rules' },
-  EU: { title: 'EU agent', subtitle: 'EU + GDPR' },
-  LATAM: { title: 'LATAM agent', subtitle: 'LATAM rules' },
-  BRAND: { title: 'Brand agent', subtitle: 'stays on-brand' },
+const POD_META: Record<PodName, { title: string; subtitle: string; members: string }> = {
+  claims: { title: 'Claims pod', subtitle: 'evidence + precedent', members: 'scout, claim, precedent, disclosure' },
+  regulatory: { title: 'Regulatory pod', subtitle: 'US / EU / LATAM debate', members: 'US, EU, LATAM' },
+  brand: { title: 'Brand pod', subtitle: 'voice, channel, visual', members: 'voice, channel, visual' },
 };
 
-function agentMeta(region: string): { title: string; subtitle: string } {
-  return AGENT_META[region] ?? { title: `${region} agent`, subtitle: `${region} rules` };
-}
-
-// "Intake: asset ... Recruiting 6 reviewer(s)." -> 6
-function parseRecruitCount(text: string): number | undefined {
-  const match = /Recruiting\s+(\d+)/i.exec(text);
-  if (!match) return undefined;
-  const value = Number.parseInt(match[1], 10);
-  return Number.isFinite(value) ? value : undefined;
-}
-
-function verdictOf(status: RegionStatus): VerdictDecision | undefined {
-  return status === 'reviewing' ? undefined : status;
-}
-
-function regionActivity(region: RegionState): NodeActivity {
-  return region.status === 'reviewing' ? 'active' : 'done';
+function podNodeId(pod: PodName): Extract<NodeId, `pod:${string}`> {
+  return `pod:${pod}`;
 }
 
 export function buildPipelineModel(state: BoardState): PipelineModel {
   const events = state.events;
   const has = (type: string): boolean => events.some((event) => event.type === type);
+  const phase = state.phase;
+  const terminal = state.terminal;
 
-  // --- Coordinator -------------------------------------------------------
-  const recruitEvents = events.filter(
-    (event): event is Extract<typeof event, { type: 'recruited' }> => event.type === 'recruited',
-  );
-  const lastRecruit = recruitEvents[recruitEvents.length - 1];
-  const recruitCount = lastRecruit ? parseRecruitCount(lastRecruit.text) : undefined;
-  const reReview = recruitEvents.some((event) => /re-?review/i.test(event.text));
-  const intakeSeen = has('intake') || has('recruited');
-  const anyReview = has('review');
-  const coordinatorActivity: NodeActivity = !intakeSeen
-    ? 'idle'
-    : anyReview
-      ? 'done'
-      : 'active';
+  // --- Asset (intake) ----------------------------------------------------
+  const assetSeen = Boolean(state.asset) || has('intake');
+  // The asset stays "done" once seen; it pulses again only when a recommit
+  // loop re-enters it (an adjudication asked for remediation, or a revision
+  // landed). Otherwise idle before the first asset.
+  const recommit =
+    has('revised') ||
+    events.some((event) => event.type === 'adjudication' && event.decision === 'remediate');
+  const assetActivity: NodeActivity = !assetSeen ? 'idle' : recommit && phase !== 'terminal' ? 'active' : 'done';
 
-  // --- Region / brand agents --------------------------------------------
-  const agents: AgentNodeModel[] = REGION_ORDER.map((region) => {
-    const node = state.regions[region];
-    const meta = agentMeta(region);
-    const activity: NodeActivity = node ? regionActivity(node) : 'idle';
-    const verdict = node ? verdictOf(node.status) : undefined;
+  // --- Pods --------------------------------------------------------------
+  const pods: PodNodeModel[] = POD_ORDER.map((pod) => {
+    const podState: PodState | undefined = state.pods[pod];
+    const meta = POD_META[pod];
+    const filed = Boolean(podState?.filed);
+    // A pod is "active" while it deliberates (asset seen, not yet filed), "done"
+    // once it has filed, idle before intake.
+    const activity: NodeActivity = filed ? 'done' : assetSeen && phase !== 'intake' ? 'active' : 'idle';
     return {
-      id: `agent:${region}`,
-      region,
+      id: podNodeId(pod),
+      pod,
       title: meta.title,
       subtitle: meta.subtitle,
+      members: meta.members,
       activity,
-      ...(verdict ? { verdict } : {}),
-      blocking: node?.blocking ?? 0,
-      findings: node?.findings.length ?? 0,
-      ...(node?.reviewerName ? { reviewerName: node.reviewerName } : {}),
+      filed,
+      conflicts: podState?.conflicts ?? 0,
     };
   });
-  const anyVerdict = has('verdict');
+  const anyFiled = pods.some((pod) => pod.filed);
+  const totalConflicts = pods.reduce((sum, pod) => sum + pod.conflicts, 0);
 
-  // --- Reconcile ---------------------------------------------------------
-  const reconcileActivity: NodeActivity = !anyReview ? 'idle' : anyVerdict ? 'done' : 'active';
-  const decided = agents.filter((agent) => agent.verdict);
-  const summary =
-    decided.length > 0
-      ? decided.map((agent) => `${agent.region} ${agent.verdict}`).join('  ')
-      : undefined;
-
-  // --- Outcome lanes -----------------------------------------------------
-  const publishRegions = agents
-    .filter((agent) => agent.verdict === 'publish')
-    .map((agent) => agent.region);
-  const hasAdapt = agents.some((agent) => agent.verdict === 'adapt');
-  const hasEscalate = agents.some((agent) => agent.verdict === 'escalate');
-
-  const remediationActive = Boolean(state.remediation);
-  const remediationActivity: NodeActivity = remediationActive
-    ? 'done'
-    : hasAdapt
-      ? 'active'
-      : 'idle';
-
-  const publishActivity: NodeActivity = publishRegions.length > 0 ? 'done' : 'idle';
-
-  const escalated = Boolean(state.escalationText) || hasEscalate;
-  const awaitingDecision = state.status === 'awaiting-decision';
-  const decisionRecorded = Boolean(state.decisionText);
-  const complianceActivity: NodeActivity = !escalated
-    ? 'idle'
-    : decisionRecorded
+  // --- Board (Mediator) --------------------------------------------------
+  // Lit while reconciling or deciding; done once the spine is terminal.
+  const boardActivity: NodeActivity =
+    phase === 'terminal'
       ? 'done'
-      : 'active';
+      : phase === 'reconciling' || phase === 'deciding'
+        ? 'active'
+        : anyFiled
+          ? 'active'
+          : 'idle';
+  const mediating = events.some((event) => event.type === 'mediation') || (phase === 'reconciling' && totalConflicts > 0);
+
+  // --- Adjudicator (spine) ----------------------------------------------
+  const adjudications = events.filter(
+    (event): event is Extract<typeof event, { type: 'adjudication' }> => event.type === 'adjudication',
+  );
+  const lastAdjudication = adjudications.at(-1);
+  const adjudicatorActivity: NodeActivity =
+    phase === 'terminal' ? 'done' : phase === 'deciding' ? 'active' : adjudications.length > 0 ? 'active' : 'idle';
+
+  // --- Terminals ---------------------------------------------------------
+  const publishedActivity: NodeActivity = terminal === 'published' ? 'done' : 'idle';
+  const spikedActivity: NodeActivity = terminal === 'spiked' ? 'done' : 'idle';
+  const escalated = terminal === 'escalated' || Boolean(state.escalationText) || has('escalation');
+  const awaitingDecision = state.status === 'awaiting-decision';
+  const decisionRecorded = Boolean(state.decisionText) || terminal === 'escalated';
+  const humanActivity: NodeActivity = !escalated ? 'idle' : decisionRecorded && terminal === 'escalated' ? 'done' : 'active';
 
   // --- Edges -------------------------------------------------------------
   const activeEdges = new Set<EdgeId>();
-  if (intakeSeen) activeEdges.add('context-coordinator');
-  if (coordinatorActivity !== 'idle' && (anyReview || coordinatorActivity === 'active')) {
-    activeEdges.add('coordinator-agents');
+  if (assetSeen && phase !== 'intake') {
+    activeEdges.add('asset-claims');
+    activeEdges.add('asset-regulatory');
+    activeEdges.add('asset-brand');
   }
-  if (anyReview) activeEdges.add('agents-reconcile');
-  if (hasAdapt || remediationActive) activeEdges.add('reconcile-remediation');
-  if (publishRegions.length > 0) activeEdges.add('reconcile-publish');
-  if (escalated) activeEdges.add('reconcile-compliance');
-  if (remediationActive) activeEdges.add('remediation-agents');
-  if (decisionRecorded) activeEdges.add('compliance-context');
+  for (const pod of pods) {
+    if (pod.filed) activeEdges.add(`${pod.pod}-board` as EdgeId);
+  }
+  if (anyFiled && (phase === 'reconciling' || phase === 'deciding' || phase === 'terminal')) {
+    activeEdges.add('board-adjudicator');
+  }
+  if (terminal === 'published') activeEdges.add('adjudicator-published');
+  if (terminal === 'spiked') activeEdges.add('adjudicator-spiked');
+  if (escalated) activeEdges.add('adjudicator-human');
+  if (recommit) activeEdges.add('adjudicator-asset');
 
   return {
-    context: { activity: 'done', pulse: decisionRecorded },
-    coordinator: {
-      activity: coordinatorActivity,
-      ...(recruitCount !== undefined ? { recruitCount } : {}),
-      reReview,
+    asset: { activity: assetActivity, ...(state.asset ? { assetId: state.asset.id } : {}) },
+    pods,
+    board: { activity: boardActivity, conflicts: totalConflicts, mediating },
+    adjudicator: {
+      activity: adjudicatorActivity,
+      ...(lastAdjudication ? { decision: lastAdjudication.decision } : {}),
     },
-    agents,
-    reconcile: {
-      activity: reconcileActivity,
-      conflict: state.conflict,
-      ...(summary ? { summary } : {}),
-    },
-    remediation: { activity: remediationActivity },
-    publish: { activity: publishActivity, regions: publishRegions },
-    compliance: { activity: complianceActivity, awaitingDecision },
+    published: { activity: publishedActivity },
+    spiked: { activity: spikedActivity },
+    human: { activity: humanActivity, awaitingDecision },
+    phase,
+    ...(terminal ? { terminal } : {}),
     activeEdges,
   };
 }

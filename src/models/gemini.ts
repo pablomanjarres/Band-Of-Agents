@@ -74,11 +74,15 @@ export class GeminiModelClient implements ModelClient {
       }),
     );
     const text = res.text ?? '';
-    if (!req.jsonSchema) return { text };
+    const meta = res.usageMetadata;
+    const usage = meta
+      ? { usage: { inputTokens: meta.promptTokenCount ?? 0, outputTokens: meta.candidatesTokenCount ?? 0 } }
+      : {};
+    if (!req.jsonSchema) return { text, ...usage };
     try {
-      return { text, json: JSON.parse(text) };
+      return { text, json: JSON.parse(text), ...usage };
     } catch {
-      return { text };
+      return { text, ...usage };
     }
   }
 

@@ -84,6 +84,12 @@ export type BoardEvent = (
       stage: 'vision' | 'stt' | 'done';
       transcript?: string;
     }
+  | { type: 'workitem'; seq: number; fromName: string; text: string }
+  | { type: 'debate'; seq: number; fromName: string; text: string }
+  | { type: 'pod-finding'; seq: number; fromName: string; pod: string; conflicts: number; text: string }
+  | { type: 'mediation'; seq: number; fromName: string; resolved: boolean; text: string }
+  | { type: 'adjudication'; seq: number; fromName: string; decision: string; text: string }
+  | { type: 'terminal'; seq: number; fromName: string; decision: 'published' | 'spiked' | 'escalated' }
 ) &
   BoardEventCampaignRef;
 
@@ -331,4 +337,39 @@ export interface VideoUploadResponse {
 /** Response for POST /api/images (multipart upload). */
 export interface ImageUploadResponse {
   url: string;
+}
+
+// Spending: live estimate of model cost, mirrors SpendSnapshot in src/models/spend.ts.
+export interface ModelSpend {
+  model: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  images: number;
+  usd: number;
+}
+
+export interface Spending {
+  totalUsd: number;
+  calls: number;
+  byModel: ModelSpend[];
+}
+
+// Artifacts: things an agent produced that Band cannot show inline, rendered by
+// the /a/:id viewer. Mirrors src/domain/artifact.ts.
+export type ArtifactKind = 'image' | 'markdown' | 'json' | 'text';
+
+export interface Artifact {
+  id: string;
+  kind: ArtifactKind;
+  title: string;
+  createdAt: number;
+  createdBy?: string;
+  reviewId?: string;
+  src?: string;
+  content?: string;
+}
+
+export interface ArtifactResponse {
+  artifact: Artifact;
 }

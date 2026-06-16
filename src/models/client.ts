@@ -21,16 +21,26 @@ export interface Msg {
 export interface CompleteRequest {
   system?: string;
   messages: Msg[];
+  /** Image URLs (http(s) or data URL) passed as vision INPUT; only image-capable adapters (AIML) use them. */
+  images?: string[];
   /** JSON schema for structured output; adapters shape it per provider. */
   jsonSchema?: unknown;
   effort?: 'low' | 'medium' | 'high';
   maxTokens?: number;
 }
 
+/** Approximate token counts a provider reports for one completion, used to estimate spend. */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface CompleteResult {
   text: string;
   /** Present when jsonSchema was supplied and the output parsed as JSON. */
   json?: unknown;
+  /** Provider-reported token usage when available; omitted by the stub and any adapter that lacks counts. */
+  usage?: TokenUsage;
 }
 
 export interface ImageRequest {

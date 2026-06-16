@@ -47,9 +47,39 @@ export class AimlModelClient implements ModelClient {
   }
 
   async complete(req: CompleteRequest): Promise<CompleteResult> {
+    // Vision INPUT, two ways, both supported here:
+    //  - req.images: a flat list of image URLs appended to the last user message
+    //    (the reviewer/pod vision path).
+    //  - per-message content blocks (Msg.content = string | ContentBlock[]):
+    //    toOpenAIContent maps each message, so an image block becomes an
+    //    image_url part (the perception pre-pass path).
+    // A plain-string text call stays byte-identical: toOpenAIContent returns the
+    // string and no req.images are present.
+    const hasImages = (req.images?.length ?? 0) > 0;
+    let lastUserIdx = -1;
+    req.messages.forEach((m, i) => {
+      if (m.role === 'user') lastUserIdx = i;
+    });
+    const chat = req.messages.map((m, i) => {
+      const mapped = toOpenAIContent(m.content);
+      if (hasImages && i === lastUserIdx) {
+        // Merge the flat image URLs onto whatever this message already carried,
+        // normalizing a plain string to a single text part first.
+        const baseParts: OpenAI.Chat.Completions.ChatCompletionContentPart[] =
+          typeof mapped === 'string' ? [{ type: 'text' as const, text: mapped }] : mapped;
+        return {
+          role: 'user' as const,
+          content: [
+            ...baseParts,
+            ...req.images!.map((url) => ({ type: 'image_url' as const, image_url: { url } })),
+          ],
+        };
+      }
+      return { role: m.role, content: mapped };
+    });
     const messages = [
       ...(req.system ? [{ role: 'system', content: req.system }] : []),
-      ...req.messages.map((m) => ({ role: m.role, content: toOpenAIContent(m.content) })),
+      ...chat,
     ] as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
 
     const res = await withRetry(() =>
@@ -61,11 +91,14 @@ export class AimlModelClient implements ModelClient {
       }),
     );
     const text = res.choices[0]?.message?.content ?? '';
-    if (!req.jsonSchema) return { text };
+    const usage = res.usage
+      ? { usage: { inputTokens: res.usage.prompt_tokens, outputTokens: res.usage.completion_tokens } }
+      : {};
+    if (!req.jsonSchema) return { text, ...usage };
     try {
-      return { text, json: JSON.parse(text) };
+      return { text, json: JSON.parse(text), ...usage };
     } catch {
-      return { text };
+      return { text, ...usage };
     }
   }
 

@@ -30,16 +30,22 @@ interface EdgeSpec {
   tone: 'ai' | 'human' | 'outcome' | 'context';
 }
 
-// Declarative wiring of the diagram. Order is irrelevant; ids must be unique.
+// Declarative wiring of the pods -> board -> spine diagram. Order is irrelevant;
+// ids must be unique. The asset fans into the three pods, each pod files into the
+// board, the board feeds the adjudicator, the adjudicator drives the three
+// terminals, and a dashed recommit loop returns from the adjudicator to the asset.
 const EDGES: EdgeSpec[] = [
-  { id: 'context-coordinator', from: 'context', to: 'coordinator', fromSide: 'bottom', toSide: 'top', tone: 'context' },
-  { id: 'coordinator-agents', from: 'coordinator', to: 'agent:EU', fromSide: 'bottom', toSide: 'top', tone: 'ai' },
-  { id: 'agents-reconcile', from: 'agent:EU', to: 'reconcile', fromSide: 'bottom', toSide: 'top', tone: 'ai' },
-  { id: 'reconcile-remediation', from: 'reconcile', to: 'remediation', fromSide: 'bottom', toSide: 'top', label: 'adapt', tone: 'ai' },
-  { id: 'reconcile-publish', from: 'reconcile', to: 'publish', fromSide: 'bottom', toSide: 'top', label: 'publish', tone: 'outcome' },
-  { id: 'reconcile-compliance', from: 'reconcile', to: 'compliance', fromSide: 'bottom', toSide: 'top', label: 'escalate', tone: 'human' },
-  { id: 'remediation-agents', from: 'remediation', to: 'agent:US', fromSide: 'left', toSide: 'bottom', label: 're-review', dashed: true, tone: 'ai' },
-  { id: 'compliance-context', from: 'compliance', to: 'context', fromSide: 'right', toSide: 'right', label: 'logs precedent', dashed: true, tone: 'context' },
+  { id: 'asset-claims', from: 'asset', to: 'pod:claims', fromSide: 'bottom', toSide: 'top', tone: 'ai' },
+  { id: 'asset-regulatory', from: 'asset', to: 'pod:regulatory', fromSide: 'bottom', toSide: 'top', tone: 'ai' },
+  { id: 'asset-brand', from: 'asset', to: 'pod:brand', fromSide: 'bottom', toSide: 'top', tone: 'ai' },
+  { id: 'claims-board', from: 'pod:claims', to: 'board', fromSide: 'right', toSide: 'left', tone: 'ai' },
+  { id: 'regulatory-board', from: 'pod:regulatory', to: 'board', fromSide: 'right', toSide: 'left', tone: 'ai' },
+  { id: 'brand-board', from: 'pod:brand', to: 'board', fromSide: 'right', toSide: 'left', tone: 'ai' },
+  { id: 'board-adjudicator', from: 'board', to: 'adjudicator', fromSide: 'bottom', toSide: 'top', label: 'findings', tone: 'ai' },
+  { id: 'adjudicator-published', from: 'adjudicator', to: 'published', fromSide: 'right', toSide: 'left', label: 'publish', tone: 'outcome' },
+  { id: 'adjudicator-spiked', from: 'adjudicator', to: 'spiked', fromSide: 'right', toSide: 'left', label: 'spike', tone: 'outcome' },
+  { id: 'adjudicator-human', from: 'adjudicator', to: 'human', fromSide: 'right', toSide: 'left', label: 'escalate', tone: 'human' },
+  { id: 'adjudicator-asset', from: 'adjudicator', to: 'asset', fromSide: 'left', toSide: 'left', label: 'recommit', dashed: true, tone: 'ai' },
 ];
 
 const TONE_ACTIVE: Record<EdgeSpec['tone'], string> = {

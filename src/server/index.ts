@@ -24,7 +24,10 @@ import { z } from 'zod';
 import { loadBrandDna, loadRulebook } from '../domain/load';
 import { Advertisement as AdvertisementSchema, Campaign as CampaignSchema, ContentAsset as ContentAssetSchema, Material as MaterialSchema, Rulebook as RulebookSchema } from '../domain/types';
 import type { Advertisement, Campaign, ContentAsset, Material, Rulebook } from '../domain/types';
+import { NewArtifact as NewArtifactSchema } from '../domain/artifact';
 import { BoardSession, realBoardModels, realPerceptionModels, type BoardModels } from '../board/session';
+import { PodBoardSession } from '../board/pod-session';
+import { realPodBoardModels } from '../board/pod-board';
 import { type ModelClient, type SttClient } from '../models/client';
 import { demoCampaignModels, demoPerception } from '../run/demo-fixtures';
 import { CampaignSession, type CampaignRollup } from '../board/campaign';
@@ -34,13 +37,30 @@ import { importRulebook, type ImportFormat } from '../domain/rulebook-import';
 import { loadPresets } from '../domain/presets';
 import type { BoardEvent, BoardStatus } from '../board/events';
 import { Store } from '../store/store';
+import { makePublishArtifact } from '../store/artifacts';
+import { makeGcsMirror, restoreFromGcs } from '../store/gcs-backup';
+import { spend, readSpendSnapshot, SPEND_FILE } from '../models/spend';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
 const PRESETS_DIR = new URL('../../assets/presets/', import.meta.url).pathname;
 const WEB_DIST = new URL('../../web/dist/', import.meta.url).pathname;
 const DATA_DIR = new URL('../../data/', import.meta.url).pathname;
 const PORT = Number(process.env.PORT ?? 8787);
+// The origin baked into artifact links agents paste into Band, so a human can
+// click them from the Band UI. Prefer an explicit PUBLIC_BASE_URL; on Vercel
+// fall back to the deployment hostname (VERCEL_PROJECT_PRODUCTION_URL or the
+// per-deploy VERCEL_URL, both without a scheme); otherwise the local origin.
+function resolvePublicBaseUrl(): string {
+  const explicit = process.env.PUBLIC_BASE_URL;
+  const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
+  const base = explicit ?? (vercelHost ? `https://${vercelHost}` : `http://localhost:${PORT}`);
+  return base.replace(/\/+$/, '');
+}
+const PUBLIC_BASE_URL = resolvePublicBaseUrl();
 const BOARD_MODE = process.env.BOARD_MODE === 'local' ? 'local' : 'band';
+// Orchestration topology: 'pods' runs the blackboard pods + decision spine
+// (PodBoardSession); 'classic' runs the original coordinator/reconcile board.
+const BOARD_TOPOLOGY = process.env.BOARD_TOPOLOGY === 'pods' ? 'pods' : 'classic';
 const REGIONS = ['us', 'eu', 'latam'] as const;
 type RegionKey = (typeof REGIONS)[number];
 
@@ -72,7 +92,16 @@ interface CampaignReviewRecord {
 
 const reviews = new Map<string, ReviewRecord>();
 const campaignReviews = new Map<string, CampaignReviewRecord>();
-const store = new Store(DATA_DIR);
+// Durable state on Cloud Run: when GCS_BUCKET is set, mirror every write to a
+// private bucket and restore from it on boot (see main()). Local dev leaves it
+// unset and uses the plain file store.
+const GCS_BUCKET = process.env.GCS_BUCKET;
+const GCS_PREFIX = process.env.GCS_PREFIX ?? 'state';
+const gcsMirror = GCS_BUCKET ? makeGcsMirror(GCS_BUCKET, DATA_DIR, GCS_PREFIX) : undefined;
+const store = new Store(DATA_DIR, gcsMirror);
+// Agents publish artifacts (images, reports) and paste the returned viewer URL
+// into the room, since Band shows only plain text.
+const publishArtifact = makePublishArtifact(store, PUBLIC_BASE_URL);
 
 // Key-free local demo fallback. In local mode with no AIML key (and not dev mode),
 // the real model clients cannot be constructed (modelFor throws). Rather than fail
@@ -185,6 +214,7 @@ function buildBandBoard(): BandBoard | undefined {
     models: realBoardModels(),
     ...(process.env.HUMAN_HANDLE ? { humanHandle: process.env.HUMAN_HANDLE } : {}),
     hostImage: (u) => store.hostImage(u) ?? u,
+    publishArtifact,
     getPrecedents: recentPrecedents,
     getRulebook: (region) => store.getRulebookOverride(region) ?? defaultRulebooks[region.toLowerCase() as RegionKey] ?? defaultRulebooks.us,
     lookupCampaign: findCampaign,
@@ -433,18 +463,38 @@ app.post('/api/reviews', async (c) => {
 
   const id = randomUUID();
   record.id = id;
-  const session = new BoardSession({
-    roomId: `review-${id}`,
-    asset,
-    brand,
-    rulebooks: currentRulebooks(),
-    models: boardModelsOrStub(),
-    onEvent,
-    onPrecedent: (p) => store.appendPrecedent(p),
-    hostImage: (u) => store.hostImage(u) ?? u,
-    getPrecedents: recentPrecedents,
-    perception: perceptionConfig,
-  });
+  const roomId = `review-${id}`;
+  const hostImage = (u: string): string => store.hostImage(u) ?? u;
+  // Opt-in pods topology runs the blackboard pods + decision spine; classic (the
+  // default) runs the coordinator/reconcile board with the multimodal perception
+  // pre-pass and the key-free stub fallback.
+  const session = BOARD_TOPOLOGY === 'pods'
+    ? new PodBoardSession({
+        roomId,
+        asset,
+        brand,
+        rulebooks: currentRulebooks(),
+        models: realPodBoardModels(),
+        onEvent,
+        onPrecedent: (p) => store.appendPrecedent({ roomId, regions: [], decision: `${p.decision}: ${p.claim}` }),
+        hostImage,
+        getPrecedents: recentPrecedents,
+        getRulebook: (region) => store.getRulebookOverride(region) ?? defaultRulebooks[region.toLowerCase() as RegionKey] ?? defaultRulebooks.us,
+      })
+    : new BoardSession({
+        roomId,
+        asset,
+        brand,
+        rulebooks: currentRulebooks(),
+        models: boardModelsOrStub(),
+        onEvent,
+        onPrecedent: (p) => store.appendPrecedent(p),
+        hostImage,
+        publishArtifact,
+        getPrecedents: recentPrecedents,
+        perception: perceptionConfig,
+      });
+
   record.submitDecision = (text) => session.submitDecision(text);
   reviews.set(id, record);
   void session.run().catch((err: unknown) => {
@@ -463,7 +513,7 @@ app.get('/api/reviews', (c) => {
     byId.set(r.id, { id: r.id, createdAt: r.createdAt, assetId: r.asset.id, copy: r.asset.copy, markets: r.asset.markets, status: r.status, conflict: r.conflict });
   }
   const list = [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
-  return c.json({ reviews: list, mode: BOARD_MODE });
+  return c.json({ reviews: list, mode: BOARD_MODE, topology: BOARD_TOPOLOGY });
 });
 
 app.get('/api/reviews/:id', (c) => {
@@ -635,8 +685,28 @@ app.post('/api/campaigns/:id/dossier/sources', (c) => addDossierSource(c));
 // Back-compat alias (the same handler) used by the earlier multipart upload path.
 app.post('/api/campaigns/:id/dossier-sources', (c) => addDossierSource(c));
 
+// Artifacts: agents publish images/reports here and paste the viewer URL into
+// the room; the /a/:id dashboard page fetches GET /api/artifacts/:id to render.
+app.post('/api/artifacts', async (c) => {
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const parsed = NewArtifactSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const published = publishArtifact(parsed.data);
+  return c.json(published);
+});
+
+app.get('/api/artifacts/:id', (c) => {
+  const artifact = store.getArtifact(c.req.param('id'));
+  if (!artifact) return c.json({ error: 'not found' }, 404);
+  return c.json({ artifact });
+});
 
 app.get('/api/precedents', (c) => c.json({ precedents: store.listPrecedents() }));
+
+// Live, in-memory estimate of model spend since the server started.
+// Read the shared file so the UI reflects spend from the pnpm agents runner too,
+// falling back to this process's own in-memory tally.
+app.get('/api/spending', (c) => c.json(readSpendSnapshot(SPEND_FILE) ?? spend.snapshot()));
 
 app.get('/api/assets', (c) => c.json({ assets: store.listAssets() }));
 
@@ -860,6 +930,17 @@ if (existsSync(WEB_DIST)) {
 export { app, store };
 
 async function main(): Promise<void> {
+  // Restore persisted state before serving or connecting agents (disk is
+  // ephemeral on Cloud Run). Best effort: a first run with an empty bucket, or a
+  // transient GCS error, falls back to whatever is on local disk.
+  if (GCS_BUCKET) {
+    try {
+      const n = await restoreFromGcs(GCS_BUCKET, DATA_DIR, GCS_PREFIX);
+      console.log(`Restored ${n} file(s) from gs://${GCS_BUCKET}/${GCS_PREFIX}`);
+    } catch (err) {
+      console.error('[gcs-backup] restore failed (continuing with local state):', (err as Error)?.message ?? err);
+    }
+  }
   const bandBoard = buildBandBoard();
   if (bandBoard) {
     console.log('Connecting band.ai agents (BOARD_MODE=band). This is the real coordination layer...');

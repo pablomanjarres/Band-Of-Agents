@@ -1,22 +1,31 @@
-// Local end-to-end demo on the in-process fake transport. The default run is a
-// MULTI-MATERIAL CAMPAIGN driven through CampaignSession: one product (a shared
-// dossier) with several marketing materials, each negotiated by the full
-// US/EU/LATAM/BRAND + reconcile + remediation board CONCURRENTLY (not material-1
-// then material-2). It prints each material's events as they interleave and the
-// final observational rollup (worst-case per region + the material x region
-// matrix). Stub models keep it key-free and deterministic.
+// Local end-to-end demos on the in-process fake transport, all key-free
+// (stub models) and deterministic. Three runs are reachable:
 //
-// The single-asset run is still reachable for comparison:  pnpm local single
+//   npm run local            (default) concurrent MULTI-MATERIAL CAMPAIGN
+//   npm run local single     one asset, the legacy single-asset board path
+//   npm run local pods       the opt-in pods -> board -> spine topology
 //
-//   pnpm local            (concurrent multi-material campaign)
-//   pnpm local single     (one asset, the legacy path)
+// Default (runCampaignDemo): one product (a shared dossier) with several
+// marketing materials, each negotiated by the full US/EU/LATAM/BRAND + reconcile
+// + remediation board CONCURRENTLY (not material-1 then material-2). It prints
+// each material's events as they interleave and the final observational rollup
+// (worst-case per region + the material x region matrix).
+//
+// pods (runPodsDemo): the Conductor fans the asset to three pods, the Regulatory
+// pod debates (US passes, EU blocks and holds on rebuttal), each pod files one
+// PodFinding, the Risk Adjudicator consults the Mediator, runs one remediation
+// cycle that still fails, escalates to the human, and the human reject yields a
+// terminal spiked. Swap in the real Band transport and real model clients
+// (npm run agents) once credentials are wired.
 
+import { FakeBandTransport } from '../band/fake';
 import { BoardSession, type BoardModels } from '../board/session';
 import { CampaignSession } from '../board/campaign';
+import { connectPodBoardAgents, type PodBoardModels } from '../board/pod-board';
+import { translateActivity, type BoardEvent } from '../board/events';
 import { StubModelClient, type ModelClient } from '../models/client';
 import { loadAsset, loadBrandDna, loadRulebook } from '../domain/load';
 import { Campaign } from '../domain/types';
-import type { BoardEvent } from '../board/events';
 import { demoCampaignModels, demoPerception, findings } from './demo-fixtures';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
@@ -54,6 +63,12 @@ function printEvent(e: BoardEvent): void {
       console.log(`  ${tag}perceiving [${e.stage}] frame ${e.index + 1}/${e.total}${e.frameUrl ? ` ${e.frameUrl}` : ''}`);
       break;
   }
+}
+
+// A single block/warn/info finding for the pods demo stub models (severity +
+// claim). Distinct from demo-fixtures' findings(), which takes Finding objects.
+function podFinding(severity: 'block' | 'warn' | 'info', claim: string): { text: string; json: { findings: unknown[] } } {
+  return { text: '', json: { findings: [{ category: 'claim', severity, claim, rationale: 'r' }] } };
 }
 
 // One product, THREE advertisements (each with its own materials), one shared
@@ -150,7 +165,7 @@ async function runCampaignDemo(): Promise<void> {
   }
 }
 
-// Legacy single-asset run, kept reachable for comparison: pnpm local single
+// Legacy single-asset run, kept reachable for comparison: npm run local single
 async function runSingleDemo(): Promise<void> {
   const brand = loadBrandDna(`${ASSETS}brand-dna.json`);
   const rulebooks = {
@@ -192,9 +207,74 @@ async function runSingleDemo(): Promise<void> {
   }
 }
 
+// Opt-in pods -> board -> spine run: npm run local pods
+async function runPodsDemo(): Promise<void> {
+  const brand = loadBrandDna(`${ASSETS}brand-dna.json`);
+  const usRules = loadRulebook(`${ASSETS}rulebook.us.json`);
+  const euRules = loadRulebook(`${ASSETS}rulebook.eu.json`);
+  const latamRules = loadRulebook(`${ASSETS}rulebook.latam.json`);
+  const asset = loadAsset(`${ASSETS}sample-asset.json`);
+  const claim = asset.claim;
+
+  // Stub models so the full debate runs with no keys. Real runs route through
+  // AIML (main) or Bedrock/Vertex/Featherless (dev) via the ModelClient seam.
+  const pass: ModelClient = new StubModelClient(() => podFinding('info', claim));
+  const empty: ModelClient = new StubModelClient(() => ({ text: '', json: { findings: [] } }));
+  // EU blocks on review, then holds on rebuttal: a two-phase model keyed on call count.
+  let euCall = 0;
+  const euModel: ModelClient = new StubModelClient(() => (euCall++ % 2 === 0
+    ? podFinding('block', claim)
+    : { text: '', json: { stance: 'hold', rationale: 'unlawful' } }));
+  const mediator: ModelClient = new StubModelClient(() => ({ text: '', json: { resolved: false, note: 'no movement', requiredDisclosure: null } }));
+  const revised: ModelClient = new StubModelClient(() => ({ text: JSON.stringify({ ...asset, copy: 'softened' }) }));
+  const image: ModelClient = { model: 'stub-image', complete: async () => ({ text: '' }), generateImage: async () => ({ url: 'https://cdn.aimlapi.com/lumavida.png' }) };
+
+  const models: PodBoardModels = {
+    scout: empty, claim: empty, precedent: empty, disclosure: empty,
+    us: pass, eu: euModel, latam: pass,
+    brand: empty, channel: empty, visual: empty,
+    mediator, remediationCopy: revised, image,
+  };
+
+  const room = new FakeBandTransport('demo-room', {
+    onActivity: (a) => {
+      const e = translateActivity(a);
+      if (e) console.log(`  [event] ${e.type} (${a.fromName}): ${a.content}`);
+    },
+  });
+  room.addUser('lead', 'Compliance Lead', '@compliance-lead');
+  await connectPodBoardAgents(room, { brand, rulebooks: { us: usRules, eu: euRules, latam: latamRules }, models });
+
+  console.log(`\n# Pods -> board -> spine review (local fake-Band demo, NOT legal advice)`);
+  console.log(`# Asset: ${asset.id}; markets US/EU/LATAM + brand consistency\n`);
+
+  room.post('lead', JSON.stringify(asset), [{ id: 'cond' }]);
+  await room.drain();
+
+  room.post('lead', 'Reject: cannot publish in EU without authorization. US may publish with the typical-results disclosure.', [{ id: 'adj' }]);
+  await room.drain();
+
+  printTranscript(room);
+}
+
+function printTranscript(room: FakeBandTransport): void {
+  console.log('\n--- room transcript ---');
+  for (const t of room.transcript) {
+    if (t.kind === 'event') {
+      console.log(`  · ${t.fromName} (${t.messageType}): ${t.content}`);
+    } else {
+      const to = t.mentions.map((m) => m.handle ?? m.id).join(', ');
+      const body = t.content.length > 150 ? `${t.content.slice(0, 150)}…` : t.content;
+      console.log(`→ ${t.fromName} -> [${to}]: ${body}`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   if (process.argv.includes('single')) {
     await runSingleDemo();
+  } else if (process.argv.includes('pods')) {
+    await runPodsDemo();
   } else {
     await runCampaignDemo();
   }

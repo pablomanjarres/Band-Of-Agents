@@ -39,11 +39,14 @@ export class FeatherlessModelClient implements ModelClient {
       }),
     );
     const text = res.choices[0]?.message?.content ?? '';
-    if (!req.jsonSchema) return { text };
+    const usage = res.usage
+      ? { usage: { inputTokens: res.usage.prompt_tokens, outputTokens: res.usage.completion_tokens } }
+      : {};
+    if (!req.jsonSchema) return { text, ...usage };
     try {
-      return { text, json: JSON.parse(text) };
+      return { text, json: JSON.parse(text), ...usage };
     } catch {
-      return { text };
+      return { text, ...usage };
     }
   }
 }

@@ -1,5 +1,6 @@
 import type {
   AdvertisementResponse,
+  ArtifactResponse,
   AssetListResponse,
   AssetResponse,
   BoardEvent,
@@ -23,6 +24,7 @@ import type {
   RulebookListResponse,
   RulebookPresetListResponse,
   RulebookResponse,
+  Spending,
   VideoUploadResponse,
 } from './types';
 
@@ -117,6 +119,12 @@ export async function createAsset(asset: NewContentAsset): Promise<AssetResponse
     body: JSON.stringify(asset),
   });
   return asJson<AssetResponse>(res);
+}
+
+// Artifacts ----------------------------------------------------------------
+export async function getArtifact(id: string): Promise<ArtifactResponse> {
+  const res = await fetch(`/api/artifacts/${encodeURIComponent(id)}`);
+  return asJson<ArtifactResponse>(res);
 }
 
 // Precedent log ------------------------------------------------------------
@@ -240,6 +248,12 @@ export async function submitCampaignDecision(
     body: JSON.stringify({ materialId, decision }),
   });
   return asJson<DecisionResponse>(res);
+}
+
+// Spending -----------------------------------------------------------------
+export async function fetchSpending(): Promise<Spending> {
+  const res = await fetch('/api/spending');
+  return asJson<Spending>(res);
 }
 
 export interface EventSubscription {

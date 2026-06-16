@@ -1,6 +1,7 @@
 import type { AgentHandler, Mention, RoomMessage, RoomTools } from '../band/types';
 import type { ModelClient } from '../models/client';
 import type { BrandDna, ContentAsset, Finding, ReviewResult } from '../domain/types';
+import type { NewArtifact } from '../domain/artifact';
 import type { SharedBoard } from '../board/shared';
 import { matchParticipant } from './handles';
 
@@ -18,6 +19,12 @@ export interface RemediationOptions {
    * large). When absent, the data URL is used as-is (fine for tests/stubs).
    */
   hostImage?: (url: string) => string;
+  /**
+   * Register an artifact and get back a dashboard viewer URL to paste into the
+   * room. Band cannot show the regenerated image inline, so we link to it.
+   * Optional: when absent (tests/stubs) the agent just skips the link.
+   */
+  publishArtifact?: (input: NewArtifact) => { id: string; url: string };
 }
 
 // The remediation agent. On reconcile's plain-English request it reads the open
@@ -73,10 +80,26 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
       `Remediated ${region}: rewrote copy${imageNote}. Re-submitting for review.`,
       'remediation',
     );
+
+    // Band cannot show the regenerated image inline, so publish it and paste a
+    // dashboard link the human can click. Only when we have both a hosted image
+    // and the publish capability (tests/stubs skip it).
+    let viewLink = '';
+    if (imageUrl && opts.publishArtifact) {
+      const { url } = opts.publishArtifact({
+        kind: 'image',
+        title: `${region} visual (revised)`,
+        src: imageUrl,
+        reviewId: ctx.roomId,
+        createdBy: ctx.agentName,
+      });
+      viewLink = ` View the regenerated visual: ${url}`;
+    }
+
     const reportTo = await resolveTarget(tools, opts.reportToHandle, message);
     const coordTag = reportTo.handle ? `@${reportTo.handle}` : '@Coordinator';
     await tools.sendMessage(
-      `${coordTag}, I rewrote the ${region} copy to add the required disclosure and regenerated the image. Re-submitting for review.`,
+      `${coordTag}, I rewrote the ${region} copy to add the required disclosure and regenerated the image. Re-submitting for review.${viewLink}`,
       [reportTo],
     );
   };

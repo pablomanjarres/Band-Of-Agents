@@ -1,5 +1,6 @@
 import type { AgentHandler, Mention, Participant, RoomMessage, RoomTools } from '../band/types';
 import type { Finding, RegionVerdict, ReviewResult } from '../domain/types';
+import type { NewArtifact } from '../domain/artifact';
 import type { SharedBoard } from '../board/shared';
 import { matchParticipant, nameMatchesHandle } from './handles';
 
@@ -14,6 +15,14 @@ export interface ReconcileOptions {
   board: SharedBoard;
   /** Regions whose reviews to wait for before deciding, e.g. ['US','EU']. */
   expectedRegions: string[];
+  /**
+   * The subset of expectedRegions that are market-bound (US/EU/LATAM). When set,
+   * Reconcile waits only for the market-bound regions in the asset's markets,
+   * plus every non-market reviewer (Brand), so a targeted single-market asset
+   * does not block on regions that were never recruited. Omit to wait for every
+   * expected region (the prior behavior).
+   */
+  marketRegions?: string[];
   /** Handle of the coordinator to report the verdict to. */
   coordinatorHandle?: string;
   /** Handle of the human reviewer to escalate to (e.g. the compliance lead). */
@@ -24,6 +33,12 @@ export interface ReconcileOptions {
   logPrecedent?: (precedent: Precedent) => void;
   /** band.ai room mode: accept the human ruling relayed by this intake/proxy agent. */
   humanProxyHandle?: string;
+  /**
+   * Register a findings/verdict report and get back a dashboard viewer URL to
+   * paste into the room, since Band shows only plain text. Optional: when absent
+   * (tests/stubs) the verdict message just omits the report link.
+   */
+  publishArtifact?: (input: NewArtifact) => { id: string; url: string };
 }
 
 const MAX_REMEDIATION_ROUNDS = 1;
@@ -64,17 +79,27 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
     // re-review clears them (startReReview), reopening the decision for that round.
     if (opts.board.hasVerdicts(ctx.roomId)) return;
 
+    // Wait only for the reviewers this asset actually recruited. With targeted
+    // recruitment a single-market asset engages a subset of the regions, so a
+    // market-bound region not in the asset's markets is dropped from the wait set
+    // (Reconcile would otherwise block on a reviewer that never joins). Non-market
+    // reviewers like Brand are always expected. With no marketRegions configured
+    // this is a no-op and Reconcile waits for every expected region, as before.
+    const markets = opts.board.campaign(ctx.roomId)?.markets ?? [];
+    const marketBound = new Set(opts.marketRegions ?? []);
+    const expected =
+      marketBound.size === 0
+        ? opts.expectedRegions
+        : opts.expectedRegions.filter((r) => !marketBound.has(r) || markets.includes(r));
+
     // A reviewer just reported. Read the running tally off the board.
     const reviews = opts.board.reviews(ctx.roomId);
     const have = new Set(reviews.map((r) => r.region));
-    await tools.sendEvent(
-      `${have.size}/${opts.expectedRegions.length} reviews in.`,
-      'reconcile',
-    );
-    if (!opts.expectedRegions.every((r) => have.has(r))) return; // wait for the rest
+    await tools.sendEvent(`${have.size}/${expected.length} reviews in.`, 'reconcile');
+    if (!expected.every((r) => have.has(r))) return; // wait for the rest
 
     const byRegion = new Map<string, ReviewResult>(reviews.map((r) => [r.region, r]));
-    const verdicts = opts.expectedRegions.map((r) => decideRegion(byRegion.get(r)!));
+    const verdicts = expected.map((r) => decideRegion(byRegion.get(r)!));
 
     // Re-review cap: once a region has been remediated MAX_REMEDIATION_ROUNDS
     // times, a still-fixable 'adapt' escalates to the human instead of looping.
@@ -100,9 +125,23 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
       'verdict',
     );
 
+    // Publish the full findings/verdict report and link it: Band shows only the
+    // plain-English summary, so the detail lives on our dashboard viewer.
+    let reportLink = '';
+    if (opts.publishArtifact) {
+      const { url } = opts.publishArtifact({
+        kind: 'markdown',
+        title: 'Review report',
+        content: buildReportMarkdown(verdicts, byRegion),
+        reviewId: ctx.roomId,
+        createdBy: ctx.agentName,
+      });
+      reportLink = ` Full report: ${url}`;
+    }
+
     // Tell the coordinator the outcome in plain English.
     const coordTarget = await resolveByHandle(tools, opts.coordinatorHandle, message);
-    await tools.sendMessage(verdictSummary(verdicts, conflict, canPublish, blocked), [coordTarget]);
+    await tools.sendMessage(verdictSummary(verdicts, conflict, canPublish, blocked) + reportLink, [coordTarget]);
 
     // Route fixable regions to remediation. The findings live on the board, so the
     // message just asks for the adaptation.
@@ -152,6 +191,28 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
       opts.board.complete(ctx.roomId);
     }
   };
+}
+
+/** Render the findings + verdicts as a markdown report for the dashboard viewer. */
+function buildReportMarkdown(verdicts: RegionVerdict[], byRegion: Map<string, ReviewResult>): string {
+  const lines: string[] = ['# Review report', ''];
+  lines.push('## Verdicts', '');
+  for (const v of verdicts) lines.push(`- **${v.region}**: ${v.decision} - ${v.rationale}`);
+  lines.push('', '## Findings by region', '');
+  for (const v of verdicts) {
+    const findings = byRegion.get(v.region)?.findings ?? [];
+    lines.push(`### ${v.region}`, '');
+    if (findings.length === 0) {
+      lines.push('No findings.', '');
+      continue;
+    }
+    for (const f of findings) {
+      const disclosure = f.requiredDisclosure ? ` (add: ${f.requiredDisclosure})` : '';
+      lines.push(`- [${f.severity}] ${f.ruleId ?? f.category}: ${f.rationale}${disclosure}`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
 }
 
 /** Compose a plain-English verdict summary for the coordinator. */

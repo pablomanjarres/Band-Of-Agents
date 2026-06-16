@@ -23,7 +23,7 @@ import { DossierEditor } from '../components/DossierEditor';
 import { MaterialCard } from '../components/MaterialCard';
 import { MaterialDetail } from '../components/MaterialDetail';
 import { PerceptionPanel } from '../components/PerceptionPanel';
-import { PipelineDiagram } from '../components/PipelineDiagram';
+import { Timeline } from '../components/Timeline';
 import { StatusBadge } from '../components/StatusBadge';
 import { AggregateBadge } from '../components/VerdictBadge';
 import type { BoardEvent, Campaign, CampaignRollup, VerdictDecision } from '../types';
@@ -335,7 +335,7 @@ export function CampaignDetailPage() {
               <button type="button" onClick={() => setDebateMaterialId(undefined)} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">Close</button>
             </div>
             <div className="space-y-3 overflow-y-auto p-5">
-              <PipelineDiagram state={debateLane.board} />
+              <Timeline events={debateLane.board.events} />
               {(debateLane.board.status === 'awaiting-decision' || debateLane.board.escalationText) && reviewId ? (
                 <EscalationActions materialId={debateLane.material.id} onDecision={handleDecision} />
               ) : null}
