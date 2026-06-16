@@ -56,6 +56,8 @@ export function CampaignDetailPage() {
   const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
   const [board, dispatch] = useReducer(reducer, undefined, () => initialCampaignState());
   const [reviewId, setReviewId] = useState<string | null>(null);
+  // null = campaign-wide review; an id = review scoped to that one advertisement.
+  const [reviewScopeAdId, setReviewScopeAdId] = useState<string | null>(null);
   const [tab, setTab] = useState<'advertisements' | 'dossier'>('advertisements');
   const [selectedAdId, setSelectedAdId] = useState<string | undefined>(undefined);
   const [detailMaterialId, setDetailMaterialId] = useState<string | undefined>(undefined);
@@ -106,14 +108,18 @@ export function CampaignDetailPage() {
     if (!reviewId) dispatch({ kind: 'reset', campaign: next });
   }
 
-  async function handleRun() {
+  // Runs a campaign review. With an advertisementId the review is SCOPED to that
+  // one ad (still per-material concurrent, reconciled per material): it just runs
+  // fewer materials. Without it, the whole campaign is reviewed (unchanged).
+  async function handleRun(advertisementId?: string) {
     if (load.kind !== 'ready') return;
     setStarting(true);
     setStartError(null);
     try {
       dispatch({ kind: 'reset', campaign: load.campaign });
-      const res = await startCampaignReview(load.campaign.id);
+      const res = await startCampaignReview(load.campaign.id, advertisementId);
       setReviewId(res.id);
+      setReviewScopeAdId(advertisementId ?? null);
       subscriptionRef.current = subscribeToCampaignEvents(res.id, (event) => dispatch({ kind: 'event', event }));
       void pollRollup(res.id);
     } catch (err) {
@@ -167,6 +173,8 @@ export function CampaignDetailPage() {
   const perceivingLanes = activePerceivingLanes(board);
   const reviewing = Boolean(reviewId);
   const inProgress = reviewing && board.status === 'running';
+  // The ad a scoped review is currently running against (null when campaign-wide).
+  const scopedAd = reviewScopeAdId ? campaign.advertisements.find((a) => a.id === reviewScopeAdId) : undefined;
 
   const worstByAd: Record<string, VerdictDecision | undefined> = {};
   for (const ad of board.rollup?.perAdvertisement ?? []) {
@@ -197,10 +205,16 @@ export function CampaignDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {reviewing && scopedAd ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 font-mono text-[11px] font-medium text-accent">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+              Scoped: {scopedAd.name}
+            </span>
+          ) : null}
           {reviewing ? <StatusBadge status={board.status} /> : null}
           <button
             type="button"
-            onClick={handleRun}
+            onClick={() => handleRun()}
             disabled={starting || campaign.advertisements.every((a) => a.materials.length === 0) || inProgress}
             className="btn btn-primary"
           >
@@ -267,13 +281,24 @@ export function CampaignDetailPage() {
                       {selectedAd.name}
                       <span className="ml-2 font-sans text-xs font-normal text-faint">{selectedAd.materials.length} material{selectedAd.materials.length === 1 ? '' : 's'}</span>
                     </h2>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddMaterial((v) => !v)}
-                      className="btn btn-ghost px-3 py-1.5"
-                    >
-                      {showAddMaterial ? 'Cancel' : '+ Add material'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleRun(selectedAd.id)}
+                        disabled={starting || selectedAd.materials.length === 0 || inProgress}
+                        className="btn border border-accent/40 bg-accent/10 px-3 py-1.5 text-accent hover:bg-accent/15"
+                        title="Review only this advertisement's materials"
+                      >
+                        {inProgress && reviewScopeAdId === selectedAd.id ? 'Reviewing…' : 'Review this ad'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddMaterial((v) => !v)}
+                        className="btn btn-ghost px-3 py-1.5"
+                      >
+                        {showAddMaterial ? 'Cancel' : '+ Add material'}
+                      </button>
+                    </div>
                   </div>
 
                   {showAddMaterial ? (
