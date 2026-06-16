@@ -21,7 +21,7 @@ function Pill({ tone, children }: { tone: 'red' | 'amber' | 'slate' | 'emerald' 
     indigo: 'bg-indigo-500/20 text-indigo-100 ring-indigo-400/40',
   };
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset ${styles[tone]}`}>
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${styles[tone]}`}>
       {children}
     </span>
   );
@@ -138,8 +138,8 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
   }, [measure]);
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-xl">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
+    <section className="surface-2 overflow-hidden rounded-2xl">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3.5">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-200">
             Blackboard pods on a decision spine
@@ -151,7 +151,7 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
         <div className="flex items-center gap-3">
           <Pill tone="indigo">{PHASE_LABEL[model.phase]}</Pill>
           {LEGEND.map((item) => (
-            <span key={item.label} className="inline-flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span key={item.label} className="inline-flex items-center gap-1.5 text-[11px] text-muted">
               <span className={`h-2 w-2 rounded-full ${item.dot}`} />
               {item.label}
             </span>
@@ -161,7 +161,7 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
 
       <div
         ref={canvasRef}
-        className="relative bg-[radial-gradient(circle_at_50%_0%,rgba(79,70,229,0.12),transparent_60%)] px-5 py-7"
+        className="relative bg-[radial-gradient(circle_at_50%_-10%,rgba(99,102,241,0.14),transparent_55%)] px-5 py-7"
       >
         <DiagramEdges rects={rects} activeEdges={model.activeEdges} width={size.width} height={size.height} />
 
