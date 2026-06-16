@@ -323,6 +323,8 @@ export interface CampaignReviewResponse {
 export interface CreateCampaignReviewResponse {
   id: string;
   kind: 'campaign';
+  /** Present when the review was scoped to a single advertisement. */
+  advertisementId?: string;
   materials: string[];
 }
 

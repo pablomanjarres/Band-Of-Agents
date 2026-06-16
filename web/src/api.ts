@@ -221,13 +221,16 @@ export async function uploadImage(file: File): Promise<ImageUploadResponse> {
 
 // Start a concurrent per-material review of a saved campaign (local board mode).
 // Returns the campaign-review id whose rollup + per-material lanes stream over SSE.
+// Pass advertisementId to SCOPE the review to a single ad (still per-material
+// concurrent, still reconciled per material): it simply runs fewer materials.
 export async function startCampaignReview(
   campaignId: string,
+  advertisementId?: string,
 ): Promise<CreateCampaignReviewResponse> {
   const res = await fetch('/api/reviews', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ campaignId }),
+    body: JSON.stringify({ campaignId, ...(advertisementId ? { advertisementId } : {}) }),
   });
   return asJson<CreateCampaignReviewResponse>(res);
 }
