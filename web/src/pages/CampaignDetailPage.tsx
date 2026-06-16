@@ -148,12 +148,12 @@ export function CampaignDetailPage() {
     setShowAddAd(false);
   }
 
-  if (load.kind === 'loading') return <p className="text-sm text-slate-500">Loading campaign.</p>;
+  if (load.kind === 'loading') return <p className="text-sm text-muted">Loading campaign…</p>;
   if (load.kind === 'error') {
     return (
       <div className="space-y-3">
-        <Link to="/campaigns" className="text-sm text-indigo-600 hover:text-indigo-500">&larr; All campaigns</Link>
-        <p className="text-sm text-red-600">{load.message}</p>
+        <Link to="/campaigns" className="text-sm text-muted transition-colors hover:text-fg">← All campaigns</Link>
+        <p className="text-sm text-danger">{load.message}</p>
       </div>
     );
   }
@@ -183,15 +183,15 @@ export function CampaignDetailPage() {
   const debateLane = debateMaterialId ? board.lanes[debateMaterialId] : undefined;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <Link to="/campaigns" className="text-sm text-indigo-600 hover:text-indigo-500">&larr; All campaigns</Link>
-          <div className="mt-1 flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-slate-900">{campaign.name}</h1>
+          <Link to="/campaigns" className="text-sm text-muted transition-colors hover:text-fg">← All campaigns</Link>
+          <div className="mt-2 flex items-center gap-3">
+            <h1 className="font-display text-4xl leading-none text-fg">{campaign.name}</h1>
             <AggregateBadge {...(aggregate ? { decision: aggregate } : {})} />
           </div>
-          <p className="mt-0.5 text-sm text-slate-400">
+          <p className="mt-2 font-mono text-[11px] text-faint">
             Product campaign · {campaign.advertisements.length} advertisement{campaign.advertisements.length === 1 ? '' : 's'} ·{' '}
             {campaign.advertisements.reduce((n, a) => n + a.materials.length, 0)} materials
           </p>
@@ -202,15 +202,15 @@ export function CampaignDetailPage() {
             type="button"
             onClick={handleRun}
             disabled={starting || campaign.advertisements.every((a) => a.materials.length === 0) || inProgress}
-            className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn btn-primary"
           >
-            {inProgress ? 'Reviewing.' : starting ? 'Starting.' : reviewing ? 'Re-run review' : 'Run review'}
+            {inProgress ? 'Reviewing…' : starting ? 'Starting…' : reviewing ? 'Re-run review' : 'Run review'}
           </button>
         </div>
       </div>
 
       {startError ? (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">{startError}</p>
+        <p className="rounded-xl border border-warn/30 bg-warn/[0.07] px-4 py-2.5 text-sm text-warn">{startError}</p>
       ) : null}
 
       {/* Two-pane workspace: LEFT = live video processing; MAIN = ads + materials. */}
@@ -219,18 +219,18 @@ export function CampaignDetailPage() {
           {perceivingLanes.length > 0 ? (
             <PerceptionPanel lanes={perceivingLanes} />
           ) : (
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Live processing</h2>
-              <div className="mt-3 flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 text-center text-xs text-slate-400">
+            <div className="surface rounded-2xl p-4">
+              <p className="eyebrow">Live processing</p>
+              <div className="mt-3 flex aspect-video w-full items-center justify-center rounded-xl border border-dashed border-border-strong bg-bg-soft/60 px-3 text-center text-xs text-faint">
                 Each video is analyzed here, frame by frame, while a review runs.
               </div>
-              <p className="mt-3 text-xs text-slate-500">
+              <p className="mt-3 text-xs text-muted">
                 Run a review to watch the perception pass (keyframes + transcript) and the
                 per-material verdicts land concurrently.
               </p>
               {aggregate ? (
                 <div className="mt-3 flex items-center gap-2">
-                  <span className="text-xs text-slate-400">Campaign worst-case:</span>
+                  <span className="text-xs text-faint">Campaign worst-case:</span>
                   <AggregateBadge decision={aggregate} />
                 </div>
               ) : null}
@@ -239,7 +239,7 @@ export function CampaignDetailPage() {
         </aside>
 
         <section className="min-w-0 flex-1 space-y-4">
-          <div className="flex items-center gap-1 border-b border-slate-200">
+          <div className="flex items-center gap-1 border-b border-border">
             <TabButton active={tab === 'advertisements'} onClick={() => setTab('advertisements')}>Advertisements</TabButton>
             <TabButton active={tab === 'dossier'} onClick={() => setTab('dossier')}>Dossier</TabButton>
           </div>
@@ -263,14 +263,14 @@ export function CampaignDetailPage() {
               {selectedAd ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <h2 className="text-sm font-semibold text-slate-900">
+                    <h2 className="font-display text-xl text-fg">
                       {selectedAd.name}
-                      <span className="ml-2 text-xs font-normal text-slate-400">{selectedAd.materials.length} material{selectedAd.materials.length === 1 ? '' : 's'}</span>
+                      <span className="ml-2 font-sans text-xs font-normal text-faint">{selectedAd.materials.length} material{selectedAd.materials.length === 1 ? '' : 's'}</span>
                     </h2>
                     <button
                       type="button"
                       onClick={() => setShowAddMaterial((v) => !v)}
-                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+                      className="btn btn-ghost px-3 py-1.5"
                     >
                       {showAddMaterial ? 'Cancel' : '+ Add material'}
                     </button>
@@ -287,7 +287,7 @@ export function CampaignDetailPage() {
                   ) : null}
 
                   {selectedAd.materials.length === 0 ? (
-                    <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                    <p className="rounded-2xl border border-dashed border-border-strong bg-surface/40 px-4 py-8 text-center text-sm text-muted">
                       No materials in this advertisement yet. Add a video, post, image, or banner.
                     </p>
                   ) : (
@@ -305,7 +305,7 @@ export function CampaignDetailPage() {
                   )}
                 </div>
               ) : (
-                <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                <p className="rounded-2xl border border-dashed border-border-strong bg-surface/40 px-4 py-8 text-center text-sm text-muted">
                   No advertisements yet. Add the first one above.
                 </p>
               )}
@@ -328,11 +328,11 @@ export function CampaignDetailPage() {
       {/* The agents' debate, on demand from the material detail. */}
       {debateLane ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button type="button" aria-label="Close" onClick={() => setDebateMaterialId(undefined)} className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
-          <div className="relative z-10 flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-              <h2 className="text-sm font-semibold text-slate-900">Agents&apos; debate: {debateLane.material.name ?? debateLane.material.id}</h2>
-              <button type="button" onClick={() => setDebateMaterialId(undefined)} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">Close</button>
+          <button type="button" aria-label="Close" onClick={() => setDebateMaterialId(undefined)} className="absolute inset-0 bg-bg/70 backdrop-blur-sm" />
+          <div className="surface-2 relative z-10 flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl">
+            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+              <h2 className="font-display text-lg text-fg">Agents&apos; debate · {debateLane.material.name ?? debateLane.material.id}</h2>
+              <button type="button" onClick={() => setDebateMaterialId(undefined)} className="btn btn-ghost px-2.5 py-1 text-xs">Close</button>
             </div>
             <div className="space-y-3 overflow-y-auto p-5">
               <PipelineDiagram state={debateLane.board} />
@@ -352,8 +352,8 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
     <button
       type="button"
       onClick={onClick}
-      className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
-        active ? 'border-indigo-500 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'
+      className={`-mb-px border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
+        active ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'
       }`}
     >
       {children}
@@ -365,23 +365,23 @@ function AddAdvertisement({ onAdd, onCancel }: { onAdd: (name: string) => Promis
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+    <div className="surface flex flex-wrap items-center gap-2 rounded-2xl p-3">
       <input
         type="text"
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Advertisement name (e.g. Retargeting)"
-        className="flex-1 rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+        className="flex-1 rounded-xl border border-border-strong bg-bg-soft/70 p-2.5 text-sm text-fg placeholder:text-faint transition-colors focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/25"
       />
       <button
         type="button"
         disabled={saving || !name.trim()}
         onClick={async () => { setSaving(true); try { await onAdd(name); } finally { setSaving(false); } }}
-        className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+        className="btn btn-primary"
       >
-        {saving ? 'Adding.' : 'Add'}
+        {saving ? 'Adding…' : 'Add'}
       </button>
-      <button type="button" onClick={onCancel} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">Cancel</button>
+      <button type="button" onClick={onCancel} className="btn btn-ghost px-3 py-2">Cancel</button>
     </div>
   );
 }
@@ -394,23 +394,23 @@ function EscalationActions({ materialId, onDecision }: { materialId: string; onD
     try { await onDecision(materialId, decision); } finally { setSending(false); setText(''); }
   }
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
-      <p className="text-sm font-semibold text-amber-900">This material escalated to a human.</p>
+    <div className="rounded-2xl border border-warn/30 bg-warn/[0.07] p-4 shadow-[inset_0_1px_0_rgb(255_255_255/0.04),0_0_28px_-16px_rgb(251_191_36/0.5)]">
+      <p className="text-sm font-semibold text-warn">This material escalated to a human.</p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <input
           type="text"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Record the compliance ruling."
-          className="flex-1 rounded-lg border border-amber-300 bg-white p-2 text-sm text-slate-800 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+          placeholder="Record the compliance ruling…"
+          className="flex-1 rounded-xl border border-warn/30 bg-bg-soft/70 p-2.5 text-sm text-fg placeholder:text-faint transition-colors focus:border-warn/60 focus:outline-none focus:ring-2 focus:ring-warn/25"
         />
         <button
           type="button"
           disabled={sending || !text.trim()}
           onClick={() => void send(text.trim())}
-          className="inline-flex items-center rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="btn border border-warn/40 bg-warn/10 text-warn hover:bg-warn/15"
         >
-          {sending ? 'Recording.' : 'Record decision'}
+          {sending ? 'Recording…' : 'Record decision'}
         </button>
       </div>
     </div>
