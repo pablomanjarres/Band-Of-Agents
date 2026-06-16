@@ -698,6 +698,38 @@ app.get('/api/videos/:name', (c) => {
 // a review is started and streams 'perceiving' over the existing SSE; it can refine
 // this transcript. Transcription is fully graceful: no STT provider, no ffmpeg, or
 // no audio track simply leaves the transcript empty and the upload still succeeds.
+// Shared "the video bytes are hosted" finalize: attach the url to the material
+// (when campaign + material are given) and transcribe at upload time. Used by both
+// the single-shot POST /api/videos and the chunked /api/videos/finalize.
+async function finalizeVideoUpload(
+  videoUrl: string,
+  campaignId: string,
+  advertisementId: string,
+  materialId: string,
+): Promise<Record<string, unknown>> {
+  let transcribed = false;
+  if (campaignId && materialId) {
+    const camp = store.getCampaign(campaignId);
+    if (camp) {
+      // Attach the hosted url first so the material is durable even if the
+      // (best-effort) transcription below fails or finds no audio.
+      const withVideo = patchMaterial(camp, materialId, (m) => ({ ...m, videoUrl }));
+      store.saveCampaign(withVideo);
+      // Transcribe at upload time so the material detail can show a transcript
+      // without waiting for a review. Re-read the campaign before persisting so a
+      // concurrent edit is not clobbered.
+      transcribed = await attachTranscript(campaignId, materialId, withVideo);
+    }
+  }
+  return {
+    videoUrl,
+    ...(campaignId ? { campaignId } : {}),
+    ...(advertisementId ? { advertisementId } : {}),
+    ...(materialId ? { materialId } : {}),
+    transcribed,
+  };
+}
+
 app.post('/api/videos', async (c) => {
   let form: FormData;
   try {
@@ -710,25 +742,43 @@ app.post('/api/videos', async (c) => {
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (bytes.byteLength === 0) return c.json({ error: 'empty video file' }, 400);
   const videoUrl = store.hostVideo(bytes, extOf(file.name));
-
   const campaignId = typeof form.get('campaignId') === 'string' ? (form.get('campaignId') as string) : '';
+  const advertisementId = typeof form.get('advertisementId') === 'string' ? (form.get('advertisementId') as string) : '';
   const materialId = typeof form.get('materialId') === 'string' ? (form.get('materialId') as string) : '';
-  let transcribed = false;
-  if (campaignId && materialId) {
-    const camp = store.getCampaign(campaignId);
-    if (camp) {
-      // Attach the hosted url first so the material is durable even if the
-      // (best-effort) transcription below fails or finds no audio.
-      const withVideo = patchMaterial(camp, materialId, (m) => ({ ...m, videoUrl }));
-      store.saveCampaign(withVideo);
-      // Transcribe at upload time so the material detail can show a transcript
-      // without waiting for a review. Every step is graceful: no STT provider, no
-      // ffmpeg, or no audio track simply leaves the transcript empty. Re-read the
-      // campaign before persisting so a concurrent edit is not clobbered.
-      transcribed = await attachTranscript(campaignId, materialId, withVideo);
-    }
+  return c.json(await finalizeVideoUpload(videoUrl, campaignId, advertisementId, materialId));
+});
+
+// Chunked video upload, for files over Cloud Run's 32 MiB per-request cap: the
+// client slices the file and POSTs each piece here as a raw octet-stream body
+// (?uploadId=&index=), then calls /api/videos/finalize to assemble + transcribe.
+app.post('/api/videos/chunk', async (c) => {
+  const uploadId = c.req.query('uploadId') ?? '';
+  const index = Number(c.req.query('index'));
+  if (!/^[a-zA-Z0-9_-]{8,}$/.test(uploadId) || !Number.isInteger(index) || index < 0) {
+    return c.json({ error: 'bad chunk params (need uploadId and index)' }, 400);
   }
-  return c.json({ videoUrl, ...(campaignId ? { campaignId } : {}), ...(materialId ? { materialId } : {}), transcribed });
+  const bytes = new Uint8Array(await c.req.arrayBuffer());
+  if (bytes.byteLength === 0) return c.json({ error: 'empty chunk' }, 400);
+  store.writeVideoChunk(uploadId, index, bytes);
+  return c.json({ ok: true, index });
+});
+
+// Assemble an upload's chunks into one hosted video, then run the same attach +
+// transcribe path as the single-shot upload.
+app.post('/api/videos/finalize', async (c) => {
+  let body: { uploadId?: string; fileName?: string; campaignId?: string; advertisementId?: string; materialId?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'expected a json body' }, 400);
+  }
+  const uploadId = body.uploadId ?? '';
+  if (!/^[a-zA-Z0-9_-]{8,}$/.test(uploadId)) return c.json({ error: 'missing or invalid uploadId' }, 400);
+  const videoUrl = store.assembleVideoChunks(uploadId, extOf(body.fileName ?? 'video.mp4'));
+  if (!videoUrl) return c.json({ error: 'no chunks found for that uploadId' }, 400);
+  return c.json(
+    await finalizeVideoUpload(videoUrl, body.campaignId ?? '', body.advertisementId ?? '', body.materialId ?? ''),
+  );
 });
 
 // Multipart image upload. Hosts the file under data/images/ and returns its served

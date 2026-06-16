@@ -16,7 +16,7 @@ export type AgentRole =
  * image, audio) and honor MODEL_MODE, so they are kept off the reviewer ROUTES.
  */
 export type PerceptionRole = 'perception-vision' | 'perception-stt';
-export type ModelMode = 'aiml' | 'dev';
+export type ModelMode = 'aiml' | 'dev' | 'vertex';
 
 interface RouteEntry {
   aiml: string;
@@ -65,7 +65,9 @@ const PERCEPTION_VISION_DEV = 'gemini-2.5-flash';
 const PERCEPTION_STT_DEV = () => process.env.GEMINI_STT_MODEL ?? 'gemini-2.5-flash';
 
 export function activeMode(): ModelMode {
-  return process.env.MODEL_MODE === 'dev' ? 'dev' : 'aiml';
+  if (process.env.MODEL_MODE === 'dev') return 'dev';
+  if (process.env.MODEL_MODE === 'vertex') return 'vertex';
+  return 'aiml';
 }
 
 // True when a Gemini provider is reachable without an AIML key: either Vertex is
@@ -89,6 +91,14 @@ export function modelFor(role: AgentRole, mode: ModelMode = activeMode()): Model
     const apiKey = process.env.AIML_API_KEY;
     if (!apiKey) throw new Error('AIML_API_KEY is not set but MODEL_MODE=aiml.');
     return meter(new AimlModelClient({ apiKey, model: entry.aiml }));
+  }
+  // Vertex-only mode: route EVERY agent through Gemini on Vertex, so the whole
+  // multi-agent flow runs on a single GCP credential (no AIML key, no AWS/Bedrock).
+  // Honors the gemini devModel where one is set (e.g. EU on gemini-2.5-pro) and
+  // falls back to flash elsewhere, keeping a little model variety.
+  if (mode === 'vertex') {
+    const gm = entry.devProvider === 'gemini' ? entry.devModel : 'gemini-2.5-flash';
+    return meter(new GeminiModelClient({ model: gm }));
   }
   if (entry.devProvider === 'bedrock') return meter(new BedrockModelClient({ model: entry.devModel }));
   if (entry.devProvider === 'featherless') {
@@ -169,7 +179,12 @@ export function describeRoutes(mode: ModelMode = activeMode()): Record<AgentRole
   const out = {} as Record<AgentRole, string>;
   for (const role of Object.keys(ROUTES) as AgentRole[]) {
     const e = ROUTES[role];
-    out[role] = mode === 'aiml' ? `aiml:${e.aiml}` : `${e.devProvider}:${e.devModel}`;
+    out[role] =
+      mode === 'aiml'
+        ? `aiml:${e.aiml}`
+        : mode === 'vertex'
+          ? `vertex:${e.devProvider === 'gemini' ? e.devModel : 'gemini-2.5-flash'}`
+          : `${e.devProvider}:${e.devModel}`;
   }
   return out;
 }

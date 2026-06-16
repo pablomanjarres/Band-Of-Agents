@@ -12,7 +12,9 @@
     "test:watch": "vitest",
     "local": "tsx src/run/local.ts",
     "agents": "tsx src/run/agents.ts",
+    "agents:classic": "tsx src/run/agents-classic.ts",
     "serve": "tsx src/server/index.ts",
+    "serve:band": "BOARD_MODE=band tsx src/server/index.ts",
     "dev:server": "tsx watch src/server/index.ts"
   },
   "dependencies": {
