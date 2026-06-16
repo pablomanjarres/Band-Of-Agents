@@ -36,6 +36,17 @@ export interface CoordinatorOptions {
    */
   startOptions?: StartReviewOptions;
   /**
+   * band.ai CAMPAIGN mode: resolve the material posted into THIS room (by its room
+   * id) to the asset under review plus its campaign cascade (dossier + campaign/ad/
+   * material ids). A campaign is decomposed into one band.ai room per material, so
+   * a single connected coordinator handles every material by looking the room up
+   * here. When it returns a hit, that material and its startOptions win over the
+   * single-asset `lookupCampaign`/`startOptions`, so the per-material dossier
+   * cascade and the per-material reconcile gate engage for that room. Omitted (or a
+   * miss) leaves the single-asset path unchanged.
+   */
+  lookupMaterial?: (roomId: string) => { asset: ContentAsset; startOptions: StartReviewOptions } | undefined;
+  /**
    * Region code (US/EU/LATAM) -> the reviewer's configured handle. Recruitment is
    * then filtered to the asset's markets: a region reviewer joins only when its
    * market is targeted, and a targeted market with no agent present is pulled in
@@ -66,12 +77,18 @@ export function makeCoordinator(opts: CoordinatorOptions): AgentHandler {
 
     const participants = await tools.getParticipants();
 
+    // band.ai CAMPAIGN mode: a campaign is one room per material, so resolve the
+    // material posted into THIS room (and its dossier/campaign/ad/material ids).
+    // A hit drives recruitment off the material's markets and engages the
+    // per-material cascade + gate below; a miss is the unchanged single-asset path.
+    const material = fromRemediation ? undefined : opts.lookupMaterial?.(ctx.roomId);
+
     // Resolve the campaign first so recruitment can target its markets. A
     // re-submit reuses the campaign already on the board; an intake or human
-    // post carries it (a saved-campaign lookup, or inline JSON).
+    // post carries it (a per-material lookup, a saved-campaign lookup, or inline JSON).
     const campaign = fromRemediation
       ? opts.board.campaign(ctx.roomId)
-      : (opts.lookupCampaign?.(message.content) ?? toAsset(message.content));
+      : (material?.asset ?? opts.lookupCampaign?.(message.content) ?? toAsset(message.content));
     const markets = campaign?.markets ?? [];
 
     // Base pool: every agent in the room except this coordinator, the intake
@@ -144,7 +161,7 @@ export function makeCoordinator(opts: CoordinatorOptions): AgentHandler {
     // (with the campaign cascade options when this is one material of a
     // campaign) and recruit.
     if (!campaign) return;
-    opts.board.startReview(ctx.roomId, campaign, opts.startOptions);
+    opts.board.startReview(ctx.roomId, campaign, material?.startOptions ?? opts.startOptions);
     await tools.sendEvent(
       `Intake: "${campaignLabel(campaign)}" for ${campaign.markets.join(', ')}. Recruiting ${reviewers.length} reviewer(s).`,
       'intake',

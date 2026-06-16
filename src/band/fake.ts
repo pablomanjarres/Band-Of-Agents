@@ -13,8 +13,10 @@ import type {
   AgentHandler,
   BandTransport,
   ConnectOptions,
+  IntakeControl,
   Mention,
   MentionInput,
+  MentionRef,
   Participant,
   RoomMessage,
   RoomTools,
@@ -66,6 +68,17 @@ export class FakeBandTransport implements BandTransport {
     this.participants.set(id, { id, name, handle, type: 'user' });
   }
 
+  /**
+   * Seed a participant of either type with an explicit handle. Used to register
+   * the intake relay (an agent, since the band.ai SDK posts only as an agent) so
+   * its posts are recognized by the coordinator's intake gate. A participant with
+   * no handler never has messages delivered to it; it can only post.
+   */
+  addParticipant(id: string, name: string, handle: string = name, type: 'agent' | 'user' = 'user'): void {
+    if (this.participants.has(id)) return;
+    this.participants.set(id, { id, name, handle, type });
+  }
+
   connectAgent(opts: ConnectOptions): Promise<AgentConnection> {
     const reg: Registered = {
       id: opts.agentId,
@@ -84,19 +97,25 @@ export class FakeBandTransport implements BandTransport {
     return Promise.resolve(connection);
   }
 
-  /** External injection: a human or the test harness posts into the room. */
-  post(fromId: string, content: string, mentions?: MentionInput): void {
-    this.record('message', fromId, content, 'chat', normalizeMentions(mentions), {});
+  /**
+   * External injection: a human or the test harness posts into a room. The
+   * optional roomId targets a specific room (defaulting to the constructor room),
+   * so ONE fake transport can host MANY rooms with the same connected agents,
+   * exactly like one band.ai agent serving every chat it is a member of. This is
+   * what lets a campaign fan out into one room per material over a single fake.
+   */
+  post(fromId: string, content: string, mentions?: MentionInput, roomId: string = this.roomId): void {
+    this.record('message', fromId, content, 'chat', normalizeMentions(mentions), {}, roomId);
   }
 
-  private toolsFor(agentId: string): RoomTools {
+  private toolsFor(agentId: string, roomId: string): RoomTools {
     return {
       capabilities: { peers: true, contacts: false, memory: false },
       sendMessage: async (content, mentions) => {
-        this.record('message', agentId, content, 'chat', normalizeMentions(mentions), {});
+        this.record('message', agentId, content, 'chat', normalizeMentions(mentions), {}, roomId);
       },
       sendEvent: async (content, messageType, metadata) => {
-        this.record('event', agentId, content, messageType, [], metadata ?? {});
+        this.record('event', agentId, content, messageType, [], metadata ?? {}, roomId);
       },
       getParticipants: async () => this.listParticipants(),
       addParticipant: async (name, role) => {
@@ -126,6 +145,7 @@ export class FakeBandTransport implements BandTransport {
     messageType: string,
     mentions: Mention[],
     metadata: Record<string, unknown>,
+    roomId: string = this.roomId,
   ): void {
     const from = this.participants.get(fromId);
     const seq = this.seq++;
@@ -141,7 +161,7 @@ export class FakeBandTransport implements BandTransport {
     });
     this.onActivity?.({
       kind,
-      roomId: this.roomId,
+      roomId,
       fromId,
       fromName: from?.name ?? fromId,
       content,
@@ -156,7 +176,7 @@ export class FakeBandTransport implements BandTransport {
       if (!target?.handler || target.id === fromId) continue;
       const message: RoomMessage = {
         id: `m${seq}`,
-        roomId: this.roomId,
+        roomId,
         content,
         senderId: fromId,
         senderType: from?.type ?? 'user',
@@ -167,8 +187,8 @@ export class FakeBandTransport implements BandTransport {
         createdAt: new Date(),
       };
       const handler = target.handler;
-      const tools = this.toolsFor(target.id);
-      const ctx: AgentContext = { roomId: this.roomId, agentId: target.id, agentName: target.name };
+      const tools = this.toolsFor(target.id, roomId);
+      const ctx: AgentContext = { roomId, agentId: target.id, agentName: target.name };
       this.enqueue(() => handler(message, tools, ctx));
     }
   }
@@ -204,3 +224,34 @@ export class FakeBandTransport implements BandTransport {
     }
   }
 }
+
+/**
+ * An IntakeControl backed by a FakeBandTransport, so the band CAMPAIGN flow is
+ * driveable in-process (no band.ai credentials), exactly like the single-asset
+ * band flow is tested. It mirrors RealBandTransport.connectIntake()'s control:
+ * createRoom mints a fresh room id (a campaign fans out one room per material),
+ * addParticipant is a no-op (the fake's connected agents already serve every
+ * room, like one band.ai agent in many chats), and postMessage injects the
+ * intake's post into that room as the intake user, mentioning the coordinator so
+ * the existing coordinator/reviewer/reconcile machinery runs per room. The intake
+ * is seeded as a user named "Intake" so the coordinator's intake-agent gate (or a
+ * test's own gate) recognizes it.
+ */
+export function makeFakeIntakeControl(
+  transport: FakeBandTransport,
+  opts: { intakeId?: string; intakeName?: string; senderType?: 'agent' | 'user' } = {},
+): IntakeControl {
+  const intakeId = opts.intakeId ?? 'intake';
+  const intakeName = opts.intakeName ?? 'Intake';
+  transport.addParticipant(intakeId, intakeName, '@pablomanjarres/intake', opts.senderType ?? 'agent');
+  let n = 0;
+  return {
+    createRoom: async (taskId) => `${transport.roomId}::room-${taskId ?? (n += 1)}`,
+    addParticipant: async () => {},
+    postMessage: async (roomId: string, content: string, mentions: MentionRef[]) => {
+      transport.post(intakeId, content, mentions.map((m) => ({ id: m.id })), roomId);
+    },
+    stop: async () => {},
+  };
+}
+

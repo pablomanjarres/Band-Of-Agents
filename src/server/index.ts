@@ -32,6 +32,7 @@ import { realPodBoardModels } from '../board/pod-board';
 import { type ModelClient, type SttClient } from '../models/client';
 import { demoCampaignModels, demoPerception } from '../run/demo-fixtures';
 import { CampaignSession, type CampaignRollup } from '../board/campaign';
+import { CampaignBandSession } from '../board/campaign-band';
 import { BandBoard } from '../board/band-session';
 import { modelFor } from '../models/route';
 import { importRulebook, type ImportFormat } from '../domain/rulebook-import';
@@ -93,6 +94,11 @@ interface CampaignReviewRecord {
 
 const reviews = new Map<string, ReviewRecord>();
 const campaignReviews = new Map<string, CampaignReviewRecord>();
+// The long-lived BandBoard (BOARD_MODE=band): connected once in main(), it hosts
+// the agents that do the reviewing in band.ai. runCampaignReview drives it via a
+// CampaignBandSession (Intake posts each material into a band.ai room; the board
+// observes). Stays undefined in local mode / on import (no agents connected).
+let bandBoard: BandBoard | undefined;
 // Durable state on Cloud Run: when GCS_BUCKET is set, mirror every write to a
 // private bucket and restore from it on boot (see main()). Local dev leaves it
 // unset and uses the plain file store.
@@ -395,32 +401,61 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
   const onEvent = makeCampaignOnEvent(record);
   campaignReviews.set(id, record);
 
-  // Build the models and run inside the async flow so a missing key / provider
+  // Build the session and run inside the async flow so a missing key / provider
   // failure degrades THIS review to a status:error event (mirroring the single-
   // asset path that returns {id} then fails async), never a 500 or a dead portal.
   void (async () => {
     try {
-      const session = new CampaignSession({
-        roomId: `campaign-${id}`,
-        campaign,
-        // Optional scope: when present, only this advertisement's materials are
-        // reviewed (still concurrent, still per material); the rollup then covers
-        // just that ad. Absent => the unchanged whole-campaign review.
-        ...(advertisementId ? { advertisementId } : {}),
-        brand,
-        rulebooks: currentRulebooks(),
-        models: boardModelsOrStub(),
-        onEvent: (e) => {
-          onEvent(e);
-          record.rollup = session.rollup();
-        },
-        onPrecedent: (precedent) => store.appendPrecedent(precedent),
-        hostImage: (u) => store.hostImage(u) ?? u,
-        getPrecedents: recentPrecedents,
-        perception: perceptionConfig,
-      });
-      record.submitDecision = (materialId, text) => session.submitDecision(materialId, text);
-      const rollup = await session.run();
+      // BOARD_MODE=band: the review runs THROUGH band.ai. The Intake posts each
+      // material into a band.ai room and the connected BandBoard agents do the
+      // reviewing; we OBSERVE the per-material events (tagged campaignId/ad/
+      // material). BOARD_MODE=local: the in-process CampaignSession runs it. Both
+      // are per material, concurrent, with NO campaign/ad-wide gate; both feed the
+      // same record + rollup, so the SSE/rollup/decision endpoints are unchanged.
+      let rollup: CampaignRollup;
+      if (BOARD_MODE === 'band') {
+        if (!bandBoard) throw new Error('band.ai board not connected');
+        const session = new CampaignBandSession({
+          board: bandBoard,
+          roomId: `campaign-${id}`,
+          campaign,
+          ...(advertisementId ? { advertisementId } : {}),
+          onEvent: (e) => {
+            onEvent(e);
+            record.rollup = session.rollup();
+          },
+        });
+        record.submitDecision = (materialId, text) => session.submitDecision(materialId, text);
+        // Note: the per-material room sinks are intentionally NOT released when
+        // run() resolves: an escalated material rests at awaiting-decision and its
+        // room must stay observed so a later human ruling (the decision endpoint)
+        // routes back into this campaign's lanes. Each review uses a unique run
+        // roomId, so rooms never collide across reviews. session.dispose() exists
+        // for an explicit teardown if a caller ever needs it.
+        rollup = await session.run();
+      } else {
+        const session = new CampaignSession({
+          roomId: `campaign-${id}`,
+          campaign,
+          // Optional scope: when present, only this advertisement's materials are
+          // reviewed (still concurrent, still per material); the rollup then covers
+          // just that ad. Absent => the unchanged whole-campaign review.
+          ...(advertisementId ? { advertisementId } : {}),
+          brand,
+          rulebooks: currentRulebooks(),
+          models: boardModelsOrStub(),
+          onEvent: (e) => {
+            onEvent(e);
+            record.rollup = session.rollup();
+          },
+          onPrecedent: (precedent) => store.appendPrecedent(precedent),
+          hostImage: (u) => store.hostImage(u) ?? u,
+          getPrecedents: recentPrecedents,
+          perception: perceptionConfig,
+        });
+        record.submitDecision = (materialId, text) => session.submitDecision(materialId, text);
+        rollup = await session.run();
+      }
       record.rollup = rollup;
       const escalated = rollup.worstCaseByRegion.some((r) => r.decision === 'escalate');
       record.status = escalated ? 'awaiting-decision' : 'complete';
@@ -444,19 +479,16 @@ const app = new Hono();
 app.use('/api/*', cors());
 
 app.post('/api/reviews', async (c) => {
-  if (BOARD_MODE === 'band') {
-    return c.json(
-      { error: 'In band mode, start reviews from band.ai: post "Coordinator, review campaign <name>" in your room. Compose/save campaigns via POST /api/assets.' },
-      400,
-    );
-  }
   const body: unknown = await c.req.json().catch(() => ({}));
 
   // Campaign mode: a saved campaignId or an inline campaign runs every material
   // concurrently. An optional advertisementId SCOPES the review to one ad's
   // materials (still concurrent, still per material): fewer materials run, the
-  // rollup covers just that ad, no new gate. The single-asset payload below is
-  // unchanged (no regression).
+  // rollup covers just that ad, no new gate. This path runs in BOTH modes: in
+  // band mode runCampaignReview drives the band.ai flow (Intake posts each material
+  // into a room, the connected agents review, we observe); in local mode it runs
+  // the in-process CampaignSession. The single-asset payload below stays band.ai-
+  // only in band mode (no regression to the local single-asset path).
   const b = (body ?? {}) as { campaignId?: unknown; campaign?: unknown; advertisementId?: unknown };
   if (typeof b.campaignId === 'string' || (b.campaign && typeof b.campaign === 'object')) {
     let campaign: Campaign | undefined;
@@ -489,6 +521,15 @@ app.post('/api/reviews', async (c) => {
       ...(advertisementId !== undefined ? { advertisementId } : {}),
       materials: scopedMaterials.map((m) => m.id),
     });
+  }
+
+  // Single-asset reviews still start from band.ai in band mode (post in your room);
+  // only the campaign path above is driven by the portal in band mode.
+  if (BOARD_MODE === 'band') {
+    return c.json(
+      { error: 'In band mode, start a single-asset review from band.ai: post "Coordinator, review <asset>" in your room. Campaign reviews can be started here.' },
+      400,
+    );
   }
 
   const parsed = CreateReview.safeParse(body);
@@ -1011,7 +1052,7 @@ async function main(): Promise<void> {
       console.error('[gcs-backup] restore failed (continuing with local state):', (err as Error)?.message ?? err);
     }
   }
-  const bandBoard = buildBandBoard();
+  bandBoard = buildBandBoard();
   if (bandBoard) {
     console.log('Connecting band.ai agents (BOARD_MODE=band). This is the real coordination layer...');
     await bandBoard.start();
