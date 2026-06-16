@@ -13,10 +13,11 @@ import { makeRegionReviewer } from '../agents/region-reviewer';
 import { makeBrandReviewer } from '../agents/brand-reviewer';
 import { makeRemediation } from '../agents/remediation';
 import { makeReconcile, type Precedent } from '../agents/reconcile';
-import type { ModelClient } from '../models/client';
-import { imageClientFor, modelFor } from '../models/route';
-import type { BrandDna, ContentAsset, Rulebook } from '../domain/types';
+import type { ModelClient, SttClient } from '../models/client';
+import { imageClientFor, modelFor, perceptionModels } from '../models/route';
+import type { BrandDna, CampaignDossier, ContentAsset, Material, MaterialPerception, Rulebook } from '../domain/types';
 import type { NewArtifact } from '../domain/artifact';
+import { perceiveMaterial } from '../perception/perceive';
 import { translateActivity, type BoardEvent } from './events';
 import { SharedBoard } from './shared';
 
@@ -56,6 +57,39 @@ export interface BoardSessionOptions {
   publishArtifact?: (input: NewArtifact) => { id: string; url: string };
   /** Recent precedent lines fed into the region reviewers' shared context. */
   getPrecedents?: () => string[];
+  /**
+   * Campaign cascade for this review. When set, this BoardSession reviews ONE
+   * material of a campaign: the dossier and the campaign/material ids are stashed
+   * on the board (so the dossier shows up in every reviewer prompt) and the
+   * material object is handed to the coordinator verbatim (so kind/perception are
+   * not stripped). Omitting this is the unchanged single-asset path.
+   */
+  campaign?: {
+    campaignId: string;
+    materialId: string;
+    advertisementId?: string;
+    dossier: CampaignDossier;
+  };
+  /**
+   * Multimodal perception pre-pass. When set, a video/image material is "seen"
+   * and "heard" ONCE before the reviewers run; the resulting MaterialPerception is
+   * merged onto the asset (so the dossier/perception cascade carries it) and
+   * 'perceiving' events stream out (tagged with the campaign ref) so the UI
+   * animates the frames being read. Every step degrades gracefully, so a missing
+   * model / ffmpeg simply means less perception, never a failure. Omitting this is
+   * the unchanged text-only path (the text demo is byte-identical).
+   */
+  perception?: {
+    vision?: ModelClient;
+    stt?: SttClient;
+    resolveVideoPath?: (videoUrl: string) => string | undefined;
+    maxFrames?: number;
+  };
+}
+
+/** Build the perception clients (vision + STT) from the active MODEL_MODE. */
+export function realPerceptionModels(): { vision?: ModelClient; stt?: SttClient } {
+  return perceptionModels();
 }
 
 export class BoardSession {
@@ -86,12 +120,44 @@ export class BoardSession {
   async run(): Promise<void> {
     if (this.started) return;
     this.started = true;
-    const { asset, brand, rulebooks, models } = this.opts;
+    const { brand, rulebooks, models } = this.opts;
     const room = this.room;
     const board = this.board;
+    const campaignCtx = this.opts.campaign;
+
+    // Perception pre-pass (multimodal): "see"/"hear" a video or image material
+    // ONCE and merge the text artifacts onto the asset BEFORE the reviewers run,
+    // so the existing dossier/perception cascade carries them to every region
+    // (even the text-only one). Degrades gracefully and is skipped entirely when
+    // not configured, so the text path is unchanged.
+    const asset = await this.maybePerceive(this.opts.asset, campaignCtx);
 
     room.addUser('lead', 'Compliance Lead', '@compliance-lead');
-    await room.connectAgent({ agentId: 'coord', name: 'Coordinator', handle: '@coordinator', onMessage: makeCoordinator({ board, remediationHandle: '@remediation', reconcileHandle: '@reconcile' }) });
+    await room.connectAgent({
+      agentId: 'coord',
+      name: 'Coordinator',
+      handle: '@coordinator',
+      onMessage: makeCoordinator({
+        board,
+        remediationHandle: '@remediation',
+        reconcileHandle: '@reconcile',
+        // Campaign mode: hand the material to the coordinator verbatim (a Material
+        // is structurally a ContentAsset, so kind/perception survive) and stash the
+        // dossier + ids so the cascade and per-material gate engage. Single-asset
+        // mode leaves both unset, so the coordinator parses the posted asset as today.
+        ...(campaignCtx
+          ? {
+              lookupCampaign: () => asset,
+              startOptions: {
+                dossier: campaignCtx.dossier,
+                campaignId: campaignCtx.campaignId,
+                materialId: campaignCtx.materialId,
+                ...(campaignCtx.advertisementId !== undefined ? { advertisementId: campaignCtx.advertisementId } : {}),
+              },
+            }
+          : {}),
+      }),
+    });
     await room.connectAgent({
       agentId: 'us',
       name: 'US Reviewer',
@@ -142,6 +208,64 @@ export class BoardSession {
     room.post('lead', JSON.stringify(asset), [{ id: 'coord' }]);
     await room.drain();
     if (!this.terminal) this.emit({ type: 'status', seq: 0, fromName: 'system', status: 'complete' });
+  }
+
+  /**
+   * Run the perception pre-pass on a material and return the asset with its
+   * MaterialPerception merged in. Returns the asset unchanged when perception is
+   * not configured or there is nothing visual to perceive. Emits 'perceiving'
+   * events (tagged with the campaign ref) so the UI animates. Never throws: every
+   * perception step degrades to a no-op, so the material always still reviews.
+   */
+  private async maybePerceive(
+    asset: ContentAsset,
+    campaignCtx: BoardSessionOptions['campaign'],
+  ): Promise<ContentAsset> {
+    const cfg = this.opts.perception;
+    if (!cfg) return asset;
+    const material = asset as Material;
+    // Only perceive something with visual/audio substance: a video, an image
+    // material, or anything carrying seeded frames / an image url.
+    const hasVisual =
+      material.kind === 'video' ||
+      material.kind === 'image' ||
+      (material.perception?.frames?.length ?? 0) > 0 ||
+      typeof material.imageUrl === 'string';
+    if (!hasVisual) return asset;
+
+    const total0Ref = campaignCtx
+      ? {
+          campaignId: campaignCtx.campaignId,
+          materialId: campaignCtx.materialId,
+          ...(campaignCtx.advertisementId !== undefined ? { advertisementId: campaignCtx.advertisementId } : {}),
+        }
+      : {};
+    let perception: MaterialPerception;
+    try {
+      perception = await perceiveMaterial(material, {
+        ...(cfg.vision ? { visionModel: cfg.vision } : {}),
+        ...(cfg.stt ? { sttModel: cfg.stt } : {}),
+        ...(this.opts.hostImage ? { hostImage: this.opts.hostImage } : {}),
+        ...(cfg.resolveVideoPath ? { resolveVideoPath: cfg.resolveVideoPath } : {}),
+        ...(cfg.maxFrames !== undefined ? { maxFrames: cfg.maxFrames } : {}),
+        onFrame: (frameUrl, index, total, stage) =>
+          this.emit({
+            type: 'perceiving',
+            seq: 0,
+            fromName: 'Perception',
+            ...(frameUrl !== undefined ? { frameUrl } : {}),
+            index,
+            total,
+            stage,
+            ...total0Ref,
+          } as BoardEvent),
+      });
+    } catch {
+      return asset; // perception entirely failed: review the material text-only
+    }
+    // Merge the perception onto the material so board.campaign(key).perception is
+    // present and the reviewer cascade (perceptionOf) picks it up.
+    return { ...material, perception } as ContentAsset;
   }
 
   /** Record a human ruling on an escalation; logs precedent via Reconcile and completes. */

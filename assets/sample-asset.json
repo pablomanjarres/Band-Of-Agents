@@ -1,9 +1,10 @@
 {
-  "id": "lumavida-immune-q3",
+  "id": "immune-plus-q3",
+  "name": "Immune+ Q3",
   "channel": "instagram",
   "markets": ["US", "EU"],
-  "copy": "Feeling run down? Lumavida Immune+ is clinically proven to boost your immune system. 9 out of 10 users felt healthier in two weeks. Tap to claim your free trial.",
+  "copy": "Feeling run down? Northwind Immune+ is clinically proven to boost your immune system. 9 out of 10 users felt healthier in two weeks. Tap to claim your free trial.",
   "claim": "Clinically proven to boost your immune system; 9 out of 10 users felt healthier.",
-  "imagePrompt": "A bright, energetic flat-lay of Lumavida Immune+ supplement bottles with fresh citrus and eucalyptus, warm morning sunlight, clean wellness aesthetic.",
+  "imagePrompt": "A bright, energetic flat-lay of Northwind Immune+ supplement bottles with fresh citrus and eucalyptus, warm morning sunlight, clean wellness aesthetic.",
   "substantiation": "Two randomized controlled trials (n=240 and n=180) on the Immune+ formula; typical-results data on file."
 }

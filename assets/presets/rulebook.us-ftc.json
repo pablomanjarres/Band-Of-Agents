@@ -1,0 +1,61 @@
+{
+  "region": "US",
+  "label": "United States (FTC) preset",
+  "notLegalAdvice": true,
+  "rules": [
+    {
+      "id": "us-ftc-substantiation",
+      "region": "US",
+      "category": "substantiation",
+      "severity": "block",
+      "check": "Objective or quantified performance claims need competent and reliable scientific evidence on file before publishing.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/business-guidance/resources/health-products-compliance-guidance"
+    },
+    {
+      "id": "us-ftc-health-evidence",
+      "region": "US",
+      "category": "health_claim",
+      "severity": "block",
+      "check": "Health or efficacy claims generally require randomized, controlled human evidence; mechanism-only or animal data is not enough.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/business-guidance/resources/health-products-compliance-guidance"
+    },
+    {
+      "id": "us-ftc-testimonial",
+      "region": "US",
+      "category": "endorsement",
+      "severity": "warn",
+      "check": "Testimonial and results claims must be substantiated as if stated directly and disclose the results a typical consumer can generally expect.",
+      "requiredDisclosure": "Typical-results disclosure",
+      "sourceUrl": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-255"
+    },
+    {
+      "id": "us-ftc-material-connection",
+      "region": "US",
+      "category": "endorsement",
+      "severity": "warn",
+      "check": "Material connections between an endorser and the brand (payment, free product, employment) must be disclosed clearly and conspicuously.",
+      "requiredDisclosure": "Material-connection disclosure",
+      "sourceUrl": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-255"
+    },
+    {
+      "id": "us-ftc-free-offer",
+      "region": "US",
+      "category": "free_offer",
+      "severity": "warn",
+      "check": "'Free', 'trial', and auto-renew offers must state all material terms (price, billing cadence, cancellation) clearly and up front.",
+      "requiredDisclosure": "Free-offer and auto-renewal terms",
+      "sourceUrl": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-251"
+    },
+    {
+      "id": "us-ftc-comparative",
+      "region": "US",
+      "category": "comparative",
+      "severity": "info",
+      "check": "Comparative claims are allowed when truthful and non-deceptive; no heightened substantiation bar applies beyond ordinary truthfulness.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/legal-library/browse/statement-policy-regarding-comparative-advertising"
+    }
+  ]
+}

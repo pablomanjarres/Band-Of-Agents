@@ -14,19 +14,27 @@ import 'dotenv/config';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { loadBrandDna, loadRulebook } from '../domain/load';
-import { ContentAsset as ContentAssetSchema, Rulebook as RulebookSchema } from '../domain/types';
-import type { ContentAsset, Rulebook } from '../domain/types';
+import { Advertisement as AdvertisementSchema, Campaign as CampaignSchema, ContentAsset as ContentAssetSchema, Material as MaterialSchema, Rulebook as RulebookSchema } from '../domain/types';
+import type { Advertisement, Campaign, ContentAsset, Material, Rulebook } from '../domain/types';
 import { NewArtifact as NewArtifactSchema } from '../domain/artifact';
-import { BoardSession, realBoardModels } from '../board/session';
+import { BoardSession, realBoardModels, realPerceptionModels, type BoardModels } from '../board/session';
 import { PodBoardSession } from '../board/pod-session';
 import { realPodBoardModels } from '../board/pod-board';
+import { type ModelClient, type SttClient } from '../models/client';
+import { demoCampaignModels, demoPerception } from '../run/demo-fixtures';
+import { CampaignSession, type CampaignRollup } from '../board/campaign';
 import { BandBoard } from '../board/band-session';
+import { modelFor } from '../models/route';
+import { importRulebook, type ImportFormat } from '../domain/rulebook-import';
+import { loadPresets } from '../domain/presets';
 import type { BoardEvent, BoardStatus } from '../board/events';
 import { Store } from '../store/store';
 import { makePublishArtifact } from '../store/artifacts';
@@ -34,6 +42,7 @@ import { makeGcsMirror, restoreFromGcs } from '../store/gcs-backup';
 import { spend, readSpendSnapshot, SPEND_FILE } from '../models/spend';
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
+const PRESETS_DIR = new URL('../../assets/presets/', import.meta.url).pathname;
 const WEB_DIST = new URL('../../web/dist/', import.meta.url).pathname;
 const DATA_DIR = new URL('../../data/', import.meta.url).pathname;
 const PORT = Number(process.env.PORT ?? 8787);
@@ -66,7 +75,23 @@ interface ReviewRecord {
   submitDecision: (text: string) => Promise<void>;
 }
 
+// A campaign review is ONE id under which every material's events stream (each
+// event carries materialId, so the UI lanes them). The rollup is recomputed as
+// verdicts arrive; it is observational and gates nothing (the one rule).
+interface CampaignReviewRecord {
+  id: string;
+  createdAt: number;
+  campaign: Campaign;
+  events: BoardEvent[];
+  status: BoardStatus;
+  conflict: boolean;
+  rollup: CampaignRollup | null;
+  subscribers: Set<(event: BoardEvent) => void>;
+  submitDecision: (materialId: string, text: string) => Promise<void>;
+}
+
 const reviews = new Map<string, ReviewRecord>();
+const campaignReviews = new Map<string, CampaignReviewRecord>();
 // Durable state on Cloud Run: when GCS_BUCKET is set, mirror every write to a
 // private bucket and restore from it on boot (see main()). Local dev leaves it
 // unset and uses the plain file store.
@@ -77,6 +102,49 @@ const store = new Store(DATA_DIR, gcsMirror);
 // Agents publish artifacts (images, reports) and paste the returned viewer URL
 // into the room, since Band shows only plain text.
 const publishArtifact = makePublishArtifact(store, PUBLIC_BASE_URL);
+
+// Key-free local demo fallback. In local mode with no AIML key (and not dev mode),
+// the real model clients cannot be constructed (modelFor throws). Rather than fail
+// the portal, we fall back to deterministic STUB models so the campaign still
+// reviews and the perception panel still animates over the seeded frames, exactly
+// like `npm run local`. The product paths (an AIML key set, MODEL_MODE=dev, or
+// BOARD_MODE=band) are untouched: real models are used whenever they can be built.
+const KEY_FREE_LOCAL = BOARD_MODE === 'local' && process.env.MODEL_MODE !== 'dev' && !process.env.AIML_API_KEY;
+
+// Rich key-free demo: the shared seeded-campaign scenario (real US/EU conflict),
+// so the portal runs a full review and the perception panel animates with no API
+// key. Same fixtures the console runner uses, keyed by material id.
+function stubBoardModels(): BoardModels {
+  return demoCampaignModels();
+}
+
+function stubPerceptionModels(): { vision: ModelClient; stt: SttClient } {
+  return demoPerception();
+}
+
+/** Reviewer models: real when constructible, else the key-free demo stubs. */
+function boardModelsOrStub(): BoardModels {
+  if (KEY_FREE_LOCAL) return stubBoardModels();
+  try {
+    return realBoardModels();
+  } catch {
+    return stubBoardModels();
+  }
+}
+
+/** Perception clients: real when available, else demo stubs (so the UI animates). */
+function perceptionOrStub(): { vision?: ModelClient; stt?: SttClient } {
+  if (KEY_FREE_LOCAL) return stubPerceptionModels();
+  return realPerceptionModels();
+}
+
+// Multimodal perception config (vision + STT) plus the video-path resolver. Absent
+// clients => that modality is skipped (graceful). The store resolves a hosted
+// /api/videos/<name> url back to its local file so ffmpeg/STT can read the bytes.
+const perceptionConfig = {
+  ...perceptionOrStub(),
+  resolveVideoPath: (videoUrl: string) => store.videoPath(videoUrl),
+};
 
 // Feed recent human-decision precedents back into the reviewers' shared context.
 const recentPrecedents = (): string[] =>
@@ -97,11 +165,18 @@ function currentRulebooks(): Record<RegionKey, Rulebook> {
   };
 }
 
+// The model used to parse a freeform (.md/text) rulebook into structured rules.
+// AIML is the default route (MODEL_MODE); we reuse the EU reviewer's slot because
+// it is a strong, strict structured-output model. No new model ids are added.
+function importModel() {
+  return modelFor('eu');
+}
+
 function normalizeName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-// Resolve a human's free-text reference ("review campaign Lumavida-Q3") to a saved campaign.
+// Resolve a human's free-text reference ("review campaign Immune+ Q3") to a saved campaign.
 function findCampaign(query: string): ContentAsset | undefined {
   const q = normalizeName(query);
   if (!q) return undefined;
@@ -127,23 +202,26 @@ function registerDiscoveredReview(roomId: string): (event: BoardEvent) => void {
   return makeOnEvent(record);
 }
 
-// band mode: connect the agents (you add them in app.band.ai) and OBSERVE. We never create rooms.
-const bandBoard =
-  BOARD_MODE === 'band'
-    ? new BandBoard({
-        brand,
-        rulebooks: currentRulebooks(),
-        models: realBoardModels(),
-        ...(process.env.HUMAN_HANDLE ? { humanHandle: process.env.HUMAN_HANDLE } : {}),
-        hostImage: (u) => store.hostImage(u) ?? u,
-        publishArtifact,
-        getPrecedents: recentPrecedents,
-        getRulebook: (region) => store.getRulebookOverride(region) ?? defaultRulebooks[region.toLowerCase() as RegionKey] ?? defaultRulebooks.us,
-        lookupCampaign: findCampaign,
-        logPrecedent: (p) => store.appendPrecedent(p),
-        onReviewDiscovered: registerDiscoveredReview,
-      })
-    : undefined;
+// band mode: connect the agents (you add them in app.band.ai) and OBSERVE. We never
+// create rooms. Built lazily inside main() (only when actually serving in band
+// mode) so importing this module (e.g. in tests, or in local mode) never
+// constructs the real board models, which would require an AIML key.
+function buildBandBoard(): BandBoard | undefined {
+  if (BOARD_MODE !== 'band') return undefined;
+  return new BandBoard({
+    brand,
+    rulebooks: currentRulebooks(),
+    models: realBoardModels(),
+    ...(process.env.HUMAN_HANDLE ? { humanHandle: process.env.HUMAN_HANDLE } : {}),
+    hostImage: (u) => store.hostImage(u) ?? u,
+    publishArtifact,
+    getPrecedents: recentPrecedents,
+    getRulebook: (region) => store.getRulebookOverride(region) ?? defaultRulebooks[region.toLowerCase() as RegionKey] ?? defaultRulebooks.us,
+    lookupCampaign: findCampaign,
+    logPrecedent: (p) => store.appendPrecedent(p),
+    onReviewDiscovered: registerDiscoveredReview,
+  });
+}
 
 const CreateReview = z.object({
   copy: z.string().min(1),
@@ -154,10 +232,75 @@ const CreateReview = z.object({
   substantiation: z.string().optional(),
 });
 
+// JSON body for a dossier source (the non-multipart path). content is required;
+// name/kind are optional (kind defaults to text).
+const DossierSourceBody = z.object({
+  name: z.string().optional(),
+  kind: z.enum(['md', 'json', 'text']).optional(),
+  content: z.string().min(1),
+});
+
 function imageContentType(name: string): string {
   if (name.endsWith('.png')) return 'image/png';
   if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
   return 'application/octet-stream';
+}
+
+function videoContentType(name: string): string {
+  if (name.endsWith('.mp4') || name.endsWith('.m4v')) return 'video/mp4';
+  if (name.endsWith('.webm')) return 'video/webm';
+  if (name.endsWith('.mov')) return 'video/quicktime';
+  return 'application/octet-stream';
+}
+
+function extOf(filename: string, fallback = 'mp4'): string {
+  const m = /\.([a-z0-9]+)$/i.exec(filename);
+  return m && m[1] ? m[1].toLowerCase() : fallback;
+}
+
+// --- Advertisement-aware campaign helpers --------------------------------
+// A material lives inside an advertisement now, so mutations walk the ad tier.
+
+/** Total material count across every advertisement. */
+function materialCount(camp: Campaign): number {
+  return camp.advertisements.reduce((n, ad) => n + ad.materials.length, 0);
+}
+
+/** All materials across every advertisement (flattened). */
+function allMaterials(camp: Campaign): Material[] {
+  return camp.advertisements.flatMap((ad) => ad.materials);
+}
+
+/** Apply a patch to the material with this id, wherever it lives, returning a new campaign. */
+function patchMaterial(camp: Campaign, materialId: string, patch: (m: Material) => Material): Campaign {
+  return {
+    ...camp,
+    advertisements: camp.advertisements.map((ad) => ({
+      ...ad,
+      materials: ad.materials.map((m) => (m.id === materialId ? patch(m) : m)),
+    })),
+  };
+}
+
+/**
+ * Add (or replace by id) a material under a target advertisement. When
+ * advertisementId is omitted, the first advertisement is used; when the campaign
+ * has no advertisements yet, a single "Default" advertisement is created. The
+ * material is removed from any OTHER advertisement first, so an id stays unique.
+ */
+function addMaterialToCampaign(camp: Campaign, material: Material, advertisementId?: string): Campaign {
+  let advertisements = camp.advertisements.map((ad) => ({
+    ...ad,
+    materials: ad.materials.filter((m) => m.id !== material.id),
+  }));
+  if (advertisements.length === 0) advertisements = [{ id: 'default', name: 'Default', materials: [] }];
+  const targetId = advertisementId && advertisements.some((ad) => ad.id === advertisementId)
+    ? advertisementId
+    : advertisements[0]!.id;
+  advertisements = advertisements.map((ad) =>
+    ad.id === targetId ? { ...ad, materials: [...ad.materials, material] } : ad,
+  );
+  return { ...camp, advertisements };
 }
 
 function makeOnEvent(record: ReviewRecord): (event: BoardEvent) => void {
@@ -182,6 +325,80 @@ function makeOnEvent(record: ReviewRecord): (event: BoardEvent) => void {
   };
 }
 
+// Campaign event sink: every per-material event is image-hosted, seq-stamped, and
+// fanned out under the single campaign-review id. Per-material status events keep
+// their materialId so the UI lanes them and the campaign SSE does NOT close on
+// them; the campaign-level terminal is a separate status event with no materialId.
+function makeCampaignOnEvent(record: CampaignReviewRecord): (event: BoardEvent) => void {
+  return (event) => {
+    let e = event;
+    if (e.type === 'revised' && e.imageUrl) {
+      const hosted = store.hostImage(e.imageUrl);
+      if (hosted) e = { ...e, imageUrl: hosted };
+    }
+    e = { ...e, seq: record.events.length } as BoardEvent;
+    record.events.push(e);
+    if (e.type === 'verdict' && e.conflict) record.conflict = true;
+    for (const sub of record.subscribers) sub(e);
+  };
+}
+
+// Run a campaign as concurrent per-material reviews. Returns the record id; the
+// caller streams events over SSE. The campaign status stays 'running' until every
+// material is terminal (CampaignSession.run resolves), then becomes 'complete' or
+// 'awaiting-decision' (any material escalated) and a campaign-level status event
+// is emitted (no materialId) so the SSE consumer knows the whole campaign rested.
+function runCampaignReview(campaign: Campaign): string {
+  const id = randomUUID();
+  const record: CampaignReviewRecord = {
+    id,
+    createdAt: Date.now(),
+    campaign,
+    events: [],
+    status: 'running',
+    conflict: false,
+    rollup: null,
+    subscribers: new Set(),
+    submitDecision: async () => {},
+  };
+  const onEvent = makeCampaignOnEvent(record);
+  campaignReviews.set(id, record);
+
+  // Build the models and run inside the async flow so a missing key / provider
+  // failure degrades THIS review to a status:error event (mirroring the single-
+  // asset path that returns {id} then fails async), never a 500 or a dead portal.
+  void (async () => {
+    try {
+      const session = new CampaignSession({
+        roomId: `campaign-${id}`,
+        campaign,
+        brand,
+        rulebooks: currentRulebooks(),
+        models: boardModelsOrStub(),
+        onEvent: (e) => {
+          onEvent(e);
+          record.rollup = session.rollup();
+        },
+        onPrecedent: (precedent) => store.appendPrecedent(precedent),
+        hostImage: (u) => store.hostImage(u) ?? u,
+        getPrecedents: recentPrecedents,
+        perception: perceptionConfig,
+      });
+      record.submitDecision = (materialId, text) => session.submitDecision(materialId, text);
+      const rollup = await session.run();
+      record.rollup = rollup;
+      const escalated = rollup.worstCaseByRegion.some((r) => r.decision === 'escalate');
+      record.status = escalated ? 'awaiting-decision' : 'complete';
+      onEvent({ type: 'status', seq: 0, fromName: 'system', status: record.status });
+    } catch (err: unknown) {
+      record.status = 'error';
+      onEvent({ type: 'log', seq: 0, fromName: 'system', messageType: 'error', text: `Campaign review failed: ${(err as Error)?.message ?? String(err)}` });
+      onEvent({ type: 'status', seq: 0, fromName: 'system', status: 'error' });
+    }
+  })();
+  return id;
+}
+
 // A model/provider failure should degrade a single review, never take down the
 // portal (e.g. an expired Vertex token surfacing as an async rejection).
 process.on('unhandledRejection', (reason) => {
@@ -199,6 +416,26 @@ app.post('/api/reviews', async (c) => {
     );
   }
   const body: unknown = await c.req.json().catch(() => ({}));
+
+  // Campaign mode: a saved campaignId or an inline campaign runs every material
+  // concurrently. The single-asset payload below is unchanged (no regression).
+  const b = (body ?? {}) as { campaignId?: unknown; campaign?: unknown };
+  if (typeof b.campaignId === 'string' || (b.campaign && typeof b.campaign === 'object')) {
+    let campaign: Campaign | undefined;
+    if (typeof b.campaignId === 'string') {
+      campaign = store.getCampaign(b.campaignId);
+      if (!campaign) return c.json({ error: `campaign ${b.campaignId} not found` }, 404);
+    } else {
+      const parsedCampaign = CampaignSchema.safeParse(b.campaign);
+      if (!parsedCampaign.success) return c.json({ error: parsedCampaign.error.flatten() }, 400);
+      campaign = parsedCampaign.data;
+    }
+    const allMaterials = campaign.advertisements.flatMap((ad) => ad.materials);
+    if (allMaterials.length === 0) return c.json({ error: 'campaign has no materials' }, 400);
+    const id = runCampaignReview(campaign);
+    return c.json({ id, kind: 'campaign', materials: allMaterials.map((m) => m.id) });
+  }
+
   const parsed = CreateReview.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
   const d = parsed.data;
@@ -228,6 +465,9 @@ app.post('/api/reviews', async (c) => {
   record.id = id;
   const roomId = `review-${id}`;
   const hostImage = (u: string): string => store.hostImage(u) ?? u;
+  // Opt-in pods topology runs the blackboard pods + decision spine; classic (the
+  // default) runs the coordinator/reconcile board with the multimodal perception
+  // pre-pass and the key-free stub fallback.
   const session = BOARD_TOPOLOGY === 'pods'
     ? new PodBoardSession({
         roomId,
@@ -246,13 +486,15 @@ app.post('/api/reviews', async (c) => {
         asset,
         brand,
         rulebooks: currentRulebooks(),
-        models: realBoardModels(),
+        models: boardModelsOrStub(),
         onEvent,
         onPrecedent: (p) => store.appendPrecedent(p),
         hostImage,
         publishArtifact,
         getPrecedents: recentPrecedents,
+        perception: perceptionConfig,
       });
+
   record.submitDecision = (text) => session.submitDecision(text);
   reviews.set(id, record);
   void session.run().catch((err: unknown) => {
@@ -337,6 +579,112 @@ app.get('/api/images/:name', (c) => {
   return c.body(new Uint8Array(buf), 200, { 'content-type': imageContentType(c.req.param('name')), 'cache-control': 'public, max-age=31536000, immutable' });
 });
 
+app.get('/api/videos/:name', (c) => {
+  const buf = store.readVideo(c.req.param('name'));
+  if (!buf) return c.json({ error: 'not found' }, 404);
+  return c.body(new Uint8Array(buf), 200, { 'content-type': videoContentType(c.req.param('name')), 'cache-control': 'public, max-age=31536000, immutable' });
+});
+
+// Multipart video upload. Hosts the file under data/videos/ and returns its served
+// url. When campaignId + materialId are included (form fields), the uploaded url is
+// also attached to that material's videoUrl so the next campaign review perceives
+// it. The actual perception (frames + vision + STT) runs server-side when a review
+// is started and streams 'perceiving' over the existing SSE.
+app.post('/api/videos', async (c) => {
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.json({ error: 'expected multipart/form-data with a "video" file' }, 400);
+  }
+  const file = form.get('video');
+  if (!(file instanceof File)) return c.json({ error: 'missing "video" file field' }, 400);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.byteLength === 0) return c.json({ error: 'empty video file' }, 400);
+  const videoUrl = store.hostVideo(bytes, extOf(file.name));
+
+  const campaignId = typeof form.get('campaignId') === 'string' ? (form.get('campaignId') as string) : '';
+  const materialId = typeof form.get('materialId') === 'string' ? (form.get('materialId') as string) : '';
+  if (campaignId && materialId) {
+    const camp = store.getCampaign(campaignId);
+    if (camp) store.saveCampaign(patchMaterial(camp, materialId, (m) => ({ ...m, videoUrl })));
+  }
+  return c.json({ videoUrl, ...(campaignId ? { campaignId } : {}), ...(materialId ? { materialId } : {}) });
+});
+
+// Multipart image upload. Hosts the file under data/images/ and returns its served
+// url. When campaignId + materialId are included, the url is attached to that
+// material's imageUrl (so the perception pre-pass treats it as the single frame).
+app.post('/api/images', async (c) => {
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    return c.json({ error: 'expected multipart/form-data with an "image" file' }, 400);
+  }
+  const file = form.get('image');
+  if (!(file instanceof File)) return c.json({ error: 'missing "image" file field' }, 400);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.byteLength === 0) return c.json({ error: 'empty image file' }, 400);
+  const imageUrl = store.hostImageBytes(bytes, extOf(file.name, 'png'));
+
+  const campaignId = typeof form.get('campaignId') === 'string' ? (form.get('campaignId') as string) : '';
+  const materialId = typeof form.get('materialId') === 'string' ? (form.get('materialId') as string) : '';
+  if (campaignId && materialId) {
+    const camp = store.getCampaign(campaignId);
+    if (camp) store.saveCampaign(patchMaterial(camp, materialId, (m) => ({ ...m, imageUrl })));
+  }
+  return c.json({ imageUrl, ...(campaignId ? { campaignId } : {}), ...(materialId ? { materialId } : {}) });
+});
+
+// Append a source to a campaign's dossier so it cascades into every reviewer
+// prompt. Two ways in: a multipart upload (a "file" field, .md/.txt/.json) OR a
+// JSON body { name, kind, content }. The kind is inferred from the file
+// extension on upload, or taken from the body. Both endpoints below share this.
+async function addDossierSource(c: Context): Promise<Response> {
+  const camp = store.getCampaign(c.req.param('id') ?? '');
+  if (!camp) return c.json({ error: 'not found' }, 404);
+
+  let source: { name: string; kind: 'md' | 'json' | 'text'; content: string } | undefined;
+  const contentType = c.req.header('content-type') ?? '';
+  if (contentType.includes('multipart/form-data')) {
+    let form: FormData;
+    try {
+      form = await c.req.formData();
+    } catch {
+      return c.json({ error: 'expected multipart/form-data with a "file" field' }, 400);
+    }
+    const file = form.get('file');
+    if (!(file instanceof File)) return c.json({ error: 'missing "file" field' }, 400);
+    const content = await file.text();
+    const ext = extOf(file.name, 'text');
+    const kind: 'md' | 'json' | 'text' = ext === 'md' ? 'md' : ext === 'json' ? 'json' : 'text';
+    source = { name: file.name || `source-${randomUUID().slice(0, 6)}`, kind, content };
+  } else {
+    // JSON body: { name?, kind?, content }. content is required; kind defaults to text.
+    const parsed = DossierSourceBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+    source = {
+      name: parsed.data.name ?? `source-${randomUUID().slice(0, 6)}`,
+      kind: parsed.data.kind ?? 'text',
+      content: parsed.data.content,
+    };
+  }
+
+  const next: Campaign = {
+    ...camp,
+    dossier: { ...camp.dossier, sources: [...camp.dossier.sources, source] },
+  };
+  store.saveCampaign(next);
+  return c.json({ campaign: next, source });
+}
+
+// TASK-spec path. Accepts a multipart .md/.txt/.json upload or a JSON body.
+app.post('/api/campaigns/:id/dossier/sources', (c) => addDossierSource(c));
+
+// Back-compat alias (the same handler) used by the earlier multipart upload path.
+app.post('/api/campaigns/:id/dossier-sources', (c) => addDossierSource(c));
+
 // Artifacts: agents publish images/reports here and paste the viewer URL into
 // the room; the /a/:id dashboard page fetches GET /api/artifacts/:id to render.
 app.post('/api/artifacts', async (c) => {
@@ -371,9 +719,150 @@ app.post('/api/assets', async (c) => {
   return c.json({ asset: parsed.data });
 });
 
+// --- Campaigns -----------------------------------------------------------
+// The saved campaign library. A Campaign holds Advertisements, each holding
+// Materials. listCampaigns also surfaces legacy single assets as one-advertisement
+// campaigns, so existing data still appears (store back-compat).
+
+app.get('/api/campaigns', (c) => {
+  const list = store
+    .listCampaigns()
+    .map((camp) => ({ id: camp.id, name: camp.name, markets: camp.markets, advertisementCount: camp.advertisements.length, materialCount: materialCount(camp) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return c.json({ campaigns: list });
+});
+
+app.get('/api/campaigns/:id', (c) => {
+  const camp = store.getCampaign(c.req.param('id'));
+  if (!camp) return c.json({ error: 'not found' }, 404);
+  return c.json({ campaign: camp });
+});
+
+app.post('/api/campaigns', async (c) => {
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const candidate = (body as { id?: unknown })?.id ? body : { ...(body as object), id: `camp-${randomUUID().slice(0, 8)}` };
+  const parsed = CampaignSchema.safeParse(candidate);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  store.saveCampaign(parsed.data);
+  return c.json({ campaign: parsed.data });
+});
+
+// Add an advertisement to an existing campaign (id auto-assigned when absent).
+// Advertisements can be added at any time, including after a review completes.
+app.post('/api/campaigns/:id/advertisements', async (c) => {
+  const camp = store.getCampaign(c.req.param('id'));
+  if (!camp) return c.json({ error: 'not found' }, 404);
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const candidate = (body as { id?: unknown })?.id ? body : { ...(body as object), id: `ad-${randomUUID().slice(0, 8)}` };
+  const parsed = AdvertisementSchema.safeParse(candidate);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const next = { ...camp, advertisements: [...camp.advertisements.filter((ad) => ad.id !== parsed.data.id), parsed.data] };
+  store.saveCampaign(next);
+  return c.json({ campaign: next, advertisement: parsed.data });
+});
+
+// Add a material to a campaign under a target advertisement. Both ids are
+// auto-assigned when absent. The target advertisement can be given in the URL
+// (POST .../advertisements/:adId/materials) or in the body (advertisementId);
+// when neither is given it defaults to the first advertisement. Materials can be
+// added at ANY time, including after a review has completed (no status gate).
+async function addMaterial(c: Context, advertisementIdFromPath?: string): Promise<Response> {
+  const camp = store.getCampaign(c.req.param('id') ?? '');
+  if (!camp) return c.json({ error: 'not found' }, 404);
+  // A path-addressed advertisement must exist; a typo should 404, not silently
+  // fall through to the first advertisement.
+  if (advertisementIdFromPath !== undefined && !camp.advertisements.some((ad) => ad.id === advertisementIdFromPath)) {
+    return c.json({ error: `advertisement ${advertisementIdFromPath} not found` }, 404);
+  }
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const advertisementId = advertisementIdFromPath
+    ?? (typeof (body as { advertisementId?: unknown })?.advertisementId === 'string'
+      ? (body as { advertisementId: string }).advertisementId
+      : undefined);
+  const candidate = (body as { id?: unknown })?.id ? body : { ...(body as object), id: `mat-${randomUUID().slice(0, 8)}` };
+  const parsed = MaterialSchema.safeParse(candidate);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const next = addMaterialToCampaign(camp, parsed.data, advertisementId);
+  store.saveCampaign(next);
+  return c.json({ campaign: next, material: parsed.data });
+}
+
+// Body carries the (optional) advertisementId; defaults to the first ad.
+app.post('/api/campaigns/:id/materials', (c) => addMaterial(c));
+
+// The advertisement is addressed in the URL path (TASK spec). Add-anytime.
+app.post('/api/campaigns/:id/advertisements/:adId/materials', (c) => addMaterial(c, c.req.param('adId')));
+
+// Campaign review state for the UI: status, the observational rollup (worst-case
+// per region + the material x region matrix), and the full event stream.
+app.get('/api/campaign-reviews/:id', (c) => {
+  const record = campaignReviews.get(c.req.param('id'));
+  if (!record) return c.json({ error: 'not found' }, 404);
+  return c.json({
+    id: record.id,
+    status: record.status,
+    campaign: record.campaign,
+    rollup: record.rollup,
+    events: record.events,
+  });
+});
+
+app.get('/api/campaign-reviews/:id/events', (c) => {
+  const id = c.req.param('id');
+  const record = campaignReviews.get(id);
+  if (!record) return c.json({ error: 'not found' }, 404);
+  return streamSSE(c, async (stream) => {
+    for (const event of record.events) await stream.writeSSE({ data: JSON.stringify(event) });
+    if (record.status === 'complete' || record.status === 'error') return;
+
+    const queue: BoardEvent[] = [];
+    let wake: (() => void) | null = null;
+    const sub = (event: BoardEvent): void => {
+      queue.push(event);
+      if (wake) {
+        wake();
+        wake = null;
+      }
+    };
+    record.subscribers.add(sub);
+    try {
+      for (;;) {
+        if (queue.length === 0) await new Promise<void>((resolve) => (wake = resolve));
+        const event = queue.shift();
+        if (!event) continue;
+        await stream.writeSSE({ data: JSON.stringify(event) });
+        // Only a campaign-level terminal (no materialId) closes the stream; a
+        // per-material status event keeps it open so the other lanes keep flowing.
+        if (event.type === 'status' && event.materialId === undefined && (event.status === 'complete' || event.status === 'error')) break;
+      }
+    } finally {
+      record.subscribers.delete(sub);
+    }
+  });
+});
+
+// A human ruling on one material's escalation inside a campaign review.
+app.post('/api/campaign-reviews/:id/decision', async (c) => {
+  const record = campaignReviews.get(c.req.param('id'));
+  if (!record) return c.json({ error: 'not found' }, 404);
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const materialId = typeof (body as { materialId?: unknown })?.materialId === 'string' ? (body as { materialId: string }).materialId : '';
+  const decision = typeof (body as { decision?: unknown })?.decision === 'string' ? (body as { decision: string }).decision : '';
+  if (!materialId || !decision) return c.json({ error: 'materialId and decision required' }, 400);
+  void record.submitDecision(materialId, decision).catch(() => {});
+  return c.json({ ok: true });
+});
+
 app.get('/api/rulebooks', (c) => {
   const current = currentRulebooks();
   return c.json({ rulebooks: REGIONS.map((r) => current[r]) });
+});
+
+// Curated one-click rulebook presets (US-FTC, EU health claims, LATAM). Read-only;
+// the picked preset is applied via the existing PUT /api/rulebooks/:region.
+app.get('/api/rulebooks/presets', (c) => {
+  const presets = loadPresets(PRESETS_DIR).map((p) => ({ id: p.id, label: p.label, region: p.region, rulebook: p.rulebook }));
+  return c.json({ presets });
 });
 
 app.get('/api/rulebooks/:region', (c) => {
@@ -392,6 +881,39 @@ app.put('/api/rulebooks/:region', async (c) => {
   return c.json({ rulebook: parsed.data });
 });
 
+// Smart rulebook import. The result is a PROPOSAL for the user to confirm: it is
+// NOT persisted here. The user reviews the returned rulebook and saves it with
+// the PUT above. json => validate the content directly (no model call). md/text
+// => parse with the AIML-default model into structured Rule[] (the same
+// structured-output path the reviewers use), honoring MODEL_MODE.
+const ImportBody = z.object({
+  format: z.enum(['md', 'json', 'text']),
+  content: z.string().min(1),
+  label: z.string().optional(),
+});
+
+app.post('/api/rulebooks/:region/import', async (c) => {
+  const region = c.req.param('region').toLowerCase();
+  if (!(REGIONS as readonly string[]).includes(region)) return c.json({ error: 'unknown region' }, 404);
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const parsed = ImportBody.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const { format, content, label } = parsed.data;
+  try {
+    const rulebook = await importRulebook({
+      format: format as ImportFormat,
+      content,
+      region,
+      ...(label ? { label } : {}),
+      // The model is only constructed for md/text; a json import never calls it.
+      ...(format === 'json' ? {} : { model: importModel() }),
+    });
+    return c.json({ rulebook });
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error)?.message ?? 'rulebook import failed' }, 400);
+  }
+});
+
 if (existsSync(WEB_DIST)) {
   app.use('/*', serveStatic({ root: './web/dist' }));
   app.get('*', serveStatic({ path: './web/dist/index.html' }));
@@ -400,6 +922,12 @@ if (existsSync(WEB_DIST)) {
     c.text('Campaign portal backend is running. Build the UI: cd web && pnpm install && pnpm build, or run cd web && pnpm dev. API is under /api.'),
   );
 }
+
+// The Hono app and the store are exported so tests can drive the routes via
+// app.fetch without binding a port (run tests with BOARD_MODE=local). Importing
+// this module has no side effects: the server only binds, and band.ai agents only
+// connect, when run as the entrypoint (npm run serve / dev:server) via main().
+export { app, store };
 
 async function main(): Promise<void> {
   // Restore persisted state before serving or connecting agents (disk is
@@ -413,6 +941,7 @@ async function main(): Promise<void> {
       console.error('[gcs-backup] restore failed (continuing with local state):', (err as Error)?.message ?? err);
     }
   }
+  const bandBoard = buildBandBoard();
   if (bandBoard) {
     console.log('Connecting band.ai agents (BOARD_MODE=band). This is the real coordination layer...');
     await bandBoard.start();
@@ -422,7 +951,11 @@ async function main(): Promise<void> {
   console.log(`Campaign portal on http://localhost:${PORT} (BOARD_MODE=${BOARD_MODE}, MODEL_MODE=${process.env.MODEL_MODE ?? 'aiml'})`);
 }
 
-main().catch((err: unknown) => {
-  console.error(err);
-  process.exit(1);
-});
+// Run the server only when this file is the process entrypoint, not on import.
+const isEntrypoint = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isEntrypoint) {
+  main().catch((err: unknown) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -5,7 +5,18 @@
 import type { BoardActivity } from '../band/types';
 import type { ContentAsset, Finding, RegionVerdict } from '../domain/types';
 
-export type BoardEvent =
+/**
+ * Campaign coordinates carried on every event when the review is part of a
+ * campaign. Optional so single-asset reviews (no campaign) and old stored
+ * events keep the exact same shape: the ids are simply absent.
+ */
+export interface BoardEventCampaignRef {
+  campaignId?: string;
+  materialId?: string;
+  advertisementId?: string;
+}
+
+export type BoardEvent = (
   | { type: 'intake'; seq: number; fromName: string; asset: ContentAsset }
   | { type: 'recruited'; seq: number; fromName: string; text: string }
   | {
@@ -32,12 +43,31 @@ export type BoardEvent =
   | { type: 'decision'; seq: number; fromName: string; text: string }
   | { type: 'log'; seq: number; fromName: string; messageType: string; text: string }
   | { type: 'status'; seq: number; fromName: string; status: BoardStatus }
+  | {
+      // A live keyframe-analysis tick from the multimodal perception pre-pass: the
+      // server emits these per frame (and once with stage 'done') so the UI can
+      // cycle the frame being read, fill a progress bar, and type the transcript
+      // in. It carries campaignId/materialId via BoardEventCampaignRef so it lanes
+      // to the right material; it gates nothing.
+      type: 'perceiving';
+      seq: number;
+      fromName: string;
+      frameUrl?: string;
+      index: number;
+      total: number;
+      stage: 'vision' | 'stt' | 'done';
+      transcript?: string;
+    }
+  // Blackboard-pods events (opt-in pods topology): work items, debate, per-pod
+  // findings, mediation, adjudication, and the terminal decision.
   | { type: 'workitem'; seq: number; fromName: string; text: string }
   | { type: 'debate'; seq: number; fromName: string; text: string }
   | { type: 'pod-finding'; seq: number; fromName: string; pod: string; conflicts: number; text: string }
   | { type: 'mediation'; seq: number; fromName: string; resolved: boolean; text: string }
   | { type: 'adjudication'; seq: number; fromName: string; decision: string; text: string }
-  | { type: 'terminal'; seq: number; fromName: string; decision: 'published' | 'spiked' | 'escalated' };
+  | { type: 'terminal'; seq: number; fromName: string; decision: 'published' | 'spiked' | 'escalated' }
+) &
+  BoardEventCampaignRef;
 
 export type BoardStatus = 'running' | 'awaiting-decision' | 'complete' | 'error';
 

@@ -1,9 +1,10 @@
 {
-  "id": "lumavida-vitc-eu",
+  "id": "immune-plus-vitc-eu",
+  "name": "Immune+ Vitamin C (EU)",
   "channel": "instagram",
   "markets": ["EU"],
-  "copy": "Lumavida Immune+ with Vitamin C. Vitamin C contributes to the normal function of the immune system. Feel your best, every day.",
+  "copy": "Northwind Immune+ with Vitamin C. Vitamin C contributes to the normal function of the immune system. Feel your best, every day.",
   "claim": "Vitamin C contributes to the normal function of the immune system.",
-  "imagePrompt": "A calm, premium flat-lay of Lumavida Immune+ bottles with fresh oranges and green leaves on a soft neutral background, gentle natural morning light, clean wellness aesthetic.",
+  "imagePrompt": "A calm, premium flat-lay of Northwind Immune+ bottles with fresh oranges and green leaves on a soft neutral background, gentle natural morning light, clean wellness aesthetic.",
   "substantiation": "Uses the EFSA-authorised health-claim wording for vitamin C and the normal function of the immune system; each serving provides 80 mg vitamin C (100% NRV)."
 }

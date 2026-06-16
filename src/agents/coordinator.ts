@@ -1,6 +1,6 @@
 import type { AgentHandler, Participant } from '../band/types';
 import type { ContentAsset } from '../domain/types';
-import type { SharedBoard } from '../board/shared';
+import type { SharedBoard, StartReviewOptions } from '../board/shared';
 import { toAsset } from '../domain/load';
 import { matchParticipant, nameMatchesHandle } from './handles';
 
@@ -23,11 +23,18 @@ export interface CoordinatorOptions {
   reconcileHandle?: string;
   /**
    * Resolve a human's free-text reference to a saved campaign (e.g. "Coordinator,
-   * review campaign Lumavida-Q3") by fetching it from the store. This is the
+   * review campaign Immune+ Q3") by fetching it from the store. This is the
    * band.ai app flow: the human references a campaign stored in the UI and the
    * coordinator pulls it. Returns undefined to fall back to an inline campaign.
    */
   lookupCampaign?: (query: string) => ContentAsset | undefined;
+  /**
+   * Campaign cascade for this review: the dossier and the campaign/material ids.
+   * When set, the coordinator stashes them with the campaign so the per-key board,
+   * reviewer (dossier in the prompt), and reconcile (per-material gate) operate on
+   * this one material. Omitted for a plain single-asset review (no change).
+   */
+  startOptions?: StartReviewOptions;
   /**
    * Region code (US/EU/LATAM) -> the reviewer's configured handle. Recruitment is
    * then filtered to the asset's markets: a region reviewer joins only when its
@@ -74,7 +81,8 @@ export function makeCoordinator(opts: CoordinatorOptions): AgentHandler {
         p.type === 'agent' &&
         p.id !== ctx.agentId &&
         !(opts.intakeAgentHandle !== undefined && nameMatchesHandle(p.name, opts.intakeAgentHandle)) &&
-        !(opts.remediationHandle !== undefined && nameMatchesHandle(p.name, opts.remediationHandle)),
+        !(opts.remediationHandle !== undefined && nameMatchesHandle(p.name, opts.remediationHandle)) &&
+        !(opts.reconcileHandle !== undefined && nameMatchesHandle(p.name, opts.reconcileHandle)),
     );
 
     // Target the recruitment to the asset's markets: a region reviewer joins
@@ -132,9 +140,11 @@ export function makeCoordinator(opts: CoordinatorOptions): AgentHandler {
       return;
     }
 
-    // Human/intake: the campaign is always resolved off this path. Stash it and recruit.
+    // Human/intake: the campaign is always resolved off this path. Stash it
+    // (with the campaign cascade options when this is one material of a
+    // campaign) and recruit.
     if (!campaign) return;
-    opts.board.startReview(ctx.roomId, campaign);
+    opts.board.startReview(ctx.roomId, campaign, opts.startOptions);
     await tools.sendEvent(
       `Intake: "${campaignLabel(campaign)}" for ${campaign.markets.join(', ')}. Recruiting ${reviewers.length} reviewer(s).`,
       'intake',

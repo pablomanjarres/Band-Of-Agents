@@ -17,6 +17,7 @@ const TYPE_LABELS: Record<BoardEvent['type'], string> = {
   decision: 'Decision',
   log: 'Log',
   status: 'Status',
+  perceiving: 'Perceiving',
   workitem: 'Work item',
   debate: 'Debate',
   'pod-finding': 'Pod finding',
@@ -49,6 +50,10 @@ function describe(event: BoardEvent): string {
       return `${event.messageType}: ${event.text}`;
     case 'status':
       return `Status is now ${event.status}.`;
+    case 'perceiving':
+      return event.stage === 'done'
+        ? 'Perception complete.'
+        : `Analyzing ${event.stage} frame ${event.index + 1}/${event.total}.`;
     case 'workitem':
     case 'debate':
       return event.text;
@@ -78,6 +83,7 @@ const DOT_COLORS: Record<BoardEvent['type'], string> = {
   decision: 'bg-emerald-600',
   log: 'bg-slate-300',
   status: 'bg-indigo-300',
+  perceiving: 'bg-amber-400',
   workitem: 'bg-slate-300',
   debate: 'bg-amber-400',
   'pod-finding': 'bg-indigo-400',

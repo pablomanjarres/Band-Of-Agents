@@ -47,3 +47,37 @@ Coordinator and Reconcile are orchestration/rule-based in this build and do not 
 model; their ROUTES entries are nominal. Choose the family best at each task (reasoning,
 rule-following, multilingual, creative voice, code, ...), and verify each slug resolves
 via `GET https://api.aimlapi.com/models` before the demo (AIML's exact slugs vary).
+
+## Perception (the three-modalities path: text, image, audio)
+
+The multimodal pre-pass (`src/perception/perceive.ts`) "sees" and "hears" each
+visual/video material ONCE and turns it into TEXT artifacts (visual description,
+on-screen text, detected claims, transcript) that cascade to every reviewer, so a
+text-only region model (Llama) still benefits. Only this pre-pass sends image
+content blocks; the reviewer roles above are unchanged. Two new perception roles,
+both AIML-default and `MODEL_MODE`-aware (`src/models/route.ts`,
+`describePerception()`):
+
+- `perception-vision`: a vision-capable AIML chat model that reads the sampled
+  keyframes (sent as OpenAI `image_url` parts). Default slug `openai/gpt-5-2`,
+  overridable with `AIML_VISION_MODEL`. In `dev` mode it routes to Vertex
+  `gemini-2.5-flash` (also vision-capable).
+- `perception-stt`: a Whisper-class AIML transcription model on the OpenAI-
+  compatible `/audio/transcriptions` endpoint. Default slug `#g1_whisper-large`,
+  overridable with `AIML_STT_MODEL`. STT has no Bedrock equivalent, so even `dev`
+  mode uses AIML when `AIML_API_KEY` is present.
+
+Graceful degradation is mandatory and built in at every step: if `ffmpeg` is
+absent the pass falls back to seeded `frames` / `imageUrl`; if no vision model is
+reachable it skips vision; if no STT model is reachable it keeps the pasted
+`transcript` (or none). A material therefore ALWAYS still reviews, even with no
+AIML key and no ffmpeg, which is also how the deterministic demo (`pnpm local`)
+runs. Override the slugs in `.env`:
+
+```
+AIML_VISION_MODEL=openai/gpt-5-2     # any vision-capable AIML chat slug
+AIML_STT_MODEL=#g1_whisper-large     # any AIML Whisper-class transcription slug
+```
+
+Verify both resolve via `GET https://api.aimlapi.com/models` before the demo
+(AIML's exact vision/STT slugs vary).

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { describeRoutes } from '../src/models/route';
+import { describe, expect, it, afterEach } from 'vitest';
+import { describeRoutes, describePerception } from '../src/models/route';
 
 describe('model routing', () => {
   it('routes every role through AIML and spans diverse model families in aiml mode', () => {
@@ -25,5 +25,37 @@ describe('model routing', () => {
     }
     expect(r.scout).toContain('featherless:');
     expect(r.mediator).toContain('bedrock:');
+  });
+});
+
+describe('perception routing (vision + STT)', () => {
+  const saved = { v: process.env.AIML_VISION_MODEL, s: process.env.AIML_STT_MODEL };
+  afterEach(() => {
+    if (saved.v === undefined) delete process.env.AIML_VISION_MODEL;
+    else process.env.AIML_VISION_MODEL = saved.v;
+    if (saved.s === undefined) delete process.env.AIML_STT_MODEL;
+    else process.env.AIML_STT_MODEL = saved.s;
+  });
+
+  it('defaults both perception roles to AIML', () => {
+    delete process.env.AIML_VISION_MODEL;
+    delete process.env.AIML_STT_MODEL;
+    const p = describePerception('aiml');
+    expect(p['perception-vision'].startsWith('aiml:')).toBe(true);
+    expect(p['perception-stt'].startsWith('aiml:')).toBe(true);
+  });
+
+  it('honors the env-overridable slugs', () => {
+    process.env.AIML_VISION_MODEL = 'vendor/custom-vision';
+    process.env.AIML_STT_MODEL = 'vendor/custom-whisper';
+    const p = describePerception('aiml');
+    expect(p['perception-vision']).toBe('aiml:vendor/custom-vision');
+    expect(p['perception-stt']).toBe('aiml:vendor/custom-whisper');
+  });
+
+  it('keeps STT on AIML even in dev mode (no Bedrock Whisper)', () => {
+    const p = describePerception('dev');
+    expect(p['perception-vision'].startsWith('gemini:')).toBe(true);
+    expect(p['perception-stt'].startsWith('aiml:')).toBe(true);
   });
 });

@@ -6,11 +6,12 @@
 // Deliberately dependency-free (node:fs) and behind a small interface so it can
 // become SQLite later without touching the server.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { BoardEvent, BoardStatus } from '../board/events';
-import type { ContentAsset, Rulebook } from '../domain/types';
+import type { Campaign, ContentAsset, Material, Rulebook } from '../domain/types';
+import { Campaign as CampaignSchema, normalizeCampaign } from '../domain/types';
 import type { Artifact } from '../domain/artifact';
 import type { Precedent } from '../agents/reconcile';
 
@@ -21,12 +22,16 @@ export interface StoredReview {
   events: BoardEvent[];
   status: BoardStatus;
   conflict: boolean;
+  /** Campaign coordinates when the review is one material of a campaign (absent for single-asset reviews). */
+  campaignId?: string;
+  materialId?: string;
 }
 
 export class Store {
   private readonly dir: string;
   private readonly imagesDir: string;
   private readonly rulebooksDir: string;
+  private readonly videosDir: string;
   // Called with the absolute path of each file just written, so a backup layer
   // (e.g. GCS mirror on Cloud Run) can persist it. Stays out of the read/write
   // hot path's correctness: it is fire-and-forget on the caller's side.
@@ -36,8 +41,9 @@ export class Store {
     this.dir = dir;
     this.imagesDir = join(dir, 'images');
     this.rulebooksDir = join(dir, 'rulebooks');
+    this.videosDir = join(dir, 'videos');
     this.onWrite = onWrite;
-    for (const d of [this.dir, this.imagesDir, this.rulebooksDir]) {
+    for (const d of [this.dir, this.imagesDir, this.rulebooksDir, this.videosDir]) {
       if (!existsSync(d)) mkdirSync(d, { recursive: true });
     }
   }
@@ -81,6 +87,44 @@ export class Store {
     return readFileSync(p);
   }
 
+  /** Save raw image bytes (a multipart upload), returning the served url (/api/images/<name>). */
+  hostImageBytes(bytes: Uint8Array, ext = 'png'): string {
+    const safeExt = /^[a-z0-9]+$/i.test(ext) ? ext.toLowerCase() : 'png';
+    const name = `${randomUUID()}.${safeExt}`;
+    writeFileSync(join(this.imagesDir, name), Buffer.from(bytes));
+    return `/api/images/${name}`;
+  }
+
+  // --- Videos --------------------------------------------------------------
+  // Uploaded videos are hosted under data/videos/ and served via /api/videos/.
+  // The perception pass resolves a /api/videos/<name> url back to its local file
+  // (videoPath) so ffmpeg/STT can read the bytes without a network fetch.
+
+  /** Save raw video bytes, returning the served url (/api/videos/<name>). */
+  hostVideo(bytes: Uint8Array, ext = 'mp4'): string {
+    const safeExt = /^[a-z0-9]+$/i.test(ext) ? ext.toLowerCase() : 'mp4';
+    const name = `${randomUUID()}.${safeExt}`;
+    writeFileSync(join(this.videosDir, name), Buffer.from(bytes));
+    return `/api/videos/${name}`;
+  }
+
+  /** Local file path for a hosted video url (/api/videos/<name>), or undefined. */
+  videoPath(videoUrl: string): string | undefined {
+    const m = /^\/api\/videos\/(.+)$/.exec(videoUrl);
+    if (!m) return undefined;
+    const safe = (m[1] ?? '').replace(/[^a-zA-Z0-9._-]/g, '');
+    if (!safe) return undefined;
+    const p = join(this.videosDir, safe);
+    return existsSync(p) ? p : undefined;
+  }
+
+  readVideo(name: string): Buffer | null {
+    const safe = name.replace(/[^a-zA-Z0-9._-]/g, '');
+    const p = join(this.videosDir, safe);
+    if (!existsSync(p)) return null;
+    return readFileSync(p);
+  }
+
   saveReview(review: StoredReview): void {
     const all = this.readJson<StoredReview[]>('reviews.json', []).filter((r) => r.id !== review.id);
     all.push(review);
@@ -115,6 +159,68 @@ export class Store {
     this.writeJson('assets.json', all);
   }
 
+  // --- Campaigns -----------------------------------------------------------
+  // The saved campaign library lives in data/campaigns.json. Each stored record is
+  // normalized on read, so a legacy flat materials[] campaign loads as a single
+  // "Default" advertisement. For back-compat, any legacy single ContentAsset in
+  // data/assets.json is also surfaced as a one-advertisement campaign, so existing
+  // saved assets still appear and review.
+
+  /** Saved campaigns (normalized to the advertisement tier) plus legacy single assets; saved win on id collision. */
+  listCampaigns(): Campaign[] {
+    const saved = this.readJson<unknown[]>('campaigns.json', []).map((c) => safeNormalize(c)).filter((c): c is Campaign => c !== null);
+    const savedIds = new Set(saved.map((c) => c.id));
+    const legacy = this.listAssets()
+      .map((a) => assetToCampaign(a))
+      .filter((c) => !savedIds.has(c.id));
+    const combined = [...saved, ...legacy];
+    // First-run demo seed: when nothing has been saved yet, surface the bundled
+    // sample campaign (data/ is gitignored, so the durable seed ships in assets/).
+    if (combined.length === 0) return this.seedCampaigns();
+    return combined;
+  }
+
+  /** The bundled demo campaign (assets/sample-campaign.json), used only when the library is empty. */
+  private seedCampaigns(): Campaign[] {
+    // Mirror the bundled seed keyframes into data/images so the sample campaign's
+    // /api/images/<name> frame URLs resolve on a fresh clone (data/ is gitignored).
+    this.mirrorSeedFrames();
+    const p = join(this.dir, '..', 'assets', 'sample-campaign.json');
+    if (!existsSync(p)) return [];
+    try {
+      const raw: unknown = JSON.parse(readFileSync(p, 'utf8'));
+      const list = Array.isArray(raw) ? raw : [raw];
+      return list.map((c) => CampaignSchema.parse(c));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Copy any bundled assets/frames/*.{png,jpg} into data/images (missing only). */
+  private mirrorSeedFrames(): void {
+    const src = join(this.dir, '..', 'assets', 'frames');
+    if (!existsSync(src)) return;
+    try {
+      for (const f of readdirSync(src)) {
+        if (!/\.(png|jpe?g)$/i.test(f)) continue;
+        const dest = join(this.imagesDir, f);
+        if (!existsSync(dest)) copyFileSync(join(src, f), dest);
+      }
+    } catch {
+      /* best-effort: the demo just shows no frame thumbnails if this fails */
+    }
+  }
+
+  getCampaign(id: string): Campaign | undefined {
+    return this.listCampaigns().find((c) => c.id === id);
+  }
+
+  saveCampaign(campaign: Campaign): void {
+    const all = this.readJson<Campaign[]>('campaigns.json', []).filter((c) => c.id !== campaign.id);
+    all.push(campaign);
+    this.writeJson('campaigns.json', all);
+  }
+
   getRulebookOverride(region: string): Rulebook | undefined {
     const p = join(this.rulebooksDir, `${region.toLowerCase()}.json`);
     if (!existsSync(p)) return undefined;
@@ -142,5 +248,43 @@ export class Store {
 
   getArtifact(id: string): Artifact | undefined {
     return this.readJson<Artifact[]>('artifacts.json', []).find((a) => a.id === id);
+  }
+}
+
+/**
+ * Read a legacy single ContentAsset as a one-advertisement, one-material campaign
+ * so existing saved assets (and old reviews) still load under the three-tier
+ * model. The material reuses every asset field and is typed as a post (the default
+ * channel kind), grouped under a single "Default" advertisement; the dossier
+ * starts empty (the asset's own substantiation is carried into it so the cascade
+ * still has the one fact the single-asset flow had).
+ */
+export function assetToCampaign(asset: ContentAsset): Campaign {
+  const material: Material = { ...asset, kind: 'post' };
+  return {
+    id: asset.id,
+    name: asset.name ?? asset.id,
+    markets: asset.markets,
+    dossier: {
+      approvedClaims: [],
+      substantiation: asset.substantiation ?? '',
+      approvedInfo: '',
+      sources: [],
+    },
+    advertisements: [{ id: 'default', name: 'Default', materials: [material] }],
+  };
+}
+
+
+/**
+ * Normalize a stored campaign record into a Campaign, tolerating the legacy flat
+ * `materials[]` shape (it becomes a single "Default" advertisement) and dropping
+ * any record that no longer parses, so one bad row never breaks the library.
+ */
+function safeNormalize(raw: unknown): Campaign | null {
+  try {
+    return normalizeCampaign(raw);
+  } catch {
+    return null;
   }
 }

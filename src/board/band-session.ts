@@ -23,6 +23,7 @@ import type { BoardModels } from './session';
 const COORDINATOR_HANDLE = '@pablomanjarres/coordinator';
 const RECONCILE_HANDLE = '@pablomanjarres/reconcile';
 const REMEDIATION_HANDLE = '@pablomanjarres/remediation';
+const INTAKE_HANDLE = '@pablomanjarres/intake';
 
 export interface BandBoardOptions {
   brand: BrandDna;
@@ -74,6 +75,7 @@ export class BandBoard {
       envPrefix: 'COORDINATOR',
       onMessage: makeCoordinator({
         board,
+        intakeAgentHandle: INTAKE_HANDLE,
         remediationHandle: REMEDIATION_HANDLE,
         reconcileHandle: RECONCILE_HANDLE,
         // Recruit only the reviewers the asset's markets target (Brand always joins).

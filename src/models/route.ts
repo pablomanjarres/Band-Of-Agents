@@ -1,5 +1,5 @@
-import type { ModelClient } from './client';
-import { AimlModelClient } from './aiml';
+import type { ModelClient, SttClient } from './client';
+import { AimlModelClient, AimlSttClient, DEFAULT_STT_MODEL } from './aiml';
 import { BedrockModelClient } from './bedrock';
 import { GeminiModelClient } from './gemini';
 import { FeatherlessModelClient } from './featherless';
@@ -7,7 +7,15 @@ import { meter } from './spend';
 
 export type AgentRole =
   | 'coordinator' | 'us' | 'eu' | 'latam' | 'brand' | 'reconcile' | 'remediation'
+  // Blackboard-pods roles (opt-in pods topology).
   | 'scout' | 'claim' | 'precedent' | 'disclosure' | 'channel' | 'visual' | 'mediator';
+/**
+ * Perception is a separate concern from the reviewer roles: one vision-capable
+ * model "sees" each visual material once (a pre-pass) and one Whisper-class model
+ * hears the audio. Both default to AIML (the three-modalities prize signal: text,
+ * image, audio) and honor MODEL_MODE, so they are kept off the reviewer ROUTES.
+ */
+export type PerceptionRole = 'perception-vision' | 'perception-stt';
 export type ModelMode = 'aiml' | 'dev';
 
 interface RouteEntry {
@@ -42,6 +50,16 @@ const ROUTES: Record<AgentRole, RouteEntry> = {
 
 const IMAGE_AIML_MODEL = 'google/gemini-2.5-flash-image';
 
+// Perception model defaults (AIML, the three-modalities path). Both are
+// env-overridable so the exact AIML catalog slug can be swapped without a code
+// change. AIML_VISION_MODEL is a vision-capable chat model (image_url parts);
+// AIML_STT_MODEL is a Whisper-class transcription model.
+const PERCEPTION_VISION_AIML = () => process.env.AIML_VISION_MODEL ?? 'openai/gpt-5-2';
+const PERCEPTION_STT_AIML = () => process.env.AIML_STT_MODEL ?? DEFAULT_STT_MODEL;
+// dev-mode (cost-saver) perception models: Gemini sees, Whisper-on-AIML still
+// hears (Bedrock has no Whisper endpoint, so STT stays on AIML when a key exists).
+const PERCEPTION_VISION_DEV = 'gemini-2.5-flash';
+
 export function activeMode(): ModelMode {
   return process.env.MODEL_MODE === 'dev' ? 'dev' : 'aiml';
 }
@@ -75,6 +93,44 @@ export function imageClientFor(mode: ModelMode = activeMode()): ModelClient {
   return meter(new GeminiModelClient({ model: 'gemini-2.5-flash' }));
 }
 
+// The vision model for the perception pre-pass: it "sees" each material's frames
+// once and emits a text description/OCR/claims that cascade to every reviewer.
+// AIML is the default (a vision-capable chat model via image_url parts); dev mode
+// uses Gemini (also vision-capable). Returns undefined ONLY when no provider is
+// reachable, so perception degrades to text-only instead of throwing.
+export function visionModelFor(mode: ModelMode = activeMode()): ModelClient | undefined {
+  if (mode === 'aiml') {
+    const apiKey = process.env.AIML_API_KEY;
+    if (!apiKey) return undefined;
+    return new AimlModelClient({ apiKey, model: PERCEPTION_VISION_AIML() });
+  }
+  return new GeminiModelClient({ model: PERCEPTION_VISION_DEV });
+}
+
+// The speech-to-text client for the perception pre-pass (Whisper-class). AIML is
+// the only transcription endpoint here, so even dev mode uses AIML when a key
+// exists; returns undefined when none is set so STT degrades to a pasted
+// transcript (or none) rather than throwing.
+export function sttClientFor(_mode: ModelMode = activeMode()): SttClient | undefined {
+  const apiKey = process.env.AIML_API_KEY;
+  if (!apiKey) return undefined;
+  return new AimlSttClient({ apiKey, model: PERCEPTION_STT_AIML() });
+}
+
+// Both perception models in one call, each optional (absent when unreachable) so
+// the perception pass can run with whatever modalities are available.
+export function perceptionModels(mode: ModelMode = activeMode()): {
+  vision?: ModelClient;
+  stt?: SttClient;
+} {
+  const out: { vision?: ModelClient; stt?: SttClient } = {};
+  const vision = visionModelFor(mode);
+  if (vision) out.vision = vision;
+  const stt = sttClientFor(mode);
+  if (stt) out.stt = stt;
+  return out;
+}
+
 /** Role -> model map for the active mode, with no clients constructed (for logging/docs). */
 export function describeRoutes(mode: ModelMode = activeMode()): Record<AgentRole, string> {
   const out = {} as Record<AgentRole, string>;
@@ -83,4 +139,17 @@ export function describeRoutes(mode: ModelMode = activeMode()): Record<AgentRole
     out[role] = mode === 'aiml' ? `aiml:${e.aiml}` : `${e.devProvider}:${e.devModel}`;
   }
   return out;
+}
+
+/** Perception (vision + STT) routing for the active mode, for logging/docs. */
+export function describePerception(mode: ModelMode = activeMode()): Record<PerceptionRole, string> {
+  return mode === 'aiml'
+    ? {
+        'perception-vision': `aiml:${PERCEPTION_VISION_AIML()}`,
+        'perception-stt': `aiml:${PERCEPTION_STT_AIML()}`,
+      }
+    : {
+        'perception-vision': `gemini:${PERCEPTION_VISION_DEV}`,
+        'perception-stt': `aiml:${PERCEPTION_STT_AIML()}`,
+      };
 }

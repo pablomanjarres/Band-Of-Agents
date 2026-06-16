@@ -6,8 +6,8 @@ const MARKET_OPTIONS = ['US', 'EU', 'LATAM'] as const;
 type Market = (typeof MARKET_OPTIONS)[number];
 
 const SAMPLE: CampaignFormValues = {
-  name: 'Lumavida-VitC',
-  copy: 'Lumavida Immune+ with Vitamin C. Vitamin C contributes to the normal function of the immune system. Feel your best, every day.',
+  name: 'Immune+ VitC',
+  copy: 'Immune+ with Vitamin C. Vitamin C contributes to the normal function of the immune system. Feel your best, every day.',
   claim: 'Vitamin C contributes to the normal function of the immune system.',
   channel: 'instagram',
   markets: ['EU'],
@@ -154,7 +154,7 @@ export function ReviewForm({ onSave, initial }: ReviewFormProps) {
           value={name}
           onChange={(event) => setName(event.target.value)}
           className={inputClass}
-          placeholder="e.g. Lumavida-Q3"
+          placeholder="e.g. Immune+ Q3"
         />
       </div>
 
