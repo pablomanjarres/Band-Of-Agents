@@ -4,14 +4,14 @@ const STYLES: Record<RegionStatus, string> = {
   publish: 'bg-human/10 text-human ring-human/25',
   adapt: 'bg-warn/10 text-warn ring-warn/25',
   escalate: 'bg-danger/10 text-danger ring-danger/25',
-  reviewing: 'bg-surface-3 text-muted ring-border-strong animate-pulse-soft',
+  reviewing: 'bg-surface-3 text-muted ring-border-strong',
 };
 
 const LABELS: Record<RegionStatus, string> = {
   publish: 'publish',
   adapt: 'adapt',
   escalate: 'escalate',
-  reviewing: 'reviewing',
+  reviewing: 'not validated',
 };
 
 export function StatusChip({ status }: { status: RegionStatus }) {

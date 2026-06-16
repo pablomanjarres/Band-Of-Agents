@@ -4,6 +4,7 @@ import {
   createAdvertisement,
   getCampaign,
   getCampaignReview,
+  saveCampaign,
   startCampaignReview,
   submitCampaignDecision,
   subscribeToCampaignEvents,
@@ -345,6 +346,7 @@ export function CampaignDetailPage() {
       {/* Slide-over: the material itself (not the agent diagram). */}
       {detailMaterial ? (
         <MaterialDetail
+          key={detailMaterial.id}
           material={detailMaterial}
           {...(detailLane ? { board: detailLane.board } : {})}
           campaignId={campaign.id}
@@ -355,6 +357,25 @@ export function CampaignDetailPage() {
           onTranscribed={async () => {
             const refreshed = await getCampaign(campaign.id);
             refreshCampaign(refreshed.campaign);
+          }}
+          onSave={async (patch) => {
+            // Patch this material in place and persist the whole campaign (upsert),
+            // then refresh so the edit shows immediately.
+            const updated: Campaign = {
+              ...campaign,
+              advertisements: campaign.advertisements.map((ad) =>
+                detailAdId && ad.id !== detailAdId
+                  ? ad
+                  : {
+                      ...ad,
+                      materials: ad.materials.map((m) =>
+                        m.id === detailMaterial.id ? { ...m, ...patch } : m,
+                      ),
+                    },
+              ),
+            };
+            const res = await saveCampaign(updated);
+            refreshCampaign(res.campaign);
           }}
         />
       ) : null}

@@ -17,7 +17,7 @@ const KIND_TONE: Record<MaterialKind, string> = {
 };
 
 const STATUS_DOT: Record<RegionStatus, string> = {
-  reviewing: 'animate-pulse-soft bg-warn',
+  reviewing: 'bg-faint',
   publish: 'bg-human',
   adapt: 'bg-warn',
   escalate: 'bg-danger',
@@ -67,7 +67,7 @@ export function MaterialCard({ material, cells, onClick, selected }: MaterialCar
               <span
                 key={region}
                 className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-soft/60 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted"
-                title={status ? `${region}: ${status}` : `${region}: not reviewed`}
+                title={status && status !== 'reviewing' ? `${region}: ${status}` : `${region}: not validated`}
               >
                 <span className={`h-1.5 w-1.5 rounded-full ${status ? STATUS_DOT[status] : 'bg-surface-3'}`} />
                 {region}
@@ -75,7 +75,7 @@ export function MaterialCard({ material, cells, onClick, selected }: MaterialCar
               </span>
             );
           })}
-          {!reviewed ? <span className="text-[10px] text-faint">not reviewed</span> : null}
+          {!reviewed ? <span className="text-[10px] text-faint">not validated</span> : null}
         </div>
       </div>
     </button>

@@ -21,7 +21,7 @@ export function RegionCard({ region }: { region: RegionState }) {
 
       <div className="mt-3 flex items-center gap-2 text-xs text-muted">
         {isReviewing ? (
-          <span className="text-faint">Reviewing…</span>
+          <span className="text-faint">Not validated yet</span>
         ) : (
           <span>
             {region.blocking > 0 ? (

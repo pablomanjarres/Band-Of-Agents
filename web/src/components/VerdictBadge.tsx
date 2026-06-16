@@ -14,7 +14,7 @@ const LABELS: Record<RegionStatus, string> = {
   publish: 'publish',
   adapt: 'adapt',
   escalate: 'escalate',
-  reviewing: 'reviewing',
+  reviewing: 'not validated',
 };
 
 export function VerdictBadge({
