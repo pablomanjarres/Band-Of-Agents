@@ -1,8 +1,9 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router-dom';
 import { ArtifactViewerPage } from './pages/ArtifactViewerPage';
 import { CampaignDetailPage } from './pages/CampaignDetailPage';
 import { CampaignsPage } from './pages/CampaignsPage';
 import { HistoryPage } from './pages/HistoryPage';
+import { HowItWorksPage } from './pages/HowItWorksPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { LiveBoardPage } from './pages/LiveBoardPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
@@ -24,7 +25,7 @@ export default function App() {
         <main className="mx-auto w-full max-w-[100rem] flex-1 px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
           <ErrorBoundary>
             <Routes>
-              <Route path="/" element={<Navigate to="/campaigns" replace />} />
+              <Route path="/" element={<HowItWorksPage />} />
               <Route path="/campaigns" element={<CampaignsPage />} />
               <Route path="/campaigns/:id" element={<CampaignDetailPage />} />
               <Route path="/a/:id" element={<ArtifactViewerPage />} />

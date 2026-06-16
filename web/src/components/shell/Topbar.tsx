@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 
 const MOBILE_NAV = [
+  { to: '/', label: 'How it works', end: true },
   { to: '/campaigns', label: 'Campaigns', end: false },
   { to: '/history', label: 'Reviews', end: false },
   { to: '/rulebooks', label: 'Rulebooks', end: false },
