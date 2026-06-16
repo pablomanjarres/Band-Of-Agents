@@ -147,3 +147,5 @@ vite.config.ts.timestamp-*
 
 # Private local context (briefs, rubric); never committed, never pushed
 /.private/
+
+/node_modules

@@ -56,17 +56,17 @@ function describe(event: BoardEvent): string {
 }
 
 const DOT_COLORS: Record<BoardEvent['type'], string> = {
-  intake: 'bg-slate-400',
-  recruited: 'bg-indigo-400',
-  review: 'bg-slate-400',
-  progress: 'bg-slate-300',
-  verdict: 'bg-indigo-500',
-  revised: 'bg-emerald-500',
-  escalation: 'bg-red-500',
-  decision: 'bg-emerald-600',
-  log: 'bg-slate-300',
-  status: 'bg-indigo-300',
-  perceiving: 'bg-amber-400',
+  intake: 'bg-muted',
+  recruited: 'bg-accent',
+  review: 'bg-muted',
+  progress: 'bg-faint',
+  verdict: 'bg-accent-strong',
+  revised: 'bg-human',
+  escalation: 'bg-danger',
+  decision: 'bg-human',
+  log: 'bg-faint',
+  status: 'bg-accent/70',
+  perceiving: 'bg-warn',
 };
 
 export function Timeline({ events }: { events: BoardEvent[] }) {
@@ -77,27 +77,27 @@ export function Timeline({ events }: { events: BoardEvent[] }) {
   }));
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Timeline</h2>
+    <section className="surface rounded-2xl p-5">
+      <p className="eyebrow">Timeline</p>
       {lines.length === 0 ? (
-        <p className="mt-3 text-sm text-slate-400">Waiting for the first event.</p>
+        <p className="mt-3 text-sm text-faint">Waiting for the first event…</p>
       ) : (
         <ol className="mt-4 space-y-3">
           {lines.map((line, index) => (
             <li key={line.key} className="flex gap-3">
               <div className="flex flex-col items-center">
                 <span
-                  className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${DOT_COLORS[events[index].type]}`}
+                  className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ring-4 ring-bg-soft ${DOT_COLORS[events[index].type]}`}
                 />
                 {index < lines.length - 1 ? (
-                  <span className="mt-1 w-px grow bg-slate-200" />
+                  <span className="mt-1 w-px grow bg-border" />
                 ) : null}
               </div>
               <div className="pb-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <p className="font-mono text-[10px] font-semibold uppercase tracking-wider text-faint">
                   {line.label}
                 </p>
-                <p className="text-sm text-slate-700">{line.detail}</p>
+                <p className="mt-0.5 text-sm text-muted">{line.detail}</p>
               </div>
             </li>
           ))}

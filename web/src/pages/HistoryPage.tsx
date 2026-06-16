@@ -14,10 +14,10 @@ type PrecedentState =
   | { kind: 'ready'; precedents: Precedent[] };
 
 const STATUS_STYLES: Record<BoardStatus, string> = {
-  running: 'bg-indigo-100 text-indigo-700',
-  'awaiting-decision': 'bg-amber-100 text-amber-700',
-  complete: 'bg-emerald-100 text-emerald-700',
-  error: 'bg-red-100 text-red-700',
+  running: 'bg-accent/10 text-accent ring-1 ring-inset ring-accent/25',
+  'awaiting-decision': 'bg-warn/10 text-warn ring-1 ring-inset ring-warn/25',
+  complete: 'bg-human/10 text-human ring-1 ring-inset ring-human/25',
+  error: 'bg-danger/10 text-danger ring-1 ring-inset ring-danger/25',
 };
 
 function formatDate(ms: number): string {
@@ -68,54 +68,53 @@ export function HistoryPage() {
   }, []);
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8">
+      <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Reviews</h1>
-          <p className="mt-0.5 text-xs text-slate-400">
+          <p className="eyebrow mb-2.5">Reviews</p>
+          <h1 className="font-display text-4xl leading-none text-fg">Review boards</h1>
+          <p className="mt-2 text-sm text-muted">
             Reviews you start in band.ai appear here automatically.
           </p>
         </div>
-        <Link
-          to="/"
-          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
-        >
+        <Link to="/" className="btn btn-primary shrink-0">
           + Compose campaign
         </Link>
       </div>
 
       {load.kind === 'loading' ? (
-        <p className="text-sm text-slate-500">Loading history.</p>
+        <p className="text-sm text-muted">Loading history…</p>
       ) : load.kind === 'error' ? (
-        <p className="text-sm text-red-600">{load.message}</p>
+        <p className="text-sm text-danger">{load.message}</p>
       ) : load.reviews.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+        <div className="rounded-2xl border border-dashed border-border-strong bg-surface/40 p-10 text-center text-sm text-muted">
           No reviews yet. Start one in the band.ai room and it will appear here.
         </div>
       ) : (
-        <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <ul className="surface divide-y divide-border overflow-hidden rounded-2xl">
           {load.reviews.map((review) => (
             <li key={review.id}>
               <Link
                 to={`/history/${review.id}`}
-                className="flex items-center justify-between gap-4 px-5 py-4 transition hover:bg-slate-50"
+                className="group flex items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-surface-2/60"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-800">{review.copy}</p>
-                  <p className="mt-0.5 text-xs text-slate-400">
-                    {review.markets.join(', ') || 'no markets'} - {formatDate(review.createdAt)}
+                  <p className="truncate text-sm font-medium text-fg">{review.copy}</p>
+                  <p className="mt-1 font-mono text-[11px] text-faint">
+                    {review.markets.join(', ') || 'no markets'} · {formatDate(review.createdAt)}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {review.conflict ? (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                    <span className="rounded-full bg-warn/10 px-2 py-0.5 text-xs font-semibold text-warn ring-1 ring-inset ring-warn/25">
                       conflict
                     </span>
                   ) : null}
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_STYLES[review.status]}`}
-                  >
+                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_STYLES[review.status]}`}>
                     {review.status}
+                  </span>
+                  <span className="text-faint transition-transform group-hover:translate-x-0.5" aria-hidden>
+                    ›
                   </span>
                 </div>
               </Link>
@@ -124,24 +123,24 @@ export function HistoryPage() {
         </ul>
       )}
 
-      <section className="space-y-3 pt-2">
-        <h2 className="text-lg font-bold text-slate-900">Precedent log</h2>
+      <section className="space-y-3 pt-4">
+        <h2 className="font-display text-2xl text-fg">Precedent log</h2>
         {precedents.kind === 'loading' ? (
-          <p className="text-sm text-slate-500">Loading precedents.</p>
+          <p className="text-sm text-muted">Loading precedents…</p>
         ) : precedents.kind === 'error' ? (
-          <p className="text-sm text-red-600">{precedents.message}</p>
+          <p className="text-sm text-danger">{precedents.message}</p>
         ) : precedents.precedents.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
+          <div className="rounded-2xl border border-dashed border-border-strong bg-surface/40 p-6 text-center text-sm text-muted">
             No precedents recorded yet.
           </div>
         ) : (
-          <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <ul className="surface divide-y divide-border overflow-hidden rounded-2xl">
             {precedents.precedents.map((precedent) => (
-              <li key={precedent.roomId} className="flex items-start gap-3 px-5 py-3">
-                <span className="mt-0.5 shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+              <li key={precedent.roomId} className="flex items-start gap-3 px-5 py-3.5">
+                <span className="mt-0.5 shrink-0 rounded-full bg-surface-3 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted ring-1 ring-inset ring-border-strong">
                   {precedent.regions.join(', ') || 'no regions'}
                 </span>
-                <p className="text-sm text-slate-700">{precedent.decision}</p>
+                <p className="text-sm text-muted">{precedent.decision}</p>
               </li>
             ))}
           </ul>

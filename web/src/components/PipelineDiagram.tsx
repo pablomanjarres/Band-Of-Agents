@@ -14,13 +14,13 @@ interface PipelineDiagramProps {
 // Pill badge used for counts / flags inside nodes.
 function Pill({ tone, children }: { tone: 'red' | 'amber' | 'slate' | 'emerald'; children: React.ReactNode }) {
   const styles: Record<typeof tone, string> = {
-    red: 'bg-red-500/20 text-red-200 ring-red-400/40',
-    amber: 'bg-amber-500/20 text-amber-100 ring-amber-400/40',
-    slate: 'bg-slate-500/20 text-slate-200 ring-slate-400/30',
-    emerald: 'bg-emerald-500/20 text-emerald-100 ring-emerald-400/40',
+    red: 'bg-danger/15 text-danger ring-danger/30',
+    amber: 'bg-warn/15 text-warn ring-warn/30',
+    slate: 'bg-surface-3 text-muted ring-border-strong',
+    emerald: 'bg-human/15 text-human ring-human/30',
   };
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset ${styles[tone]}`}>
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${styles[tone]}`}>
       {children}
     </span>
   );
@@ -29,8 +29,8 @@ function Pill({ tone, children }: { tone: 'red' | 'amber' | 'slate' | 'emerald';
 function AgentBadge({ agent }: { agent: AgentNodeModel }) {
   if (agent.activity === 'active') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-indigo-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-100 ring-1 ring-inset ring-indigo-400/40">
-        <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-indigo-300" />
+      <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-accent ring-1 ring-inset ring-accent/30">
+        <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-accent" />
         reviewing
       </span>
     );
@@ -42,9 +42,9 @@ function AgentBadge({ agent }: { agent: AgentNodeModel }) {
 }
 
 const LEGEND: { label: string; dot: string }[] = [
-  { label: 'AI agent', dot: 'bg-indigo-400' },
-  { label: 'human', dot: 'bg-emerald-400' },
-  { label: 'context / outcome', dot: 'bg-slate-400' },
+  { label: 'AI agent', dot: 'bg-accent' },
+  { label: 'human', dot: 'bg-human' },
+  { label: 'context / outcome', dot: 'bg-muted' },
 ];
 
 // Compare two measured-rect maps so measure() can bail out when nothing moved.
@@ -125,19 +125,18 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
   const remediation = state.remediation;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-xl">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
+    <section className="surface-2 overflow-hidden rounded-2xl">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3.5">
         <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-200">
-            Multi-agent review pipeline
-          </h2>
-          <p className="text-[11px] text-slate-500">
+          <p className="eyebrow mb-1.5">Live orchestration</p>
+          <h2 className="font-display text-xl leading-none text-fg">Multi-agent review pipeline</h2>
+          <p className="mt-1.5 text-[11px] text-faint">
             Coordinated negotiation: recruit, review, reconcile, remediate, re-review, escalate.
           </p>
         </div>
         <div className="flex items-center gap-3">
           {LEGEND.map((item) => (
-            <span key={item.label} className="inline-flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span key={item.label} className="inline-flex items-center gap-1.5 text-[11px] text-muted">
               <span className={`h-2 w-2 rounded-full ${item.dot}`} />
               {item.label}
             </span>
@@ -147,7 +146,7 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
 
       <div
         ref={canvasRef}
-        className="relative bg-[radial-gradient(circle_at_50%_0%,rgba(79,70,229,0.12),transparent_60%)] px-5 py-7"
+        className="relative bg-[radial-gradient(circle_at_50%_-10%,rgba(99,102,241,0.14),transparent_55%)] px-5 py-7"
       >
         <DiagramEdges rects={rects} activeEdges={model.activeEdges} width={size.width} height={size.height} />
 
@@ -182,7 +181,7 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
               }
             >
               {model.coordinator.reReview ? (
-                <p className="text-[10px] font-medium uppercase tracking-wide text-indigo-300/80">
+                <p className="font-mono text-[10px] font-medium uppercase tracking-wider text-accent/80">
                   re-review round dispatched
                 </p>
               ) : null}
@@ -229,7 +228,7 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
               badge={model.reconcile.conflict ? <Pill tone="amber">conflict</Pill> : undefined}
             >
               {model.reconcile.summary ? (
-                <p className="font-mono text-[11px] tracking-tight text-slate-300">
+                <p className="font-mono text-[11px] tracking-tight text-muted">
                   {model.reconcile.summary}
                 </p>
               ) : null}
@@ -251,18 +250,18 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
                     <img
                       src={remediation.imageUrl}
                       alt={`Revised creative for ${remediation.region}`}
-                      className="h-28 w-full rounded-lg border border-indigo-500/30 object-cover"
+                      className="h-28 w-full rounded-lg border border-accent/30 object-cover"
                     />
                   ) : null}
-                  <p className="line-clamp-3 rounded-md border border-indigo-500/20 bg-slate-900/60 p-2 text-[11px] leading-snug text-slate-300">
+                  <p className="line-clamp-3 rounded-md border border-accent/20 bg-bg-soft/70 p-2 text-[11px] leading-snug text-muted">
                     {remediation.copy}
                   </p>
-                  <p className="text-[10px] uppercase tracking-wide text-indigo-300/70">
+                  <p className="font-mono text-[10px] uppercase tracking-wider text-accent/70">
                     {remediation.region} - {remediation.markets.join(', ') || 'no markets'}
                   </p>
                 </div>
               ) : (
-                <p className="text-[11px] text-slate-500">Idle until a region needs adaptation.</p>
+                <p className="text-[11px] text-faint">Idle until a region needs adaptation.</p>
               )}
             </DiagramNode>
 
@@ -282,7 +281,7 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] text-slate-500">No region cleared yet.</p>
+                <p className="text-[11px] text-faint">No region cleared yet.</p>
               )}
             </DiagramNode>
 
@@ -300,7 +299,7 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
                   variant="diagram"
                 />
               ) : (
-                <p className="text-[11px] text-slate-500">No escalation. Lit only on gray areas.</p>
+                <p className="text-[11px] text-faint">No escalation. Lit only on gray areas.</p>
               )}
             </DiagramNode>
           </div>
