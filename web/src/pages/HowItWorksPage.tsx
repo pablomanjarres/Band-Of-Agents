@@ -40,6 +40,112 @@ const VERDICTS: { label: string; tone: string; desc: string }[] = [
   { label: 'Escalate', tone: 'bg-danger/10 text-danger ring-danger/25', desc: 'A genuine deadlock goes to a human.' },
 ];
 
+// The step-by-step walkthrough. Each step shows the concrete action and an example
+// of what is said in the room: who posts it (you), or that it happens automatically.
+type ExampleKind = 'post' | 'auto' | 'you';
+const EXAMPLE_TONE: Record<ExampleKind, { label: string; cls: string }> = {
+  post: { label: 'you post', cls: 'text-accent' },
+  auto: { label: 'agents', cls: 'text-faint' },
+  you: { label: 'your ruling', cls: 'text-human' },
+};
+
+const STEPS: { n: string; title: string; body: string; example: string; kind: ExampleKind }[] = [
+  {
+    n: '1',
+    title: 'Add your campaign',
+    body: 'Create a campaign, then add advertisements and drop materials into each (video, post, image, banner) with their copy and the claim they make.',
+    example: 'Upload hero.mp4, paste the copy + the claim it makes',
+    kind: 'post',
+  },
+  {
+    n: '2',
+    title: 'Fill the dossier once',
+    body: 'Add the approved claims and substantiation at the campaign level. It cascades into every reviewer of every material, so they all judge against the same ground truth.',
+    example: 'Approved claim: "Clinically supported to help maintain a healthy immune response" + trial refs',
+    kind: 'post',
+  },
+  {
+    n: '3',
+    title: 'Kick off the review',
+    body: 'In the portal, click Run review (or Review this ad). In a Band.ai room, tag the Coordinator with the campaign name.',
+    example: '@Coordinator review the Immune+ Q3 campaign',
+    kind: 'post',
+  },
+  {
+    n: '4',
+    title: 'The Coordinator recruits',
+    body: 'It pulls in the reviewers for the markets you target and tells them to report to Reconcile. You never tag the individual reviewers yourself.',
+    example: '@US @EU @LATAM @Brand review this and report to @Reconcile',
+    kind: 'auto',
+  },
+  {
+    n: '5',
+    title: 'Reviewers check in parallel',
+    body: 'Each market reviewer checks against its own rulebook; Brand checks voice and consistency. They file findings to the shared board at the same time.',
+    example: 'EU Reviewer: 4 findings, 3 blocking',
+    kind: 'auto',
+  },
+  {
+    n: '6',
+    title: 'Reconcile decides',
+    body: 'Once every review is in, Reconcile posts a verdict per region: publish, adapt, or escalate. Adapt is handed to Remediation; an escalate comes to you.',
+    example: 'Verdicts: US=escalate, EU=publish, LATAM=publish, Brand=publish',
+    kind: 'auto',
+  },
+  {
+    n: '7',
+    title: 'Remediation fixes, or you rule',
+    body: 'Remediation rewrites the adapt regions and resubmits for a re-review. On a genuine deadlock, Reconcile asks you for the final call, and your decision is logged as precedent.',
+    example: 'Hold US: drop the auto-renewal, resubmit with clear pricing',
+    kind: 'you',
+  },
+];
+
+const AGENTS: { name: string; role: string; when: string; tone: 'accent' | 'warn' | 'human' }[] = [
+  {
+    name: 'Coordinator',
+    role: 'Chairs the review. Recruits the right reviewers for the markets you target and points them at their rulebooks and Reconcile.',
+    when: 'Tag to start',
+    tone: 'accent',
+  },
+  {
+    name: 'US / EU / LATAM',
+    role: "One reviewer per market. Each checks the content against that region's regulatory rulebook and files findings.",
+    when: 'Auto, per market',
+    tone: 'accent',
+  },
+  {
+    name: 'Brand',
+    role: 'Checks voice, tone and consistency against the brand DNA, independent of the regional rules.',
+    when: 'Auto, always',
+    tone: 'accent',
+  },
+  {
+    name: 'Reconcile',
+    role: 'Collects every review, decides the per-region verdict, and routes the room: adapt to Remediation, deadlocks to you.',
+    when: 'Auto, gives the verdict',
+    tone: 'warn',
+  },
+  {
+    name: 'Remediation',
+    role: 'Rewrites non-compliant copy (and can regenerate an image) for adapt regions, then resubmits for a re-review.',
+    when: 'Auto, on adapt',
+    tone: 'warn',
+  },
+  {
+    name: 'Compliance lead (you)',
+    role: 'Rules on genuine deadlocks the agents could not resolve. Your call is recorded as precedent for next time.',
+    when: 'On escalate',
+    tone: 'human',
+  },
+];
+
+const WHEN_TONE: Record<'accent' | 'warn' | 'human', string> = {
+  accent: 'bg-accent/10 text-accent ring-accent/25',
+  warn: 'bg-warn/10 text-warn ring-warn/25',
+  human: 'bg-human/10 text-human ring-human/25',
+};
+
 export function HowItWorksPage() {
   return (
     <div className="space-y-20">
@@ -109,6 +215,73 @@ export function HowItWorksPage() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Step by step: how to actually run one. */}
+      <section>
+        <div className="mb-6 text-center">
+          <p className="eyebrow mb-2">Step by step</p>
+          <h2 className="font-display text-3xl text-fg">Running a review, start to finish</h2>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted">
+            The same flow whether you click through the portal or drive it by tagging agents in a Band.ai room. You
+            only ever start it; the agents hand off to each other from there.
+          </p>
+        </div>
+        <ol className="mx-auto max-w-3xl space-y-3">
+          {STEPS.map((s, i) => (
+            <li
+              key={s.n}
+              className="rise surface flex gap-4 rounded-2xl p-5"
+              style={{ '--d': `${i * 60}ms` } as CSSProperties}
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 font-mono text-sm font-semibold text-fg ring-1 ring-inset ring-border-strong">
+                {s.n}
+              </span>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-display text-lg leading-tight text-fg">{s.title}</h3>
+                <p className="mt-1 text-sm leading-relaxed text-muted">{s.body}</p>
+                <div className="mt-2.5 flex items-center gap-2 overflow-hidden rounded-lg border border-border bg-bg-soft/70 px-3 py-2">
+                  <span className={`shrink-0 font-mono text-[9px] font-semibold uppercase tracking-wider ${EXAMPLE_TONE[s.kind].cls}`}>
+                    {EXAMPLE_TONE[s.kind].label}
+                  </span>
+                  <code className="truncate font-mono text-[12px] text-fg/90">{s.example}</code>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      {/* Meet the agents: what each does and when it runs. */}
+      <section>
+        <div className="mb-6 text-center">
+          <p className="eyebrow mb-2">The cast</p>
+          <h2 className="font-display text-3xl text-fg">What each agent does</h2>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-muted">
+            You only ever tag the Coordinator. It brings in everyone else, and the rest run themselves.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {AGENTS.map((a, i) => (
+            <div
+              key={a.name}
+              className="rise surface flex flex-col rounded-2xl p-5"
+              style={{ '--d': `${i * 60}ms` } as CSSProperties}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="font-display text-lg leading-tight text-fg">{a.name}</h3>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider ring-1 ring-inset ${WHEN_TONE[a.tone]}`}>
+                  {a.when}
+                </span>
+              </div>
+              <p className="mt-2 text-sm leading-relaxed text-muted">{a.role}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mx-auto mt-5 max-w-2xl text-center text-xs leading-relaxed text-faint">
+          There is also a deeper "pods" topology (a Conductor, pod leads, a Mediator and a Risk Adjudicator) for the
+          full debate showcase. The cast above is the one that returns a clean per-region verdict.
+        </p>
       </section>
 
       {/* Closing CTA. */}
