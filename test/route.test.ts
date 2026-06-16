@@ -1,5 +1,7 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { describeRoutes, describePerception } from '../src/models/route';
+import { describeRoutes, describePerception, sttClientFor } from '../src/models/route';
+import { AimlSttClient } from '../src/models/aiml';
+import { GeminiSttClient } from '../src/models/gemini';
 
 describe('model routing', () => {
   it('routes every role through AIML and spans diverse model families in aiml mode', () => {
@@ -57,5 +59,35 @@ describe('perception routing (vision + STT)', () => {
     const p = describePerception('dev');
     expect(p['perception-vision'].startsWith('gemini:')).toBe(true);
     expect(p['perception-stt'].startsWith('aiml:')).toBe(true);
+  });
+});
+
+
+describe('sttClientFor: a dev-mode STT exists even with no AIML key', () => {
+  const saved = { key: process.env.AIML_API_KEY, vertex: process.env.GOOGLE_GENAI_USE_VERTEXAI };
+  afterEach(() => {
+    if (saved.key === undefined) delete process.env.AIML_API_KEY;
+    else process.env.AIML_API_KEY = saved.key;
+    if (saved.vertex === undefined) delete process.env.GOOGLE_GENAI_USE_VERTEXAI;
+    else process.env.GOOGLE_GENAI_USE_VERTEXAI = saved.vertex;
+  });
+
+  it('dev mode with no AIML key returns a Gemini-backed STT client (not undefined)', () => {
+    delete process.env.AIML_API_KEY;
+    delete process.env.GOOGLE_GENAI_USE_VERTEXAI;
+    const client = sttClientFor('dev');
+    expect(client).toBeInstanceOf(GeminiSttClient);
+    expect(client?.model).toBeTruthy();
+  });
+
+  it('aiml mode with no AIML key returns undefined (STT degrades to a pasted transcript)', () => {
+    delete process.env.AIML_API_KEY;
+    expect(sttClientFor('aiml')).toBeUndefined();
+  });
+
+  it('an AIML key makes BOTH modes prefer the AIML Whisper client', () => {
+    process.env.AIML_API_KEY = 'test-key';
+    expect(sttClientFor('aiml')).toBeInstanceOf(AimlSttClient);
+    expect(sttClientFor('dev')).toBeInstanceOf(AimlSttClient);
   });
 });
