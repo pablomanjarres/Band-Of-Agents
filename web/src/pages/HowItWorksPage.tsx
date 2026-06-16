@@ -172,6 +172,19 @@ const WHEN_TONE: Record<'accent' | 'warn' | 'human', string> = {
   human: 'bg-human/10 text-human ring-human/25',
 };
 
+// The exact 17 agents to add to the Band.ai room, grouped. Every pod needs all of
+// its members present: a pod cannot finish (and the review cannot conclude) if one
+// of its members is missing from the room.
+const ROOM_AGENTS: { group: string; members: string[] }[] = [
+  { group: 'Spine', members: ['Conductor', 'Risk Adjudicator'] },
+  { group: 'Claims pod', members: ['Claims Lead', 'Scout', 'Claim & Evidence', 'Precedent', 'Disclosure'] },
+  { group: 'Regulatory pod', members: ['Reg Lead', 'US Reviewer', 'EU Reviewer', 'LATAM Reviewer'] },
+  { group: 'Brand pod', members: ['Brand Lead', 'Brand Voice', 'Channel Fit', 'Visual'] },
+  { group: 'Board', members: ['Mediator', 'Remediation'] },
+];
+
+const codeChip = 'rounded bg-bg-soft px-1.5 py-0.5 font-mono text-[12px] text-accent ring-1 ring-inset ring-border';
+
 export function HowItWorksPage() {
   return (
     <div className="space-y-20">
@@ -307,6 +320,47 @@ export function HowItWorksPage() {
         <p className="mx-auto mt-5 max-w-2xl text-center text-xs leading-relaxed text-faint">
           Seventeen agents in all: three pods filing to a shared board, with a Risk Adjudicator on the decision spine.
           The portal&apos;s quick Run review uses a lighter Coordinator and Reconcile cast for a fast per-region verdict.
+        </p>
+      </section>
+
+      {/* Set up the Band.ai room: the exact agents to add. */}
+      <section>
+        <div className="mb-6 text-center">
+          <p className="eyebrow mb-2">Set up the room</p>
+          <h2 className="font-display text-3xl text-fg">Add these 17 agents to your Band.ai room</h2>
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+            Connect them with <code className={codeChip}>{'MODEL_MODE=vertex pnpm agents'}</code>, then add every
+            agent below to the room, plus yourself as the Compliance Lead. If a pod is missing one of its members,
+            that pod cannot finish and the review never reaches a verdict.
+          </p>
+        </div>
+        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {ROOM_AGENTS.map((g) => (
+            <div key={g.group} className="surface rounded-2xl p-4">
+              <p className="eyebrow mb-2.5">{g.group}</p>
+              <ul className="space-y-1.5">
+                {g.members.map((m) => (
+                  <li key={m} className="flex items-center gap-2 text-sm text-fg">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                    {m}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <div className="surface rounded-2xl p-4">
+            <p className="eyebrow mb-2.5">Human</p>
+            <ul className="space-y-1.5">
+              <li className="flex items-center gap-2 text-sm text-fg">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-human" />
+                Compliance Lead (you)
+              </li>
+            </ul>
+          </div>
+        </div>
+        <p className="mx-auto mt-5 max-w-2xl text-center text-sm text-muted">
+          Then post <code className={codeChip}>{'@Conductor review <campaign name>'}</code> in the room. You only
+          ever tag the Conductor; it runs the other sixteen.
         </p>
       </section>
 

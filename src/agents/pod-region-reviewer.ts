@@ -71,12 +71,19 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
     const hubChallenge = opts.hub?.challenge(message.roomId, opts.region);
     const challenge = (parsed && parsed.kind === 'challenge') ? parsed : (hubChallenge ? { kind: 'challenge', ...hubChallenge } : null);
     if (challenge && challenge.kind === 'challenge') {
-      const res = await opts.model.complete({
-        system: `You are the ${opts.region} reviewer. A peer (${challenge.peerRegion}) argues: "${challenge.peerRationale}". Decide whether to hold your block on "${challenge.claim}" under the ${opts.region} rulebook, or concede. Answer JSON.`,
-        messages: [{ role: 'user', content: `Claim under dispute: ${challenge.claim}` }],
-        jsonSchema: REBUTTAL_JSON_SCHEMA,
-      });
-      const out = (res.json ?? {}) as { stance?: string; rationale?: string };
+      let out: { stance?: string; rationale?: string } = {};
+      try {
+        const res = await opts.model.complete({
+          system: `You are the ${opts.region} reviewer. A peer (${challenge.peerRegion}) argues: "${challenge.peerRationale}". Decide whether to hold your block on "${challenge.claim}" under the ${opts.region} rulebook, or concede. Answer JSON.`,
+          messages: [{ role: 'user', content: `Claim under dispute: ${challenge.claim}` }],
+          jsonSchema: REBUTTAL_JSON_SCHEMA,
+        });
+        out = (res.json ?? {}) as { stance?: string; rationale?: string };
+      } catch (err) {
+        // On a model error, hold the block (the safe default) and still reply, so the
+        // Reg Lead's rebuttal round is not left waiting.
+        console.warn(`[${opts.region}] rebuttal failed (continuing, holding):`, (err as Error)?.message ?? err);
+      }
       const stance = out.stance ?? 'hold';
       const target = matchParticipant(await tools.getParticipants(), opts.reportToHandle ?? '', 'agent') ?? null;
       const mention = target ? [{ id: target.id, handle: target.handle }] : [{ id: message.senderId }];
@@ -104,12 +111,20 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
     await tools.sendEvent(`${opts.region} review: starting compliance review.`, 'task');
 
     const { system, user } = buildReviewPrompt(opts, asset);
-    const res = await opts.model.complete({
-      system,
-      messages: [{ role: 'user', content: user }],
-      jsonSchema: REVIEW_OUTPUT_JSON_SCHEMA,
-    });
-    const review = toReviewResult(res, opts);
+    // A reviewer whose model call fails must STILL report, or the Reg Lead waits
+    // forever for it and the regulatory pod never files. Degrade to an empty review.
+    let review: ReviewResult;
+    try {
+      const res = await opts.model.complete({
+        system,
+        messages: [{ role: 'user', content: user }],
+        jsonSchema: REVIEW_OUTPUT_JSON_SCHEMA,
+      });
+      review = toReviewResult(res, opts);
+    } catch (err) {
+      console.warn(`[${opts.region}] review failed (continuing):`, (err as Error)?.message ?? err);
+      review = { region: opts.region, reviewer: opts.reviewerName, findings: [] };
+    }
 
     const blocking = review.findings.filter((f) => f.severity === 'block').length;
     await tools.sendEvent(
@@ -119,11 +134,22 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
     const target = await resolveReportTarget(tools, opts.reportToHandle, message);
     if (opts.hub) {
       opts.hub.setFinding(message.roomId, opts.region, review.findings);
-      await tools.sendMessage(`${opts.reviewerName}: ${review.findings.length} finding(s)${blocking ? `, ${blocking} blocking` : ''}.`, [target]);
+      const detail = review.findings.length ? `: ${topRegionFindings(review.findings)}` : '';
+      await tools.sendMessage(`${opts.reviewerName}: ${review.findings.length} finding(s)${blocking ? `, ${blocking} blocking` : ''}${detail}.`, [target]);
     } else {
       await tools.sendMessage(JSON.stringify(review), [target]);
     }
   };
+}
+
+// A short, room-friendly summary of the first finding or two, so the chat shows
+// WHAT was flagged, not just a count.
+function topRegionFindings(findings: ReviewResult['findings']): string {
+  const text = (f: ReviewResult['findings'][number]): string => {
+    const s = f.rationale || f.claim || f.category || f.ruleId || 'issue';
+    return s.length > 90 ? `${s.slice(0, 87)}...` : s;
+  };
+  return findings.slice(0, 2).map(text).join('; ');
 }
 
 function buildReviewPrompt(

@@ -28,8 +28,19 @@ export function makeKnowledgeSource(opts: KnowledgeSourceOptions): AgentHandler 
     if (!asset) return;
     const user = opts.buildUser ? opts.buildUser(asset) : `Asset (JSON):\n${JSON.stringify(asset, null, 2)}`;
     const imgs = opts.images ? opts.images(asset) : [];
-    const res = await opts.model.complete({ system: opts.system, messages: [{ role: 'user', content: user }], jsonSchema: opts.jsonSchema, ...(imgs.length ? { images: imgs } : {}) });
-    const payload = (res.json && typeof res.json === 'object') ? (res.json as Record<string, unknown>) : {};
+    // A member whose model call fails must STILL report to its pod lead. Otherwise
+    // the lead waits forever for a reply that never comes, its pod never files, and
+    // the Risk Adjudicator never reaches a conclusion. So degrade to an empty review
+    // on any model error instead of throwing out of the handler.
+    let payload: Record<string, unknown> = {};
+    let failed = false;
+    try {
+      const res = await opts.model.complete({ system: opts.system, messages: [{ role: 'user', content: user }], jsonSchema: opts.jsonSchema, ...(imgs.length ? { images: imgs } : {}) });
+      payload = (res.json && typeof res.json === 'object') ? (res.json as Record<string, unknown>) : {};
+    } catch (err) {
+      failed = true;
+      console.warn(`[${opts.role}] review failed (continuing):`, (err as Error)?.message ?? err);
+    }
     await tools.sendEvent(`${opts.reviewerName} reviewed ${asset.id}`, eventType, { role: opts.role });
     const target = matchParticipant(await tools.getParticipants(), opts.reportToHandle, 'agent');
     if (!target) return;
@@ -38,12 +49,26 @@ export function makeKnowledgeSource(opts: KnowledgeSourceOptions): AgentHandler 
       const findings = (Array.isArray(payload['findings']) ? payload['findings'] : []) as Finding[];
       opts.hub.setFinding(message.roomId, opts.role, findings);
       const workItems = Array.isArray(payload['workItems']) ? payload['workItems'] : null;
-      const summary = workItems
-        ? `mapped ${workItems.length} risky surface(s)`
-        : findings.length === 0 ? 'no issues found' : `flagged ${findings.length} issue${findings.length === 1 ? '' : 's'}`;
+      const summary = failed
+        ? 'review unavailable (model error)'
+        : workItems
+          ? `mapped ${workItems.length} risky surface(s)`
+          : findings.length === 0
+            ? 'no issues found'
+            : `flagged ${findings.length} issue${findings.length === 1 ? '' : 's'}: ${topFindings(findings)}`;
       await tools.sendMessage(`${opts.reviewerName}: ${summary}.`, [{ id: target.id, handle: target.handle }]);
     } else {
       await tools.sendMessage(JSON.stringify({ source: opts.role, asset: asset.id, ...payload }), [{ id: target.id, handle: target.handle }]);
     }
   };
+}
+
+// A short, room-friendly summary of the first finding or two, so the chat shows
+// WHAT was flagged, not just a count.
+function topFindings(findings: Finding[]): string {
+  const text = (f: Finding): string => {
+    const s = f.rationale || f.category || f.ruleId || 'issue';
+    return s.length > 90 ? `${s.slice(0, 87)}...` : s;
+  };
+  return findings.slice(0, 2).map(text).join('; ');
 }
