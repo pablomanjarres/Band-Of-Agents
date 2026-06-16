@@ -68,6 +68,19 @@ export function activeMode(): ModelMode {
   return process.env.MODEL_MODE === 'dev' ? 'dev' : 'aiml';
 }
 
+// True when a Gemini provider is reachable without an AIML key: either Vertex is
+// configured (a service account on Cloud Run, or ADC locally) or a Gemini API key
+// is present. Used so the perception pre-pass (vision + STT) still runs on GCP auth
+// alone, even on the AIML route with no AIML key (e.g. the hosted Cloud Run app,
+// where reviewers are stubbed but uploaded videos must still be transcribed).
+function geminiReachable(): boolean {
+  return (
+    process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true' ||
+    Boolean(process.env.GEMINI_API_KEY) ||
+    Boolean(process.env.GOOGLE_API_KEY)
+  );
+}
+
 // AIML is the default/main path; 'dev' routes to Bedrock/Vertex/Featherless to save AIML credit.
 // Every client is wrapped in meter() so all real calls accrue into the spend tracker.
 export function modelFor(role: AgentRole, mode: ModelMode = activeMode()): ModelClient {
@@ -100,13 +113,17 @@ export function imageClientFor(mode: ModelMode = activeMode()): ModelClient {
 // The vision model for the perception pre-pass: it "sees" each material's frames
 // once and emits a text description/OCR/claims that cascade to every reviewer.
 // AIML is the default (a vision-capable chat model via image_url parts); dev mode
-// uses Gemini (also vision-capable). Returns undefined ONLY when no provider is
-// reachable, so perception degrades to text-only instead of throwing.
+// uses Gemini (also vision-capable). On the AIML route with no AIML key we still
+// fall back to Gemini when it is reachable (Vertex service account on Cloud Run, or
+// a Gemini API key), so the hosted key-free app still "sees". Returns undefined
+// ONLY when no provider is reachable, so perception degrades to text-only instead
+// of throwing.
 export function visionModelFor(mode: ModelMode = activeMode()): ModelClient | undefined {
   if (mode === 'aiml') {
     const apiKey = process.env.AIML_API_KEY;
-    if (!apiKey) return undefined;
-    return new AimlModelClient({ apiKey, model: PERCEPTION_VISION_AIML() });
+    if (apiKey) return new AimlModelClient({ apiKey, model: PERCEPTION_VISION_AIML() });
+    if (geminiReachable()) return new GeminiModelClient({ model: PERCEPTION_VISION_DEV });
+    return undefined;
   }
   return new GeminiModelClient({ model: PERCEPTION_VISION_DEV });
 }
@@ -123,8 +140,13 @@ export function visionModelFor(mode: ModelMode = activeMode()): ModelClient | un
 export function sttClientFor(mode: ModelMode = activeMode()): SttClient | undefined {
   const apiKey = process.env.AIML_API_KEY;
   if (apiKey) return new AimlSttClient({ apiKey, model: PERCEPTION_STT_AIML() });
-  // dev mode, no AIML key: Gemini transcribes (Vertex ADC or a Gemini API key).
-  if (mode === 'dev') return new GeminiSttClient({ model: PERCEPTION_STT_DEV() });
+  // No AIML key: Gemini transcribes (audio inlineData) whenever it is reachable,
+  // i.e. dev mode, or Vertex is configured (service account on Cloud Run / ADC
+  // locally), or a Gemini API key exists. This makes a key-free Cloud Run run on a
+  // Vertex service account still transcribe uploaded videos. Only when no provider
+  // is reachable do we return undefined and STT degrades to a pasted transcript (or
+  // none) rather than throwing.
+  if (mode === 'dev' || geminiReachable()) return new GeminiSttClient({ model: PERCEPTION_STT_DEV() });
   return undefined;
 }
 

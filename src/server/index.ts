@@ -141,7 +141,15 @@ function boardModelsOrStub(): BoardModels {
 
 /** Perception clients: real when available, else demo stubs (so the UI animates). */
 function perceptionOrStub(): { vision?: ModelClient; stt?: SttClient } {
-  if (KEY_FREE_LOCAL) return stubPerceptionModels();
+  if (KEY_FREE_LOCAL) {
+    // Even in the key-free demo, prefer REAL perception when a provider is reachable
+    // on GCP auth alone (a Vertex service account on Cloud Run, or a Gemini API key):
+    // uploaded videos then get a real transcript instead of the demo stub, while the
+    // reviewers stay stubbed. Fall back to the stub only when nothing real is reachable.
+    const real = realPerceptionModels();
+    if (real.vision || real.stt) return real;
+    return stubPerceptionModels();
+  }
   return realPerceptionModels();
 }
 

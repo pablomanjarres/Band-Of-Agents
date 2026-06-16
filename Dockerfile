@@ -12,6 +12,11 @@
 FROM node:22-slim
 
 WORKDIR /app
+# ffmpeg powers the perception pre-pass (audio extraction for STT, keyframe
+# extraction for vision). node:22-slim does not ship it, so a hosted video upload
+# would silently produce an empty transcript without this install.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
 # Install pnpm directly (avoids corepack's interactive download prompt in CI).
 RUN npm install -g pnpm@10.30.3
 

@@ -14,9 +14,9 @@ export function Topbar() {
         {/* Mobile brand (sidebar is hidden < lg). */}
         <div className="flex items-center gap-2.5 lg:hidden">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-accent-strong to-indigo-700">
-            <span className="font-display text-base italic leading-none text-white">L</span>
+            <span className="font-display text-base italic leading-none text-white">B</span>
           </span>
-          <span className="font-display text-lg text-fg">Lumavida</span>
+          <span className="font-display text-lg text-fg">Band Review Board</span>
         </div>
 
         {/* Desktop eyebrow: orients the operator without competing with the page H1. */}
