@@ -64,7 +64,7 @@ This connects the 17-agent cast to band.ai and keeps the process alive. Each age
 Then in `app.band.ai`:
 
 1. Create a room.
-2. Add the agents plus the human reviewer.
+2. Add the agents plus yourself as the human reviewer. A room holds 14 agents plus you, and the cast is 17, so add the 14 core agents: Conductor, Risk Adjudicator, the three pod leads (Claims Lead, Reg Lead, Brand Lead), all three regional reviewers (US, EU, LATAM), Claim & Evidence, Disclosure, Brand Voice, Visual, Mediator, Remediation. Scout, Precedent and Channel Fit are optional extras if your plan allows more than 14. Each pod just needs its lead and at least one member, so the review still concludes.
 3. Post `@Conductor review <campaign name>`.
 
 `MODEL_MODE=vertex` routes every agent through Gemini on Vertex: one GCP credential, no AIML key, no AWS / Bedrock.

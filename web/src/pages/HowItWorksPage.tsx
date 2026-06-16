@@ -172,16 +172,19 @@ const WHEN_TONE: Record<'accent' | 'warn' | 'human', string> = {
   human: 'bg-human/10 text-human ring-human/25',
 };
 
-// The exact 17 agents to add to the Band.ai room, grouped. Every pod needs all of
-// its members present: a pod cannot finish (and the review cannot conclude) if one
-// of its members is missing from the room.
+// A Band.ai room holds 14 agents plus you, and the full cast is 17. These are the
+// 14 to add: every pod keeps its lead, the regulatory debate keeps all 3 regions,
+// and the spine + board are intact. Each pod needs its lead and at least one member.
 const ROOM_AGENTS: { group: string; members: string[] }[] = [
   { group: 'Spine', members: ['Conductor', 'Risk Adjudicator'] },
-  { group: 'Claims pod', members: ['Claims Lead', 'Scout', 'Claim & Evidence', 'Precedent', 'Disclosure'] },
+  { group: 'Claims pod', members: ['Claims Lead', 'Claim & Evidence', 'Disclosure'] },
   { group: 'Regulatory pod', members: ['Reg Lead', 'US Reviewer', 'EU Reviewer', 'LATAM Reviewer'] },
-  { group: 'Brand pod', members: ['Brand Lead', 'Brand Voice', 'Channel Fit', 'Visual'] },
+  { group: 'Brand pod', members: ['Brand Lead', 'Brand Voice', 'Visual'] },
   { group: 'Board', members: ['Mediator', 'Remediation'] },
 ];
+// The remaining 3 of the 17. They add depth but the pods run without them, so leave
+// them out unless your plan allows more than 14 agents in a room.
+const OPTIONAL_AGENTS = ['Scout', 'Precedent', 'Channel Fit'];
 
 const codeChip = 'rounded bg-bg-soft px-1.5 py-0.5 font-mono text-[12px] text-accent ring-1 ring-inset ring-border';
 
@@ -318,8 +321,8 @@ export function HowItWorksPage() {
           ))}
         </div>
         <p className="mx-auto mt-5 max-w-2xl text-center text-xs leading-relaxed text-faint">
-          Seventeen agents in all: three pods filing to a shared board, with a Risk Adjudicator on the decision spine.
-          The portal&apos;s quick Run review uses a lighter Coordinator and Reconcile cast for a fast per-region verdict.
+          Seventeen agents in all, and fourteen fit a room plus you: three pods filing to a shared board, with a Risk
+          Adjudicator on the decision spine. The portal&apos;s quick Run review uses a lighter Coordinator and Reconcile cast for a fast per-region verdict.
         </p>
       </section>
 
@@ -327,11 +330,12 @@ export function HowItWorksPage() {
       <section>
         <div className="mb-6 text-center">
           <p className="eyebrow mb-2">Set up the room</p>
-          <h2 className="font-display text-3xl text-fg">Add these 17 agents to your Band.ai room</h2>
+          <h2 className="font-display text-3xl text-fg">Add these 14 agents to your Band.ai room</h2>
           <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-            Connect them with <code className={codeChip}>{'MODEL_MODE=vertex pnpm agents'}</code>, then add every
-            agent below to the room, plus yourself as the Compliance Lead. If a pod is missing one of its members,
-            that pod cannot finish and the review never reaches a verdict.
+            A Band.ai room holds 14 agents plus you. Connect the cast with{' '}
+            <code className={codeChip}>{'MODEL_MODE=vertex pnpm agents'}</code>, add the 14 below to the room, and
+            join as the Compliance Lead yourself. Every pod keeps its lead and at least one member, so the review
+            still concludes.
           </p>
         </div>
         <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -358,9 +362,13 @@ export function HowItWorksPage() {
             </ul>
           </div>
         </div>
-        <p className="mx-auto mt-5 max-w-2xl text-center text-sm text-muted">
+        <p className="mx-auto mt-4 max-w-2xl text-center text-xs text-faint">
+          Optional, only if your plan allows more than 14 agents: {OPTIONAL_AGENTS.join(', ')}. They add depth, but
+          the pods run without them.
+        </p>
+        <p className="mx-auto mt-3 max-w-2xl text-center text-sm text-muted">
           Then post <code className={codeChip}>{'@Conductor review <campaign name>'}</code> in the room. You only
-          ever tag the Conductor; it runs the other sixteen.
+          ever tag the Conductor; it runs the rest.
         </p>
       </section>
 
