@@ -17,6 +17,25 @@ material-1 then material-2 then material-3. Each material is its own independent
 negotiation, all running concurrently, and the campaign verdict is an observation over
 them, never a gate.
 
+## Topology
+
+There are two distinct agent topologies in this project, and the campaign portal flow is
+only one of them. Both run on `MODEL_MODE=vertex` (every agent on Gemini/Vertex, behind a
+single GCP credential).
+
+1. Campaign portal review ("Run review"). When a user clicks "Run review" on a campaign in
+   the portal, each material is reviewed concurrently on the lighter CLASSIC cast:
+   Coordinator -> US / EU / LATAM / Brand reviewers -> Reconcile. This is what produces the
+   per-region verdicts shown on the campaign page and in the material x region matrix.
+2. Live Band.ai showcase. The full "blackboard pods on a decision spine" workflow
+   (Conductor -> Claims / Regulatory / Brand pods -> Mediator -> Risk Adjudicator, with the
+   regions running a rebuttal debate) is the live Band.ai showcase. It is run via
+   `pnpm agents` and driven by @mentioning the Conductor in a band.ai room. See
+   `docs/LIVE_BAND.md`.
+
+The sections below ("How a campaign review runs", the rollup, etc.) describe the CLASSIC
+campaign portal topology. The blackboard pods topology is documented in `docs/LIVE_BAND.md`.
+
 ## Data model
 
 Defined in `src/domain/types.ts` (zod schemas double as runtime validators).

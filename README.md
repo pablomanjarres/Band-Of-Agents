@@ -22,9 +22,9 @@ The interesting part is the conflict, not the workflow. The agents do not run ch
 - An EU fix can require a disclosure or consent line the US version never needed.
 - A localized rewrite that fixes the legal problem can drift off-brand, which the brand reviewers push back on.
 
-So the reviewers do not produce one merged checklist. They post findings, and a reconcile step issues a separate verdict per region (publish, adapt, or escalate) and surfaces the cross-region conflict. That negotiation is the point. Band is the layer it happens on: every agent is a first-class participant in the room that coordinates by @mention and narrates its reasoning, not a wrapper around a script. Across a campaign the same conflict plays out per material, all at once, never serialized.
+So the reviewers do not produce one merged checklist. The genuine agent-to-agent debate is the originality here: in the regulatory pod, when two region reviewers split on the same span, the Reg Lead runs a one-round rebuttal where each blocking region holds or concedes, on the record, before anything consolidates. That negotiation is the point. Band is the layer it happens on: every agent is a first-class participant in the room that coordinates by @mention and narrates its reasoning, not a wrapper around a script. Across a campaign the same conflict plays out per material, all at once, never serialized.
 
-Two orchestration topologies ship and coexist. The default is the Coordinator/Reconcile board with the full campaign + multimodal flow (below). An additive, opt-in redesign ("blackboard pods on a decision spine", `BOARD_TOPOLOGY=pods`) makes the negotiation explicit: small pods debate internally, a shared board reconciles cross-pod conflict, and a decision spine drives the asset to a terminal verdict.
+Two orchestration topologies ship and coexist. The live workflow is the pods cast ("blackboard pods on a decision spine"), the real Band.ai showcase you connect with `pnpm agents`: 17 agents plus a human, organized into three deliberating pods on a deterministic decision spine. A lighter classic cast (Coordinator to US/EU/LATAM/Brand to Reconcile, per-region verdicts) backs the web portal's "Run review" button and is reached with `pnpm serve`, `pnpm serve:band`, or `pnpm agents:classic`. The pods flow is the headline; the classic flow is the portal-facing variant.
 
 ## Campaigns, cascading dossier, and multimodal review
 
@@ -38,36 +38,49 @@ Full details in `docs/CAMPAIGNS.md`.
 
 ## How a review runs (pods to board to spine)
 
+The live workflow. You post the asset and @mention the Conductor; everything below follows from that one message.
+
 ```
             marketing asset (copy + hard claim + image)
                               |
-                        [ Conductor ]        sequences the pods, owns the recommit loop
-                              |
+                        [ Conductor ]        fans the asset to the three pods; owns the single recommit;
+                              |              the only agent a human tags
       +-----------------------+------------------------+
       |                       |                        |
  [ Claims pod ]        [ Regulatory pod ]        [ Brand pod ]
   Scout, Claim &        US, EU, LATAM             Brand Voice,
-  Evidence,             reviewers that DEBATE     Channel, Visual
-  Precedent,            a blocked span before     under a Brand Lead
-  Disclosure            the lead consolidates,
-  under a Claims Lead   under a Reg Lead
-      |                       |                        |
-      +------ one PodFinding each (findings + conflicts) -------+
+  Evidence,             reviewers that DEBATE     Channel Fit,
+  Precedent,            a blocked span in a        Visual
+  Disclosure            one-round rebuttal         under a Brand Lead
+  under a Claims Lead   (hold/concede), under
+      |                 a Reg Lead                       |
+      +------ one consolidated finding each (findings + conflicts) ----+
                               |
-                      [ Board: Mediator ]   brokers a cross-pod conflict
-                              |
-                     [ Risk Adjudicator ]   scores the board, drives the spine
-                              |
+                      [ Board: Mediator ]   brokers a cross-pod conflict into
+                              |              the smallest resolution, or reports a deadlock
+                     [ Risk Adjudicator ]   scores the board, runs the mediation/remediation
+                              |              cycle, drives the terminal decision (deterministic spine)
       +-----------+-----------+-----------+------------+
-   publish      spike      remediate     escalate
+   published     spiked     remediate    escalated
                               |              |
-                      [ Remediation ]   [ Human lead ]
-                      rewrite copy +     rules on the
-                      regen image,       genuine deadlock;
-                      recommit (capped)  ruling logged as precedent
+                      [ Remediation ]   [ Compliance Lead ]
+                      rewrite blocked    the human; rules on the
+                      copy + regen a     genuine deadlock;
+                      localized image,   ruling logged as
+                      recommit (once)    precedent
 ```
 
-The default Coordinator/Reconcile flow (per material, all materials concurrently):
+The pods flow, step by step:
+
+1. Post the asset and @mention the Conductor. The Conductor fans it out to the three pods.
+2. Each pod lead delegates to its members, who file findings. In the Regulatory pod, when reviewers split on the same span, the Reg Lead runs a one-round rebuttal: each blocking region holds or concedes, on the record. That is the genuine agent-to-agent debate, regions rebutting each other, not a linear pipeline.
+3. Each pod files one consolidated finding to the board, carrying its findings and any unresolved conflicts.
+4. The Risk Adjudicator scores the board. On a conflict it consults the Mediator, who brokers the smallest resolution or reports a deadlock.
+5. If the conflict still will not resolve, one Remediation recommit runs: Remediation rewrites the blocked copy and regenerates a localized image, then the revised asset recommits through the Conductor and is re-reviewed.
+6. Still unresolved: the Risk Adjudicator escalates to the human (the Compliance Lead), the only escalation path. The human's ruling is logged as precedent.
+7. The spine ends in a terminal state: published, spiked, or escalated. The spine is deterministic (no model call), so every verdict is auditable.
+
+The classic flow (the portal-facing variant, reached with `pnpm serve`, `pnpm serve:band`, or `pnpm agents:classic`) runs per material, all materials concurrently:
 
 1. The coordinator intakes the material and loads the shared context (brand DNA, a rulebook per market, and, for a campaign, the dossier).
 2. For a video or image material, a perception pre-pass sees the frames and hears the audio; its transcript and visual notes are cascaded to the reviewers.
@@ -78,36 +91,30 @@ The default Coordinator/Reconcile flow (per material, all materials concurrently
 
 For a campaign this whole loop runs per material, concurrently, and a final rollup reports the worst-case verdict per region plus the material x region matrix.
 
-The opt-in pods topology (`BOARD_TOPOLOGY=pods`), diagrammed above:
-
-1. The Conductor intakes the asset and fans it to the three pods.
-2. Each pod deliberates and files one consolidated PodFinding. In the Regulatory pod, when reviewers split on the same span, they exchange a directed rebuttal round (one reviewer challenges another with the peer's argument; the peer holds or concedes) before the lead consolidates. That is the genuine agent-to-agent debate.
-3. The Risk Adjudicator accumulates the pod findings. On a conflict it consults the Mediator.
-4. If the conflict will not resolve, it remediates once (Remediation rewrites the copy and regenerates a localized image, then the asset recommits through the Conductor), then escalates the genuine deadlock to the human. The Risk Adjudicator is the only agent that summons the human.
-5. The spine ends in a terminal state: publish, spike, or escalate, with the human ruling logged as precedent.
-
 ## The cast
+
+The live pods cast is 17 agents plus a human (the Compliance Lead).
 
 | Agent | Objective | Calls a model |
 |---|---|---|
-| Conductor | Fan the asset to the pods, run the one recommit loop | No (deterministic) |
-| Scout | Extract the risky surfaces (claims, CTAs, image) as work-items | Yes |
+| Conductor | Fan the asset to the three pods, own the single recommit; the only agent a human tags | No (deterministic) |
+| Scout | Map the risky surfaces (claims, CTAs, image) as work-items | Yes |
 | Claim & Evidence | Flag claims not substantiated by the asset | Yes |
 | Precedent | Attach relevant prior rulings | Yes |
 | Disclosure | Draft any mandatory disclosure text | Yes |
-| US / EU / LATAM reviewers | Check against each market's rulebook; debate a contested span | Yes |
-| Brand Voice / Channel / Visual | Keep copy, format, and image on-brand | Yes |
-| Claims / Regulatory / Brand Leads | Collect positions, run the rebuttal, file one PodFinding | No (deterministic) |
-| Mediator | Broker a cross-pod conflict into the smallest resolution | Yes |
-| Remediation | Rewrite copy and regenerate a localized image, recommit | Yes |
-| Risk Adjudicator | Score the board, drive the terminal decision, summon the human | No (deterministic) |
-| Human lead | Adjudicate the genuine gray area | Human, not an agent |
+| US / EU / LATAM reviewers | Check against each market's rulebook; in the Reg pod, hold or concede a contested span in the rebuttal round | Yes |
+| Brand Voice / Channel Fit / Visual | Keep copy, format, and image on-brand | Yes |
+| Claims / Regulatory / Brand Leads | Collect positions, run the rebuttal (Reg Lead), file one consolidated finding | No (deterministic) |
+| Mediator | Broker a cross-pod conflict into the smallest resolution, or report a deadlock | Yes |
+| Remediation | Rewrite blocked copy and regenerate a localized image, recommit | Yes |
+| Risk Adjudicator | Score the board, run the mediation/remediation cycle, drive the terminal decision (published/spiked/escalated), summon the human | No (deterministic) |
+| Compliance Lead | Rule on the genuine deadlock; ruling logged as precedent | Human, not an agent |
 
-The orchestration steps are deterministic on purpose: in the classic flow the coordinator and reconcile steps, and in the pods flow the leads, the Conductor, and the Risk Adjudicator, are rules-based, so routing and the verdict logic are auditable rather than left to a model. The Coordinator/Reconcile board is the default server flow; the pods topology is the additive redesign, selected with `BOARD_TOPOLOGY=pods`. A perception pre-pass (not a Band agent) sees and hears each video or image material once via AIML, producing the transcript and visual artifacts that ground every reviewer.
+The orchestration steps are deterministic on purpose. In the pods flow the Conductor, the pod leads, and the Risk Adjudicator are rules-based, so routing and the verdict logic are auditable rather than left to a model: the decision spine drives the asset to a terminal verdict with no model call. The classic cast keeps the same discipline (the coordinator and reconcile steps are deterministic). A perception pre-pass (not a Band agent) sees and hears each video or image material once via AIML, producing the transcript and visual artifacts that ground every reviewer.
 
 ## Multi-model by design
 
-Each model-calling agent runs the model family that fits its job. `MODEL_MODE` switches the whole fleet between two providers behind one interface (`src/models/route.ts`).
+Each model-calling agent runs the model family that fits its job. `MODEL_MODE` switches the whole fleet behind one interface (`src/models/route.ts`). For the live Band.ai room, `MODEL_MODE=vertex` runs everything on Gemini/Vertex from a single GCP credential, the simplest way to bring up all 17 agents.
 
 | Agent | `aiml` (main path) | `dev` (cost-saver) |
 |---|---|---|
@@ -124,13 +131,14 @@ Each model-calling agent runs the model family that fits its job. `MODEL_MODE` s
 | Perception (vision) | vision-capable model, reads keyframes/images | (MODEL_MODE fallback) |
 | Perception (audio) | Whisper-class transcription | (MODEL_MODE fallback) |
 
+- `vertex` routes the whole fleet through GCP Vertex (Gemini) on one credential, the path used to stand up the live 17-agent Band.ai room with the least setup.
 - `aiml` routes every agent through the [AI/ML API](https://aimlapi.com) OpenAI-compatible gateway, and is the path used for the high-visibility showcase calls and the Nano Banana image work.
 - `dev` spreads volume across AWS Bedrock, GCP Vertex, and [Featherless](https://featherless.ai) (open-source inference) so the small AIML credit is not burned during development.
 - All three modalities run through AIML: text (the reviewers), image (Nano Banana plus perception vision), and audio (perception transcription). The perception slugs are env-overridable (`AIML_VISION_MODEL`, `AIML_STT_MODEL`).
 
 ## The debate is real (a live run)
 
-On real models (dev mode), the sample asset drives the full negotiation, not a scripted demo. A representative run:
+On real models, the sample asset drives the full negotiation, not a scripted demo. A representative run:
 
 ```
 Reg Lead: regulatory pod deliberating (3 members)
@@ -171,32 +179,32 @@ The full pods debate runs end to end on an in-process fake transport, so you can
 pnpm install
 pnpm test          # full suite, fake transport + routing + perception stubs, no keys
 pnpm typecheck
+pnpm local pods    # the pods -> board -> spine walking skeleton on the sample asset
 pnpm local         # the Immune+ campaign negotiated concurrently (perception ticks included)
 pnpm local single  # the legacy single-asset debate, for comparison
-pnpm local pods    # the opt-in pods -> board -> spine walking skeleton on the sample asset
 ```
 
 ## Run it for real
 
-Real models, no Band account needed (in-process transport, real LLMs streamed to the console):
+The live Band.ai room (the real workflow, the pods cast):
+
+```bash
+MODEL_MODE=vertex pnpm agents   # connects the 17-agent cast to band.ai on one GCP credential
+```
+
+`MODEL_MODE=vertex` runs every agent on Gemini/Vertex from a single GCP credential. Create a band.ai room, add the agents plus the human (the Compliance Lead), then post `@Conductor review <campaign name>`. Create one External agent per handle in app.band.ai (`@conductor`, `@scout`, `@claim-evidence`, `@precedent`, `@disclosure`, `@reg-lead`, `@claims-lead`, `@brand-lead`, `@us-reviewer`, `@eu-reviewer`, `@latam-reviewer`, `@brand-voice`, `@channel`, `@visual`, `@mediator`, `@remediation`, `@adjudicator`) plus a human, paste each UUID and API key into `.env`, then post a marketing asset that @mentions the Conductor. Swap `MODEL_MODE=aiml` (with `AIML_API_KEY`) to route the whole fleet through the AI/ML API instead, or `MODEL_MODE=dev` to spread across Bedrock + Vertex + Featherless.
+
+The classic cast (the portal-facing variant) backs the web console's "Run review" button. Real models, no Band account needed (in-process transport, real LLMs streamed to the console):
 
 ```bash
 # dev providers: AWS Bedrock + GCP Vertex + Featherless
-MODEL_MODE=dev BOARD_MODE=local BOARD_TOPOLOGY=pods pnpm serve
-# open http://localhost:8787, submit a campaign, watch the pods debate live
+MODEL_MODE=dev BOARD_MODE=local pnpm serve
+# open http://localhost:8787, submit a campaign, watch the review live
+pnpm serve:band                 # the console driving a live band.ai room (classic cast)
+pnpm agents:classic             # the classic Coordinator/Reconcile cast in a band.ai room
 ```
 
-Or set `AIML_API_KEY` with `MODEL_MODE=aiml` to route the whole fleet through the AI/ML API.
-
-Live band.ai room:
-
-```bash
-pnpm agents       # connects the cast to band.ai; needs one External agent per role in .env
-```
-
-Create one External agent per handle in app.band.ai (`@conductor`, `@scout`, `@claim-evidence`, `@precedent`, `@disclosure`, `@reg-lead`, `@claims-lead`, `@brand-lead`, `@us-reviewer`, `@eu-reviewer`, `@latam-reviewer`, `@brand-voice`, `@channel`, `@visual`, `@mediator`, `@remediation`, `@adjudicator`) plus a human, paste each UUID and API key into `.env`, then post a marketing asset that @mentions the Conductor.
-
-The concurrent multi-material campaign path runs in local and server modes today; driving many materials inside a single live band.ai room (the Coordinator handing out each material as a follow-up task) is a tracked follow-up. Single-material band mode is unchanged.
+The concurrent multi-material campaign path runs in local and server modes today; driving many materials inside a single live band.ai room (the Conductor handing out each material as a follow-up task) is a tracked follow-up. Single-material band mode is unchanged.
 
 ## Repo layout
 
