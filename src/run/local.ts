@@ -227,7 +227,7 @@ async function runPodsDemo(): Promise<void> {
     : { text: '', json: { stance: 'hold', rationale: 'unlawful' } }));
   const mediator: ModelClient = new StubModelClient(() => ({ text: '', json: { resolved: false, note: 'no movement', requiredDisclosure: null } }));
   const revised: ModelClient = new StubModelClient(() => ({ text: JSON.stringify({ ...asset, copy: 'softened' }) }));
-  const image: ModelClient = { model: 'stub-image', complete: async () => ({ text: '' }), generateImage: async () => ({ url: 'https://cdn.aimlapi.com/lumavida.png' }) };
+  const image: ModelClient = { model: 'stub-image', complete: async () => ({ text: '' }), generateImage: async () => ({ url: 'https://cdn.aimlapi.com/stub-image.png' }) };
 
   const models: PodBoardModels = {
     scout: empty, claim: empty, precedent: empty, disclosure: empty,

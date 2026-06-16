@@ -151,10 +151,10 @@ function BrandMark() {
   return (
     <div className="flex items-center gap-3 px-5 pb-5 pt-6">
       <span className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-accent-strong to-indigo-700 shadow-[inset_0_1px_0_rgb(255_255_255/0.25),0_8px_20px_-8px_rgb(99_102_241/0.7)]">
-        <span className="font-display text-lg italic leading-none text-white">L</span>
+        <span className="font-display text-lg italic leading-none text-white">B</span>
       </span>
       <div className="leading-tight">
-        <p className="font-display text-xl leading-none text-fg">Lumavida</p>
+        <p className="font-display text-xl leading-none text-fg">Band Review Board</p>
         <p className="eyebrow mt-1">Compliance Console</p>
       </div>
     </div>
