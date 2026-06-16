@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { transcribeMaterial } from '../api';
 import { REGION_ORDER, type BoardState, type RegionState, type RegionStatus } from '../boardState';
 import type { Material, MaterialKind } from '../types';
 
@@ -5,11 +7,16 @@ interface MaterialDetailProps {
   material: Material;
   /** The material's live/last review lane, if a review has run. */
   board?: BoardState;
+  /** Campaign + advertisement this material lives under (enables manual transcribe). */
+  campaignId?: string;
+  advertisementId?: string;
   onClose: () => void;
   /** Open the agents' debate (PipelineDiagram) for this material. */
   onViewDebate?: () => void;
   /** True while the material is in a review (enables "View debate"). */
   reviewed?: boolean;
+  /** Re-fetch the campaign after a manual transcribe so the transcript shows. */
+  onTranscribed?: () => void | Promise<void>;
 }
 
 const KIND_TONE: Record<MaterialKind, string> = {
@@ -31,12 +38,40 @@ const STATUS_TONE: Record<RegionStatus, { dot: string; text: string; label: stri
  * claim, perception artifacts, and per-region verdicts), not the agent diagram. The
  * agents' debate is one explicit click away via "View the agents' debate".
  */
-export function MaterialDetail({ material, board, onClose, onViewDebate, reviewed }: MaterialDetailProps) {
+export function MaterialDetail({ material, board, campaignId, advertisementId, onClose, onViewDebate, reviewed, onTranscribed }: MaterialDetailProps) {
   const frames = material.perception?.frames ?? [];
   const poster = frames[0] ?? material.imageUrl;
   const regions: RegionState[] = board
     ? REGION_ORDER.map((r) => board.regions[r]).filter((r): r is RegionState => Boolean(r))
     : [];
+
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcribeError, setTranscribeError] = useState<string | null>(null);
+
+  const transcript = material.perception?.transcript?.trim();
+  const hasTranscript = Boolean(transcript);
+  // A manual transcribe is possible only for a hosted video with the ids we need to
+  // re-post its bytes and refresh the campaign.
+  const canTranscribe = Boolean(material.videoUrl && campaignId && onTranscribed);
+
+  async function handleTranscribe() {
+    if (!material.videoUrl || !campaignId) return;
+    setTranscribing(true);
+    setTranscribeError(null);
+    try {
+      await transcribeMaterial({
+        campaignId,
+        ...(advertisementId ? { advertisementId } : {}),
+        materialId: material.id,
+        videoUrl: material.videoUrl,
+      });
+      await onTranscribed?.();
+    } catch (err) {
+      setTranscribeError(err instanceof Error ? err.message : 'Transcription failed.');
+    } finally {
+      setTranscribing(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
@@ -83,10 +118,49 @@ export function MaterialDetail({ material, board, onClose, onViewDebate, reviewe
           <Field label="Copy">{material.copy || <span className="text-faint">no copy</span>}</Field>
           <Field label="Claim">{material.claim || <span className="text-faint">no claim</span>}</Field>
 
-          {material.perception ? (
+          {/* Transcript: captured at upload time for videos. Always shown when present;
+              an empty state + manual Transcribe for a video that has no transcript yet. */}
+          {hasTranscript || material.videoUrl ? (
+            <div className="space-y-2 rounded-xl border border-violet-400/25 bg-violet-500/[0.06] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-mono text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">Transcript</p>
+                {!hasTranscript && canTranscribe ? (
+                  <button
+                    type="button"
+                    onClick={handleTranscribe}
+                    disabled={transcribing}
+                    className="btn border border-violet-400/30 bg-violet-500/10 px-2.5 py-1 text-xs text-violet-200 hover:bg-violet-500/15 disabled:opacity-60"
+                  >
+                    {transcribing ? 'Transcribing…' : 'Transcribe'}
+                  </button>
+                ) : null}
+              </div>
+              {hasTranscript ? (
+                <div className="text-sm leading-relaxed text-fg/90">{transcript}</div>
+              ) : transcribing ? (
+                <p className="inline-flex items-center gap-1.5 text-xs text-violet-200/80">
+                  <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet-400" />
+                  Transcribing the audio…
+                </p>
+              ) : (
+                <p className="text-xs text-faint">
+                  No transcript yet.{' '}
+                  {canTranscribe
+                    ? 'Click Transcribe to extract the audio, or run a review.'
+                    : 'Run a review to perceive this video.'}
+                </p>
+              )}
+              {transcribeError ? <p className="text-xs text-danger">{transcribeError}</p> : null}
+            </div>
+          ) : null}
+
+          {/* Other perception artifacts produced during a review (transcript shown above). */}
+          {material.perception &&
+          (material.perception.visualDescription ||
+            material.perception.onScreenText ||
+            (material.perception.detectedClaims && material.perception.detectedClaims.length > 0)) ? (
             <div className="space-y-2 rounded-xl border border-violet-400/25 bg-violet-500/[0.06] p-3">
               <p className="font-mono text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">What the agents perceived</p>
-              {material.perception.transcript ? <Field label="Transcript">{material.perception.transcript}</Field> : null}
               {material.perception.visualDescription ? <Field label="Visual description">{material.perception.visualDescription}</Field> : null}
               {material.perception.onScreenText ? <Field label="On-screen text">{material.perception.onScreenText}</Field> : null}
               {material.perception.detectedClaims && material.perception.detectedClaims.length > 0 ? (
