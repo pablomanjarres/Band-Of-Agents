@@ -13,6 +13,13 @@ export interface PodChallenge {
   peerRationale: string;
 }
 
+/** One market-tailored version produced when regulations collide irreconcilably. */
+export interface SplitVersion {
+  region: string;
+  copy: string;
+  imageUrl?: string;
+}
+
 interface RoomState {
   asset?: ContentAsset;
   findings: Map<string, Finding[]>; // source/region key -> findings
@@ -21,6 +28,10 @@ interface RoomState {
   mediation?: MediationResult;
   challenges: Map<string, PodChallenge>; // region -> pending challenge
   revised?: ContentAsset;
+  // Market-split: the per-market plan the Adjudicator hands Remediation, and the
+  // tailored versions Remediation hands back, when one shared version is impossible.
+  splitPlan?: { region: string; findings: Finding[] }[];
+  splitVersions?: SplitVersion[];
 }
 
 export class PodHub {
@@ -62,4 +73,12 @@ export class PodHub {
   // Remediation's rewritten asset, read by the conductor on the recommit loop.
   setRevised(roomId: string, revised: ContentAsset): void { this.state(roomId).revised = revised; }
   revised(roomId: string): ContentAsset | undefined { return this.state(roomId).revised; }
+
+  // Market-split plan (Adjudicator -> Remediation): one entry per blocking market.
+  setSplitPlan(roomId: string, plan: { region: string; findings: Finding[] }[] | undefined): void { this.state(roomId).splitPlan = plan; }
+  splitPlan(roomId: string): { region: string; findings: Finding[] }[] | undefined { return this.state(roomId).splitPlan; }
+
+  // Tailored per-market versions (Remediation -> Adjudicator).
+  setSplitVersions(roomId: string, versions: SplitVersion[] | undefined): void { this.state(roomId).splitVersions = versions; }
+  splitVersions(roomId: string): SplitVersion[] | undefined { return this.state(roomId).splitVersions; }
 }
