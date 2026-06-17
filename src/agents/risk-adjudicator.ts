@@ -126,8 +126,21 @@ export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler 
         head = `Full report (rendered, with images): ${url}\n\n`;
       } catch { /* fall back to the inline report if publishing fails */ }
     }
+    // A one-line TL;DR on top, so the long report is scannable at a glance.
+    const name = asset?.name ?? asset?.id ?? 'campaign';
+    const claimMap = new Map<string, boolean>();
+    for (const src of sources) for (const f of src.findings ?? []) { const k = (f.claim ?? '').trim().toLowerCase(); if (!k) continue; claimMap.set(k, (claimMap.get(k) ?? false) || f.severity === 'block'); }
+    const flagged = claimMap.size;
+    const blocking = [...claimMap.values()].filter(Boolean).length;
+    const nFixes = fixes?.length ?? 0;
+    const tldrByDecision: Record<ReportDecision, string> = {
+      asking: `TL;DR: ${name} — ${flagged} claim(s) flagged, ${blocking} blocking. ${s.pendingSplit ? 'These markets cannot share one compliant version; reply "yes" to ship one version per market, or "reject".' : 'Reply "yes" to fix and re-review, or "reject".'}`,
+      published: `TL;DR: ${name} — PUBLISHED${nFixes > 1 ? ` as ${nFixes} market-tailored version(s)` : nFixes ? ' with a fix' : blocking ? '' : ', nothing blocking'}.`,
+      spiked: `TL;DR: ${name} — SPIKED.`,
+      escalated: `TL;DR: ${name} — ESCALATED, needs your ruling on ${blocking} blocking claim(s).`,
+    };
     const human = matchParticipant(await tools.getParticipants(), opts.humanHandle, 'user');
-    await tools.sendMessage(head + report + tail, human ? [{ id: human.id, handle: human.handle }] : []);
+    await tools.sendMessage(`${tldrByDecision[decision]}\n\n${head}${report}${tail}`, human ? [{ id: human.id, handle: human.handle }] : []);
   };
 
   // Tell the Conductor a material reached a terminal, so a multi-material campaign
