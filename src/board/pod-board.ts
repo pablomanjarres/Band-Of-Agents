@@ -42,6 +42,8 @@ export interface PodBoardConfig {
   lookupCampaign?: (query: string) => (ContentAsset | undefined) | Promise<ContentAsset | undefined>;
   /** Resolve a campaign / advertisement to its materials so the Conductor reviews each in turn. */
   lookupMaterials?: (query: string) => Promise<{ name: string; materials: ContentAsset[] } | undefined> | ({ name: string; materials: ContentAsset[] } | undefined);
+  /** Ms the Conductor waits after self-assembling the cast before the first dispatch (live: ~9000; tests: 0). */
+  settleMs?: number;
   /** Read the live rulebook per region (UI overrides) so edits apply to the next review. */
   getRulebook?: (region: string) => Rulebook | undefined;
   /** Recent human-ruling precedents fed into the region reviewers' prompts. */
@@ -109,7 +111,7 @@ export async function connectPodBoardAgents(t: BandTransport, cfg: PodBoardConfi
   const ensureAgents = cfg.compact
     ? ['Claims Lead', 'Regulatory Lead', 'US Reviewer', 'EU Reviewer', 'LATAM Reviewer', 'Brand Lead', 'Mediator', 'Remediation', 'Adjudicator']
     : ['Claims Lead', 'Scout', 'Claim Evidence', 'Precedent', 'Disclosure', 'Regulatory Lead', 'US Reviewer', 'EU Reviewer', 'LATAM Reviewer', 'Brand Lead', 'Brand Voice', 'Channel Fit', 'Visual', 'Mediator', 'Remediation', 'Adjudicator'];
-  await t.connectAgent({ agentId: 'cond', name: 'Conductor', handle: '@conductor', onMessage: makeConductor({ podLeadHandles: ['@claims-lead', '@reg-lead', '@brand-lead'], primeHandles: ['@remediation'], hub, ensureAgents, ...(cfg.lookupCampaign ? { lookupCampaign: cfg.lookupCampaign } : {}), ...(cfg.lookupMaterials ? { lookupMaterials: cfg.lookupMaterials } : {}) }) });
+  await t.connectAgent({ agentId: 'cond', name: 'Conductor', handle: '@conductor', onMessage: makeConductor({ podLeadHandles: ['@claims-lead', '@reg-lead', '@brand-lead'], primeHandles: ['@remediation'], hub, ensureAgents, ...(cfg.lookupCampaign ? { lookupCampaign: cfg.lookupCampaign } : {}), ...(cfg.lookupMaterials ? { lookupMaterials: cfg.lookupMaterials } : {}), ...(cfg.settleMs !== undefined ? { settleMs: cfg.settleMs } : {}) }) });
 
   // Claims pod: full (lead + 4 members) or, when compact, one solo reviewer.
   if (cfg.compact) {

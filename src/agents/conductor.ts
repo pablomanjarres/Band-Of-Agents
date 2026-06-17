@@ -31,6 +31,12 @@ export interface ConductorOptions {
    * Agents already present are skipped; a failure to add one is best-effort.
    */
   ensureAgents?: string[];
+  /**
+   * Milliseconds to wait after self-assembling the cast (recruiting missing agents)
+   * before the first dispatch, so freshly added agents have time to subscribe to the
+   * room and do not miss it. Default 0 (no wait); the live runner sets a real value.
+   */
+  settleMs?: number;
 }
 
 // Is an agent with this name already in the room? Match the exact name, or its
@@ -49,18 +55,35 @@ export function makeConductor(opts: ConductorOptions): AgentHandler {
   const queues = new Map<string, ReviewQueue>();
 
   // Pull any missing cast member into the room (best effort). Runs once at the start
-  // of a campaign, not per material.
-  const ensureCast = async (tools: RoomTools): Promise<void> => {
-    if (!opts.ensureAgents?.length) return;
+  // of a campaign, not per material. Returns how many were newly recruited.
+  const ensureCast = async (tools: RoomTools): Promise<number> => {
+    if (!opts.ensureAgents?.length) return 0;
     const present = await tools.getParticipants();
+    let recruited = 0;
     for (const name of opts.ensureAgents) {
       if (hasAgent(present, name)) continue;
       try {
         await tools.addParticipant(name, 'member');
+        recruited += 1;
         await tools.sendEvent(`Recruited ${name} into the room.`, 'recruited', {});
       } catch (err) {
         await tools.sendEvent(`Could not add ${name}: ${(err as Error)?.message ?? 'error'}`, 'log', {});
       }
+    }
+    return recruited;
+  };
+
+  // Assemble the cast, and if anyone was just added, wait for them to subscribe to
+  // the room before dispatching. A freshly added agent is not yet subscribed, so a
+  // dispatch sent immediately would race and be missed (the Regulatory reviewers in
+  // particular). One settle pause (a bit over the 8s re-subscribe interval) makes
+  // the whole cast reliably receive the first dispatch.
+  const assembleAndSettle = async (tools: RoomTools): Promise<void> => {
+    const recruited = await ensureCast(tools);
+    const settle = opts.settleMs ?? 0;
+    if (recruited > 0 && settle > 0) {
+      await tools.sendEvent(`Assembling the review cast (${recruited} agent(s)); starting in a moment.`, 'recruited', {});
+      await new Promise((resolve) => setTimeout(resolve, settle));
     }
   };
 
@@ -145,7 +168,7 @@ export function makeConductor(opts: ConductorOptions): AgentHandler {
           if (res.materials.length > 1) {
             await tools.sendEvent(`Reviewing "${res.name}": ${res.materials.length} materials, one at a time.`, 'intake', {});
           }
-          await ensureCast(tools);
+          await assembleAndSettle(tools);
           await reviewCurrent(roomId, tools, q);
           return;
         }
@@ -153,7 +176,7 @@ export function makeConductor(opts: ConductorOptions): AgentHandler {
       // Fallback: a single saved campaign (or raw copy).
       const single = opts.lookupCampaign ? (await opts.lookupCampaign(message.content)) ?? toAsset(message.content) : tryParseAsset(message.content);
       if (single) {
-        await ensureCast(tools);
+        await assembleAndSettle(tools);
         await dispatch(roomId, tools, single);
       }
       return;

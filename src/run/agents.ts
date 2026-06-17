@@ -249,6 +249,7 @@ async function main(): Promise<void> {
     publishArtifact,
     lookupCampaign,
     lookupMaterials,
+    settleMs: 9000,
     getRulebook,
     getPrecedents,
     compact: true,
