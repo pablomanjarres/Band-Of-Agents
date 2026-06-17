@@ -109,36 +109,52 @@ async function main(): Promise<void> {
   const BACKEND = (process.env.REPORT_BACKEND ?? 'https://band-backend-1068570846548.us-east1.run.app').replace(/\/+$/, '');
   const APP = (process.env.PUBLIC_BASE_URL ?? 'https://artifact-viewer-one.vercel.app').replace(/\/+$/, '');
 
-  // Resolve "@conductor review <name>" against the backend's campaigns (flat assets
-  // plus each campaign's first material), so anything in the dashboard is reviewable.
-  // Local data/assets.json is the offline fallback only.
+  // Resolve "@conductor review <campaign> [advertisement]" against the backend, so
+  // anything in the dashboard is reviewable. A flat asset reviews as one material; a
+  // campaign reviews ALL its materials (or just one advertisement's, when the query
+  // names an ad), one at a time. Local data/assets.json is the offline fallback.
   type CampaignSummary = { id?: string; name?: string; markets?: string[] };
-  type CampaignFull = { id?: string; name?: string; advertisements?: { materials?: ContentAsset[] }[] };
-  const lookupCampaign = async (query: string): Promise<ContentAsset | undefined> => {
+  type AdFull = { id?: string; name?: string; materials?: ContentAsset[] };
+  type CampaignFull = { id?: string; name?: string; advertisements?: AdFull[] };
+  const FILLER = new Set(['the', 'a', 'an', 'review', 'campaign', 'advertisement', 'ad', 'ads', 'please', 'for', 'and', 'of', 'material', 'materials']);
+  const tok = (s: string): string[] => s.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+
+  const lookupMaterials = async (query: string): Promise<{ name: string; materials: ContentAsset[] } | undefined> => {
     try {
       const [a, c] = await Promise.all([
         fetch(`${BACKEND}/api/assets`).then((r) => r.json() as Promise<{ assets?: ContentAsset[] }>).catch(() => ({ assets: [] as ContentAsset[] })),
         fetch(`${BACKEND}/api/campaigns`).then((r) => r.json() as Promise<{ campaigns?: CampaignSummary[] }>).catch(() => ({ campaigns: [] as CampaignSummary[] })),
       ]);
-      // Match across flat assets AND campaign summaries in ONE pass, so the best name
-      // match wins (not whichever list is checked first). The campaign list is
-      // summaries only; if a campaign wins, fetch its full record for the first
-      // material (the ContentAsset the Conductor reviews).
+      // Best name match across flat assets AND campaign summaries in one pass.
       const assets: ContentAsset[] = Array.isArray(a.assets) ? a.assets : [];
       const summaries: ContentAsset[] = (Array.isArray(c.campaigns) ? c.campaigns : [])
         .map((s) => ({ id: s.id ?? '', name: s.name ?? '', channel: '', markets: s.markets ?? [], copy: '', claim: '' }));
       const winner = findCampaignByName([...assets, ...summaries], query);
       if (winner) {
-        if (assets.some((x) => x.id === winner.id)) return winner; // a flat asset, ready to review
+        const direct = assets.find((x) => x.id === winner.id);
+        if (direct) return { name: direct.name ?? direct.id, materials: [direct] }; // flat asset = one material
+        // A campaign: fetch the full record; review one advertisement (if the query
+        // names it) or every material across all advertisements.
         const full = await fetch(`${BACKEND}/api/campaigns/${winner.id}`).then((r) => r.json() as Promise<{ campaign?: CampaignFull }>).catch(() => ({ campaign: undefined }));
-        const mat = full.campaign?.advertisements?.[0]?.materials?.[0];
-        if (mat) return { ...mat, id: full.campaign?.id ?? mat.id, name: full.campaign?.name ?? mat.name };
+        const camp = full.campaign;
+        const ads: AdFull[] = Array.isArray(camp?.advertisements) ? camp.advertisements : [];
+        const campTokens = new Set(tok(camp?.name ?? ''));
+        const qTokens = tok(query).filter((t) => !FILLER.has(t) && !campTokens.has(t));
+        let chosen: AdFull | undefined; let best = 0;
+        for (const ad of ads) {
+          const score = qTokens.filter((t) => new Set(tok(ad.name ?? '')).has(t)).length;
+          if (score > best) { best = score; chosen = ad; }
+        }
+        const materials = (chosen ? chosen.materials : ads.flatMap((ad) => ad.materials ?? [])) ?? [];
+        if (materials.length) return { name: chosen ? `${camp?.name} / ${chosen.name}` : (camp?.name ?? winner.name ?? winner.id), materials };
       }
     } catch (err) {
       console.warn(`[campaigns] backend fetch failed (${(err as Error)?.message ?? err}); using local data`);
     }
-    return findCampaignByName(store.listAssets(), query);
+    const local = findCampaignByName(store.listAssets(), query);
+    return local ? { name: local.name ?? local.id, materials: [local] } : undefined;
   };
+  const lookupCampaign = async (query: string): Promise<ContentAsset | undefined> => (await lookupMaterials(query))?.materials[0];
 
   // Serve regenerated promo images over HTTP so Remediation can post a short,
   // clickable link into the Band room (a base64 data URL is too large for band.ai,
@@ -232,6 +248,7 @@ async function main(): Promise<void> {
     hostImage,
     publishArtifact,
     lookupCampaign,
+    lookupMaterials,
     getRulebook,
     getPrecedents,
     compact: true,
