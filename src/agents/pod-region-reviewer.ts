@@ -134,22 +134,11 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
     const target = await resolveReportTarget(tools, opts.reportToHandle, message);
     if (opts.hub) {
       opts.hub.setFinding(message.roomId, opts.region, review.findings);
-      const detail = review.findings.length ? `: ${topRegionFindings(review.findings)}` : '';
-      await tools.sendMessage(`${opts.reviewerName}: ${review.findings.length} finding(s)${blocking ? `, ${blocking} blocking` : ''}${detail}.`, [target]);
+      await tools.sendMessage(`${opts.reviewerName}: ${review.findings.length} finding(s)${blocking ? `, ${blocking} blocking` : ''}. Full detail in the report.`, [target]);
     } else {
       await tools.sendMessage(JSON.stringify(review), [target]);
     }
   };
-}
-
-// A short, room-friendly summary of the first finding or two, so the chat shows
-// WHAT was flagged, not just a count.
-function topRegionFindings(findings: ReviewResult['findings']): string {
-  const text = (f: ReviewResult['findings'][number]): string => {
-    const s = f.rationale || f.claim || f.category || f.ruleId || 'issue';
-    return s.length > 90 ? `${s.slice(0, 87)}...` : s;
-  };
-  return findings.slice(0, 2).map(text).join('; ');
 }
 
 function buildReviewPrompt(

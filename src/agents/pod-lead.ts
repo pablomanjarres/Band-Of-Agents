@@ -88,15 +88,6 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
     expectedKeys.delete(roomId);
   };
 
-  const topPodFindings = (findings: Finding[]): string =>
-    findings
-      .slice(0, 2)
-      .map((f) => {
-        const s = f.rationale || f.category || f.ruleId || 'issue';
-        return s.length > 90 ? `${s.slice(0, 87)}...` : s;
-      })
-      .join('; ');
-
   // Solo mode: the lead reviews the asset itself (one model call) and files the pod
   // finding, with no members. Graceful on a model error so the spine still gets a
   // finding and the review concludes.
@@ -127,8 +118,7 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
     if (!target) return;
     if (opts.hub) {
       opts.hub.setPodFinding(roomId, opts.pod, pf);
-      const detail = findings.length ? `: ${topPodFindings(findings)}` : '';
-      await tools.sendMessage(`${opts.pod} pod filed: ${findings.length} finding(s), 0 conflict(s)${detail}.`, [{ id: target.id, handle: target.handle }]);
+      await tools.sendMessage(`${opts.pod} pod filed: ${findings.length} finding(s), 0 conflict(s). Full detail in the report.`, [{ id: target.id, handle: target.handle }]);
     } else {
       await tools.sendMessage(JSON.stringify(pf), [{ id: target.id, handle: target.handle }]);
     }
