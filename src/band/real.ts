@@ -192,8 +192,9 @@ export class RealBandTransport implements BandTransport {
     // handler (bootstrapRoomMessage routes through the adapter with working tools).
     // This makes the FIRST post in a new room reliable, no re-post needed.
     // Only re-inject the LATEST message of a room, and only if it is a still-unanswered
-    // @mention to us within a recent window. That catches a just-missed post (human ->
-    // Conductor, or Conductor -> a late-joined pod) without replaying old history.
+    // @mention to us FROM A HUMAN within a recent window. That catches the one race that
+    // actually bites (a human's first post to the Conductor in a brand-new room) without
+    // replaying agent-to-agent dispatches (which deliver live and would otherwise cascade).
     const CATCHUP_WINDOW_MS = 12 * 60 * 1000;
     const catchUp = async (): Promise<void> => {
       const rt = (agent as { runtime?: AgentRuntimeLike }).runtime;
@@ -214,9 +215,10 @@ export class RealBandTransport implements BandTransport {
         const latest = [...data].sort((a, b) => new Date(a.inserted_at).getTime() - new Date(b.inserted_at).getTime())[data.length - 1];
         if (!latest?.id || seen.has(latest.id)) continue;
         if (latest.sender_id === config.agentId) { markSeen(latest.id); continue; } // our own message
+        const fromHuman = String(latest.sender_type ?? '').toLowerCase() === 'user';
         const mine = (latest.metadata?.mentions ?? []).some((x) => x?.id === config.agentId);
         const fresh = Date.now() - new Date(latest.inserted_at).getTime() < CATCHUP_WINDOW_MS;
-        if (!mine || !fresh) { markSeen(latest.id); continue; }
+        if (!fromHuman || !mine || !fresh) { markSeen(latest.id); continue; } // human @mention to us only
         dbg(`${opts.name} catch-up replay <- ${latest.sender_name ?? latest.sender_type}: ${(latest.content ?? '').slice(0, 80)}`);
         try {
           await rt.bootstrapRoomMessage(roomId, {
