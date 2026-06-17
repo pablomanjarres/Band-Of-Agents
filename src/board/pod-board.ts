@@ -2,6 +2,7 @@
 import type { BandTransport } from '../band/types';
 import type { ModelClient } from '../models/client';
 import type { BrandDna, ContentAsset, Rulebook } from '../domain/types';
+import type { NewArtifact } from '../domain/artifact';
 import { makeConductor } from '../agents/conductor';
 import { makePodLead } from '../agents/pod-lead';
 import { makeRegionReviewer } from '../agents/pod-region-reviewer';
@@ -33,7 +34,9 @@ export interface PodBoardConfig {
   brand: BrandDna;
   rulebooks: { us: Rulebook; eu: Rulebook; latam: Rulebook };
   models: PodBoardModels;
-  hostImage?: (url: string) => string;
+  hostImage?: (url: string) => string | Promise<string>;
+  /** Publish a report/artifact and get back a viewer URL the Adjudicator links in chat. */
+  publishArtifact?: (input: NewArtifact) => { id: string; url: string } | Promise<{ id: string; url: string }>;
   logPrecedent?: (p: { claim: string; decision: string; note: string }) => void;
   /** Resolve a human's free-text reference to a saved campaign (for the Conductor). */
   lookupCampaign?: (query: string) => ContentAsset | undefined;
@@ -97,7 +100,14 @@ export async function connectPodBoardAgents(t: BandTransport, cfg: PodBoardConfi
   // Shared in-process data hub: agents keep structured data here and post prose.
   const hub = new PodHub();
 
-  await t.connectAgent({ agentId: 'cond', name: 'Conductor', handle: '@conductor', onMessage: makeConductor({ podLeadHandles: ['@claims-lead', '@reg-lead', '@brand-lead'], primeHandles: ['@remediation'], hub, ...(cfg.lookupCampaign ? { lookupCampaign: cfg.lookupCampaign } : {}) }) });
+  // The full cast minus the Conductor itself. On kickoff the Conductor pulls any of
+  // these not already present into the room (add_participant), so a human only adds
+  // the Conductor and posts; it self-assembles the rest.
+  // Exact registered agent NAMES (add_participant resolves by name, not handle).
+  const ensureAgents = cfg.compact
+    ? ['Claims Lead', 'Regulatory Lead', 'US Reviewer', 'EU Reviewer', 'LATAM Reviewer', 'Brand Lead', 'Mediator', 'Remediation', 'Adjudicator']
+    : ['Claims Lead', 'Scout', 'Claim Evidence', 'Precedent', 'Disclosure', 'Regulatory Lead', 'US Reviewer', 'EU Reviewer', 'LATAM Reviewer', 'Brand Lead', 'Brand Voice', 'Channel Fit', 'Visual', 'Mediator', 'Remediation', 'Adjudicator'];
+  await t.connectAgent({ agentId: 'cond', name: 'Conductor', handle: '@conductor', onMessage: makeConductor({ podLeadHandles: ['@claims-lead', '@reg-lead', '@brand-lead'], primeHandles: ['@remediation'], hub, ensureAgents, ...(cfg.lookupCampaign ? { lookupCampaign: cfg.lookupCampaign } : {}) }) });
 
   // Claims pod: full (lead + 4 members) or, when compact, one solo reviewer.
   if (cfg.compact) {
@@ -132,5 +142,5 @@ export async function connectPodBoardAgents(t: BandTransport, cfg: PodBoardConfi
   await t.connectAgent({ agentId: 'rem', name: 'Remediation', handle: '@remediation', onMessage: makeRemediation({ brand: cfg.brand, copyModel: m.remediationCopy, imageModel: m.image, reportToHandle: '@conductor', podHub: hub, ...(cfg.hostImage ? { hostImage: cfg.hostImage } : {}) }) });
 
   // Decision spine
-  await t.connectAgent({ agentId: 'adj', name: 'Risk Adjudicator', handle: '@adjudicator', onMessage: makeRiskAdjudicator({ expectedPods: ['claims', 'regulatory', 'brand'], mediatorHandle: '@mediator', remediationHandle: '@remediation', humanHandle: '@compliance-lead', maxRecommits: 1, hub, ...(cfg.logPrecedent ? { logPrecedent: cfg.logPrecedent } : {}) }) });
+  await t.connectAgent({ agentId: 'adj', name: 'Risk Adjudicator', handle: '@adjudicator', onMessage: makeRiskAdjudicator({ expectedPods: ['claims', 'regulatory', 'brand'], mediatorHandle: '@mediator', remediationHandle: '@remediation', humanHandle: '@compliance-lead', maxRecommits: 1, hub, ...(cfg.logPrecedent ? { logPrecedent: cfg.logPrecedent } : {}), ...(cfg.publishArtifact ? { publishArtifact: cfg.publishArtifact } : {}) }) });
 }
