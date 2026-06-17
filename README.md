@@ -75,9 +75,9 @@ The pods flow, step by step:
 1. Post the asset and @mention the Conductor. The Conductor fans it out to the three pods.
 2. Each pod lead delegates to its members, who file findings. In the Regulatory pod, when reviewers split on the same span, the Reg Lead runs a one-round rebuttal: each blocking region holds or concedes, on the record. That is the genuine agent-to-agent debate, regions rebutting each other, not a linear pipeline.
 3. Each pod files one consolidated finding to the board, carrying its findings and any unresolved conflicts.
-4. The Risk Adjudicator scores the board. On a conflict it consults the Mediator, who brokers the smallest resolution or reports a deadlock.
-5. If the conflict still will not resolve, one Remediation recommit runs: Remediation rewrites the blocked copy and regenerates a localized image, then the revised asset recommits through the Conductor and is re-reviewed.
-6. Still unresolved: the Risk Adjudicator escalates to the human (the Compliance Lead), the only escalation path. The human's ruling is logged as precedent.
+4. The Risk Adjudicator scores the board. On a cross-pod conflict it consults the Mediator, who brokers the smallest resolution or reports a deadlock.
+5. If anything still blocks, the Adjudicator does not fix it silently: it tells the human exactly what is wrong and asks permission to fix it. On "yes", one Remediation pass rewrites the blocked copy, regenerates an on-brand image, and posts the new copy plus the image link into the room, then recommits the revised asset through the Conductor for a re-review. On "reject", the campaign is spiked.
+6. If the rewrite still will not clear, the Risk Adjudicator escalates the deadlock to the human (the Compliance Lead) for a final ruling, logged as precedent. When nothing blocks, it publishes with a short summary of what it checked.
 7. The spine ends in a terminal state: published, spiked, or escalated. The spine is deterministic (no model call), so every verdict is auditable.
 
 The classic flow (the portal-facing variant, reached with `pnpm serve`, `pnpm serve:band`, or `pnpm agents:classic`) runs per material, all materials concurrently:

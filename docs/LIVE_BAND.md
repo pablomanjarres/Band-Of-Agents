@@ -32,25 +32,37 @@ The originality is in the conflict, not the pipeline. The reviewer agents have c
 
 1. A human posts the asset and @mentions the **Conductor**.
 2. The Conductor fans out to the 3 pods.
-3. Each pod lead delegates to its members, who file findings.
-4. The Regulatory pod debates conflicts via the one-round rebuttal (hold / concede).
-5. Each pod files one consolidated finding (with its conflicts) to the board.
-6. The **Risk Adjudicator** scores. On a conflict it consults the **Mediator**.
-7. If unresolved, ONE **Remediation** recommit (rewrite + regenerate image) sends the revised asset back through the Conductor for a re-review.
-8. If still unresolved after the recommit cap, escalate to the human.
-9. Terminal: **published** or **spiked**.
+3. Each pod reviews and files findings. The Regulatory pod debates conflicts via a one-round rebuttal (hold / concede).
+4. Each pod files one consolidated finding (with its conflicts) to the board.
+5. The **Risk Adjudicator** scores. On a cross-pod conflict it consults the **Mediator**.
+6. If anything still blocks, the Adjudicator does NOT fix it silently. It posts a full **report** (every flagged claim, by reviewer, with the rule it cites, the reason, and any required disclosure) and ASKS PERMISSION to fix it.
+7. The human replies **"yes"**:
+   - **One shared version possible** (the markets do not fundamentally collide): ONE **Remediation** pass rewrites the blocked copy, regenerates an on-brand image, posts the new copy + image link, and recommits for a re-review.
+   - **Markets collide irreconcilably** (a span one market bans but another allows, e.g. a substantiated "clinically proven" claim the US permits with a disclosure but the EU bans): Remediation produces **one market-tailored version per market** (each with its own copy + image link). Passing markets ship the original; blocking markets ship their tailored version. The campaign **publishes per-market**.
+8. The human replies **"reject"**: the campaign is spiked.
+9. If a shared rewrite still blocks after the recommit cap, the Adjudicator escalates the deadlock to the human for a final ruling.
+10. Terminal: a single **published** / **spiked**, or a **per-market** publish (US / EU / LATAM versions).
+11. At every terminal (and the permission ask) the Adjudicator posts the **final report** as the last word, so the verdict, the rules violated, the fixes, and the material links are never buried mid-thread. A clean campaign publishes with a "no findings" report rather than a bare "0 findings".
+
+The report is also published as an **artifact** and each report message leads with `Full report (rendered, with images): <app>/a/<id>`, a clickable link that opens in the **deployed dashboard** (the artifact-viewer SPA renders it by kind). The `pnpm agents` runner POSTs the report to the backend (`REPORT_BACKEND`, default the Cloud Run service) and the promo images to `POST /api/images`, so the link and the images resolve from anywhere, not just the machine running the agents. `PUBLIC_BASE_URL` (default `https://artifact-viewer-one.vercel.app`) is the origin used in the links. If the backend is unreachable it falls back to a local viewer on `http://localhost:8788`.
 
 Example room lines you will see:
 
 ```
-Conductor: Reviewing the campaign for US, EU, LATAM plus brand. Pods, please run your reviews.
-Claims Lead: claims pod deliberating (4 members)
+Conductor: Reviewing the "VitaBoost Focus Q3" campaign for US, EU, LATAM plus brand. Pods, please run your reviews.
+Claims Reviewer: claims pod filed: 3 finding(s), 0 conflict(s): "clinically proven to boost your immune system" is unsubstantiated...
 EU Reviewer rebuts on 'clinically proven...': hold
-Reg Lead: regulatory pod filed: 8 findings, 3 conflicts
-Risk Adjudicator: 3 conflicts, consulting mediator
+Reg Lead: regulatory pod filed: 4 finding(s), 1 conflict(s).
+Risk Adjudicator: 1 conflict(s), consulting mediator
 Mediator: no movement
-Adjudicator: remediate (attempt 1)
-Adjudicator: deadlock, escalating
+Adjudicator -> @compliance-lead: here is what is blocking publication:
+  - BLOCK "9 out of 10 users felt healthier": testimonial efficacy claim without substantiation
+  - CONFLICT "clinically proven to boost your immune system": blocked by EU, passed by US
+  Want me to fix these claims and regenerate the promo image? Reply "yes" to remediate, or "reject" to spike.
+Compliance Lead: yes
+Remediation: Here are the proposed fixes: "Support your everyday wellness with VitaBoost Focus..."
+  New promotional image: http://localhost:8788/api/images/<id>.png
+Risk Adjudicator: PUBLISHED   (or: deadlock after remediation, escalating)
 ```
 
 ### How to run

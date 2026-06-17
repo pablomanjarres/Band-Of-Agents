@@ -29,12 +29,12 @@ When regions clash on a claim, the **Regulatory pod runs a ONE-ROUND rebuttal**.
 
 ### The board
 - **Mediator.** Brokers cross-pod conflicts into the smallest resolution that satisfies every mandate, or reports a deadlock when there is no such resolution.
-- **Remediation.** On an unresolved conflict, rewrites the blocked copy and regenerates a localized, on-brand image, then recommits the revised asset for re-review. This closes a real bidirectional loop, not a one-shot pass.
+- **Remediation.** Once the human approves a fix, rewrites the blocked copy and regenerates a localized, on-brand image, posts the rewritten copy and the new image link into the room, then recommits the revised asset for re-review. This closes a real bidirectional loop, not a one-shot pass.
 
 ### The spine (deterministic, no model calls)
 - **Conductor.** Fans the asset out to the three pods and owns the single Remediation recommit. The only agent a human tags.
 - **Pod leads.** Delegate to members, collect findings, file one consolidated PodFinding each.
-- **Risk Adjudicator.** Scores the board, runs the mediation / remediation cycle, and drives the terminal decision: **published**, **spiked**, or **escalated**.
+- **Risk Adjudicator.** Scores the board, surfaces what is blocking and asks the human to approve a fix or reject, runs the approved mediation / remediation cycle, and drives the terminal decision: **published**, **spiked**, or **escalated**.
 
 ### The flow (intake to terminal)
 1. A human posts the asset and @mentions the **Conductor**.
@@ -42,13 +42,18 @@ When regions clash on a claim, the **Regulatory pod runs a ONE-ROUND rebuttal**.
 3. Each pod lead delegates to its members, who file findings.
 4. The Regulatory pod debates conflicts via the one-round rebuttal (hold / concede).
 5. Each pod files one consolidated PodFinding (with its conflicts) to the board.
-6. The **Risk Adjudicator** scores. On a conflict it consults the **Mediator** for the smallest resolution.
-7. If still unresolved, ONE **Remediation** recommit (rewrite + regenerate image) sends the revised asset back through the Conductor for a re-review.
-8. If still unresolved after the recommit cap, escalate to the human.
-9. Terminal: **published** or **spiked**.
+6. The **Risk Adjudicator** scores. On a cross-pod conflict it consults the **Mediator** for the smallest resolution.
+7. If anything still blocks, the Adjudicator does NOT fix it silently: it posts a full **report** (every flagged claim, by reviewer, with the rule, reason, and required disclosure) and asks permission to fix it.
+8. On the human's **yes**:
+   - If one shared compliant version is possible, ONE **Remediation** pass (rewrite + regenerate image) posts the new copy + image link and recommits for a re-review.
+   - If the markets collide irreconcilably (a span one market bans but another allows), Remediation produces **one market-tailored version per market** and the campaign **publishes per-market** (passing markets ship the original). This is the localization payoff of the "legal in the US, a violation in the EU" thesis: no lowest-common-denominator version.
+   On **reject**, the asset is spiked.
+9. If a shared rewrite still blocks after the recommit cap, escalate the deadlock to the human for a final ruling.
+10. Terminal: a single **published** / **spiked**, or a **per-market** publish. At every terminal (and the ask) the Adjudicator posts the **final report** as the last word, so the verdict, the rules violated, the fixes, and material links are never buried.
 
-## When the human enters (escalation triggers only, not every asset)
-- A genuine deadlock the agents cannot reconcile, even after mediation and the one Remediation recommit.
+## When the human enters (the permission gate and escalation, not every asset)
+- The permission gate: before any fix, the Adjudicator surfaces what is blocking and asks the human to approve the rewrite (yes) or spike it (reject).
+- A genuine deadlock the agents cannot reconcile, even after the approved Remediation recommit.
 - A hard legal or claim violation over a risk threshold.
 - Low reviewer confidence.
 
