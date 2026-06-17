@@ -13,7 +13,7 @@ export interface ConductorOptions {
    * "@conductor review VitaBoost Focus") instead of pasting JSON. When set, a
    * human message also accepts a matched campaign, or raw copy as a fallback.
    */
-  lookupCampaign?: (query: string) => ContentAsset | undefined;
+  lookupCampaign?: (query: string) => (ContentAsset | undefined) | Promise<ContentAsset | undefined>;
   /** When set, stash the asset here and dispatch plain English (keeps the room readable). */
   hub?: PodHub;
   /**
@@ -49,7 +49,7 @@ export function makeConductor(opts: ConductorOptions): AgentHandler {
     if (!asset && message.senderType === 'agent') asset = opts.hub?.revised(message.roomId) ?? null;
     // A human can name a saved campaign (or paste raw copy) instead of JSON.
     if (!asset && message.senderType === 'user' && opts.lookupCampaign) {
-      asset = opts.lookupCampaign(message.content) ?? toAsset(message.content);
+      asset = (await opts.lookupCampaign(message.content)) ?? toAsset(message.content);
     }
     if (!asset) return;
 

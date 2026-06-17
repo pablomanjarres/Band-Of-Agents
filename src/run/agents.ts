@@ -18,6 +18,7 @@ import { connectPodBoardAgents, type PodBoardModels } from '../board/pod-board';
 import type { AgentConnection, BandTransport, ConnectOptions } from '../band/types';
 import { activeMode, describeRoutes, imageClientFor, modelFor } from '../models/route';
 import { findCampaignByName, loadBrandDna, loadRulebook } from '../domain/load';
+import type { ContentAsset } from '../domain/types';
 import { Store } from '../store/store';
 import { makePublishArtifact } from '../store/artifacts';
 import type { Artifact, NewArtifact } from '../domain/artifact';
@@ -100,10 +101,44 @@ async function main(): Promise<void> {
     mediator: modelFor('mediator'), remediationCopy: modelFor('remediation'), image: imageClientFor(),
   };
 
-  // Saved campaigns from the portal store, so a human can post
-  // "@conductor review <campaign name>" in the room instead of pasting JSON.
   const store = new Store(DATA_DIR);
-  const lookupCampaign = (query: string) => findCampaignByName(store.listAssets(), query);
+
+  // Single source of truth: the DEPLOYED backend. Campaigns shown in the Vercel UI
+  // are fetched from here so a human can review ANY of them from band.ai, and the
+  // reports the agents publish go back to the same backend (so the UI shows them).
+  const BACKEND = (process.env.REPORT_BACKEND ?? 'https://band-backend-1068570846548.us-east1.run.app').replace(/\/+$/, '');
+  const APP = (process.env.PUBLIC_BASE_URL ?? 'https://artifact-viewer-one.vercel.app').replace(/\/+$/, '');
+
+  // Resolve "@conductor review <name>" against the backend's campaigns (flat assets
+  // plus each campaign's first material), so anything in the dashboard is reviewable.
+  // Local data/assets.json is the offline fallback only.
+  type CampaignSummary = { id?: string; name?: string; markets?: string[] };
+  type CampaignFull = { id?: string; name?: string; advertisements?: { materials?: ContentAsset[] }[] };
+  const lookupCampaign = async (query: string): Promise<ContentAsset | undefined> => {
+    try {
+      const [a, c] = await Promise.all([
+        fetch(`${BACKEND}/api/assets`).then((r) => r.json() as Promise<{ assets?: ContentAsset[] }>).catch(() => ({ assets: [] as ContentAsset[] })),
+        fetch(`${BACKEND}/api/campaigns`).then((r) => r.json() as Promise<{ campaigns?: CampaignSummary[] }>).catch(() => ({ campaigns: [] as CampaignSummary[] })),
+      ]);
+      // Match across flat assets AND campaign summaries in ONE pass, so the best name
+      // match wins (not whichever list is checked first). The campaign list is
+      // summaries only; if a campaign wins, fetch its full record for the first
+      // material (the ContentAsset the Conductor reviews).
+      const assets: ContentAsset[] = Array.isArray(a.assets) ? a.assets : [];
+      const summaries: ContentAsset[] = (Array.isArray(c.campaigns) ? c.campaigns : [])
+        .map((s) => ({ id: s.id ?? '', name: s.name ?? '', channel: '', markets: s.markets ?? [], copy: '', claim: '' }));
+      const winner = findCampaignByName([...assets, ...summaries], query);
+      if (winner) {
+        if (assets.some((x) => x.id === winner.id)) return winner; // a flat asset, ready to review
+        const full = await fetch(`${BACKEND}/api/campaigns/${winner.id}`).then((r) => r.json() as Promise<{ campaign?: CampaignFull }>).catch(() => ({ campaign: undefined }));
+        const mat = full.campaign?.advertisements?.[0]?.materials?.[0];
+        if (mat) return { ...mat, id: full.campaign?.id ?? mat.id, name: full.campaign?.name ?? mat.name };
+      }
+    } catch (err) {
+      console.warn(`[campaigns] backend fetch failed (${(err as Error)?.message ?? err}); using local data`);
+    }
+    return findCampaignByName(store.listAssets(), query);
+  };
 
   // Serve regenerated promo images over HTTP so Remediation can post a short,
   // clickable link into the Band room (a base64 data URL is too large for band.ai,
@@ -113,11 +148,8 @@ async function main(): Promise<void> {
   // runs on; set PUBLIC_BASE_URL to override the origin (e.g. a tunnel).
   const imagePort = Number(process.env.IMAGE_PORT ?? 8788);
   const localBase = `http://localhost:${imagePort}`;
-  // Publish reports + images to the DEPLOYED backend so the links the Adjudicator
-  // posts open in the real dashboard (artifact-viewer), not localhost. The local
-  // server below is only a fallback host, used if the backend is unreachable.
-  const BACKEND = (process.env.REPORT_BACKEND ?? 'https://band-backend-1068570846548.us-east1.run.app').replace(/\/+$/, '');
-  const APP = (process.env.PUBLIC_BASE_URL ?? 'https://artifact-viewer-one.vercel.app').replace(/\/+$/, '');
+  // Reports + images are published to BACKEND (defined above) so the links open in
+  // the real dashboard; the local server below is only a fallback host.
   const localPublish = makePublishArtifact(store, localBase);
   const httpServer = createServer((req, res) => {
     const url = req.url ?? '';

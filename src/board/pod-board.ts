@@ -39,7 +39,7 @@ export interface PodBoardConfig {
   publishArtifact?: (input: NewArtifact) => { id: string; url: string } | Promise<{ id: string; url: string }>;
   logPrecedent?: (p: { claim: string; decision: string; note: string }) => void;
   /** Resolve a human's free-text reference to a saved campaign (for the Conductor). */
-  lookupCampaign?: (query: string) => ContentAsset | undefined;
+  lookupCampaign?: (query: string) => (ContentAsset | undefined) | Promise<ContentAsset | undefined>;
   /** Read the live rulebook per region (UI overrides) so edits apply to the next review. */
   getRulebook?: (region: string) => Rulebook | undefined;
   /** Recent human-ruling precedents fed into the region reviewers' prompts. */
