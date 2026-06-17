@@ -228,11 +228,21 @@ export interface MaterialPerception {
   frames: string[];
 }
 
+/** The result of a band.ai review, recorded on a material so the UI reflects it. */
+export interface MaterialReview {
+  decision: 'published' | 'spiked' | 'escalated';
+  reviewedAt: number;
+  reportUrl?: string;
+  reportArtifactId?: string;
+  summary?: string;
+}
+
 /** A single marketing creative inside an advertisement. */
 export interface Material extends ContentAsset {
   kind: MaterialKind;
   videoUrl?: string;
   perception?: MaterialPerception;
+  review?: MaterialReview;
 }
 
 /** A specific advertisement: a set of creatives (the materials) for one ad. */

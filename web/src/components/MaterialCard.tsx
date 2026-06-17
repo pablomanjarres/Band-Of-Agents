@@ -23,6 +23,18 @@ const STATUS_DOT: Record<RegionStatus, string> = {
   escalate: 'bg-danger',
 };
 
+// A band.ai review verdict persisted on the material (shown when no live review runs).
+const REVIEW_TONE: Record<'published' | 'spiked' | 'escalated', string> = {
+  published: 'bg-human/15 text-human ring-human/30',
+  spiked: 'bg-danger/15 text-danger ring-danger/30',
+  escalated: 'bg-warn/15 text-warn ring-warn/30',
+};
+const REVIEW_LABEL: Record<'published' | 'spiked' | 'escalated', string> = {
+  published: 'published',
+  spiked: 'spiked',
+  escalated: 'needs decision',
+};
+
 export function MaterialCard({ material, cells, onClick, selected }: MaterialCardProps) {
   const poster = material.perception?.frames?.[0] ?? material.imageUrl;
   const reviewed = Boolean(cells);
@@ -59,24 +71,45 @@ export function MaterialCard({ material, cells, onClick, selected }: MaterialCar
           <p className="mt-0.5 line-clamp-2 text-xs text-muted">{material.claim || material.copy || 'no copy'}</p>
         </div>
 
-        <div className="mt-auto flex flex-wrap gap-1.5">
-          {REGION_ORDER.map((region) => {
-            const cell = cells?.[region];
-            const status = cell?.status;
-            return (
-              <span
-                key={region}
-                className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-soft/60 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted"
-                title={status && status !== 'reviewing' ? `${region}: ${status}` : `${region}: not validated`}
+        {material.review && !reviewed ? (
+          <div className="mt-auto flex items-center gap-2">
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${REVIEW_TONE[material.review.decision]}`}>
+              {REVIEW_LABEL[material.review.decision]}
+            </span>
+            {material.review.reportUrl ? (
+              <a
+                href={material.review.reportUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-[10px] text-accent underline"
               >
-                <span className={`h-1.5 w-1.5 rounded-full ${status ? STATUS_DOT[status] : 'bg-surface-3'}`} />
-                {region}
-                {cell && cell.findings > 0 ? <span className="text-faint">{cell.findings}</span> : null}
-              </span>
-            );
-          })}
-          {!reviewed ? <span className="text-[10px] text-faint">not validated</span> : null}
-        </div>
+                view report
+              </a>
+            ) : (
+              <span className="text-[10px] text-faint">band.ai</span>
+            )}
+          </div>
+        ) : (
+          <div className="mt-auto flex flex-wrap gap-1.5">
+            {REGION_ORDER.map((region) => {
+              const cell = cells?.[region];
+              const status = cell?.status;
+              return (
+                <span
+                  key={region}
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-soft/60 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted"
+                  title={status && status !== 'reviewing' ? `${region}: ${status}` : `${region}: not validated`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${status ? STATUS_DOT[status] : 'bg-surface-3'}`} />
+                  {region}
+                  {cell && cell.findings > 0 ? <span className="text-faint">{cell.findings}</span> : null}
+                </span>
+              );
+            })}
+            {!reviewed ? <span className="text-[10px] text-faint">not validated</span> : null}
+          </div>
+        )}
       </div>
     </button>
   );
