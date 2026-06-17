@@ -1,0 +1,15 @@
+# Keep secrets, local data, deps, and tooling out of the Cloud Build upload.
+# (Explicit so it holds even when deploying from a git worktree.)
+.git
+.gitignore
+node_modules/
+**/node_modules/
+.env
+.env.*
+/data/
+data/
+*.log
+web/dist/
+dist/
+.claude/
+tasks/
