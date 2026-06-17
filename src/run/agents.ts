@@ -231,6 +231,17 @@ async function main(): Promise<void> {
     }
   };
 
+  // Record a per-material verdict on the backend so the dashboard reflects this review
+  // (status + report link), even though it ran here in the separate agents process.
+  const recordVerdict = async (input: { materialId: string; decision: 'published' | 'spiked' | 'escalated'; reportUrl?: string; reportArtifactId?: string; summary?: string }): Promise<void> => {
+    const { materialId, ...body } = input;
+    try {
+      await fetch(`${BACKEND}/api/materials/${encodeURIComponent(materialId)}/review`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    } catch (err) {
+      console.warn(`[verdict] record failed for ${materialId}: ${(err as Error)?.message ?? err}`);
+    }
+  };
+
   // Live rulebook overrides (UI edits) and recent human-ruling precedents, read
   // per review so the long-lived runner picks them up between reviews.
   const getRulebook = (region: string) =>
@@ -247,6 +258,7 @@ async function main(): Promise<void> {
     models,
     hostImage,
     publishArtifact,
+    recordVerdict,
     lookupCampaign,
     lookupMaterials,
     settleMs: 9000,

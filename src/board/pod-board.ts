@@ -37,6 +37,8 @@ export interface PodBoardConfig {
   hostImage?: (url: string) => string | Promise<string>;
   /** Publish a report/artifact and get back a viewer URL the Adjudicator links in chat. */
   publishArtifact?: (input: NewArtifact) => { id: string; url: string } | Promise<{ id: string; url: string }>;
+  /** Record the per-material verdict to the backend so the dashboard reflects the review. */
+  recordVerdict?: (input: { materialId: string; decision: 'published' | 'spiked' | 'escalated'; reportUrl?: string; reportArtifactId?: string; summary?: string }) => void | Promise<void>;
   logPrecedent?: (p: { claim: string; decision: string; note: string }) => void;
   /** Resolve a human's free-text reference to a saved campaign (for the Conductor). */
   lookupCampaign?: (query: string) => (ContentAsset | undefined) | Promise<ContentAsset | undefined>;
@@ -146,5 +148,5 @@ export async function connectPodBoardAgents(t: BandTransport, cfg: PodBoardConfi
   await t.connectAgent({ agentId: 'rem', name: 'Remediation', handle: '@remediation', onMessage: makeRemediation({ brand: cfg.brand, copyModel: m.remediationCopy, imageModel: m.image, reportToHandle: '@conductor', podHub: hub, ...(cfg.hostImage ? { hostImage: cfg.hostImage } : {}) }) });
 
   // Decision spine
-  await t.connectAgent({ agentId: 'adj', name: 'Risk Adjudicator', handle: '@adjudicator', onMessage: makeRiskAdjudicator({ expectedPods: ['claims', 'regulatory', 'brand'], mediatorHandle: '@mediator', remediationHandle: '@remediation', humanHandle: '@compliance-lead', maxRecommits: 1, hub, notifyHandle: '@conductor', ...(cfg.logPrecedent ? { logPrecedent: cfg.logPrecedent } : {}), ...(cfg.publishArtifact ? { publishArtifact: cfg.publishArtifact } : {}) }) });
+  await t.connectAgent({ agentId: 'adj', name: 'Risk Adjudicator', handle: '@adjudicator', onMessage: makeRiskAdjudicator({ expectedPods: ['claims', 'regulatory', 'brand'], mediatorHandle: '@mediator', remediationHandle: '@remediation', humanHandle: '@compliance-lead', maxRecommits: 1, hub, notifyHandle: '@conductor', ...(cfg.logPrecedent ? { logPrecedent: cfg.logPrecedent } : {}), ...(cfg.publishArtifact ? { publishArtifact: cfg.publishArtifact } : {}), ...(cfg.recordVerdict ? { recordVerdict: cfg.recordVerdict } : {}) }) });
 }

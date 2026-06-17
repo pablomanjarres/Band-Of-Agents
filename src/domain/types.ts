@@ -149,6 +149,16 @@ export type MaterialPerception = z.infer<typeof MaterialPerception>;
 export const MaterialKind = z.enum(['video', 'post', 'image', 'banner']);
 export type MaterialKind = z.infer<typeof MaterialKind>;
 
+/** The result of a band.ai review, recorded on a material so the UI reflects it. */
+export const MaterialReview = z.object({
+  decision: z.enum(['published', 'spiked', 'escalated']),
+  reviewedAt: z.number(),
+  reportUrl: z.string().optional(),
+  reportArtifactId: z.string().optional(),
+  summary: z.string().optional(),
+});
+export type MaterialReview = z.infer<typeof MaterialReview>;
+
 /**
  * A single marketing material. Structurally a ContentAsset plus the material
  * fields. There is no `attachments` field any more: the Advertisement is the
@@ -158,6 +168,7 @@ export const Material = ContentAsset.extend({
   kind: MaterialKind,
   videoUrl: z.string().optional(),
   perception: MaterialPerception.optional(),
+  review: MaterialReview.optional(),
 });
 export type Material = z.infer<typeof Material>;
 

@@ -19,6 +19,8 @@ export interface RiskAdjudicatorOptions {
   publishArtifact?: (input: NewArtifact) => { id: string; url: string } | Promise<{ id: string; url: string }>;
   /** The Conductor's handle: notified on each terminal so it advances a multi-material campaign. */
   notifyHandle?: string;
+  /** Record the per-material verdict to the backend so the dashboard reflects the review. */
+  recordVerdict?: (input: { materialId: string; decision: 'published' | 'spiked' | 'escalated'; reportUrl?: string; reportArtifactId?: string; summary?: string }) => void | Promise<void>;
 }
 
 interface RoomState {
@@ -120,9 +122,12 @@ export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler 
     // Publish the report as an artifact and lead with the viewer link, so band.ai
     // carries a clickable link to the full, rendered report in the dashboard.
     let head = '';
+    let reportUrl: string | undefined;
+    let reportArtifactId: string | undefined;
     if (opts.publishArtifact) {
       try {
-        const { url } = await opts.publishArtifact({ kind: 'markdown', title: `Review report: ${asset?.name ?? asset?.id ?? 'campaign'} (${decision})`, content: report, createdBy: 'Risk Adjudicator' });
+        const { id, url } = await opts.publishArtifact({ kind: 'markdown', title: `Review report: ${asset?.name ?? asset?.id ?? 'campaign'} (${decision})`, content: report, createdBy: 'Risk Adjudicator' });
+        reportUrl = url; reportArtifactId = id;
         head = `Full report (rendered, with images): ${url}\n\n`;
       } catch { /* fall back to the inline report if publishing fails */ }
     }
@@ -141,6 +146,14 @@ export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler 
     };
     const human = matchParticipant(await tools.getParticipants(), opts.humanHandle, 'user');
     await tools.sendMessage(`${tldrByDecision[decision]}\n\n${head}${report}${tail}`, human ? [{ id: human.id, handle: human.handle }] : []);
+    // Land the verdict on the material in the backend, so the dashboard reflects this
+    // review (status + report link) even though it ran in the separate agents process.
+    if (opts.recordVerdict && asset?.id) {
+      const verdict: 'published' | 'spiked' | 'escalated' = decision === 'asking' ? 'escalated' : decision;
+      void Promise.resolve(
+        opts.recordVerdict({ materialId: asset.id, decision: verdict, ...(reportUrl ? { reportUrl } : {}), ...(reportArtifactId ? { reportArtifactId } : {}), summary: tldrByDecision[decision] }),
+      ).catch(() => { /* best effort */ });
+    }
   };
 
   // Tell the Conductor a material reached a terminal, so a multi-material campaign

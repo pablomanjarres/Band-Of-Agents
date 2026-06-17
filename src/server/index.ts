@@ -22,7 +22,7 @@ import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { loadBrandDna, loadRulebook } from '../domain/load';
-import { Advertisement as AdvertisementSchema, Campaign as CampaignSchema, ContentAsset as ContentAssetSchema, Material as MaterialSchema, Rulebook as RulebookSchema } from '../domain/types';
+import { Advertisement as AdvertisementSchema, Campaign as CampaignSchema, ContentAsset as ContentAssetSchema, Material as MaterialSchema, MaterialReview as MaterialReviewSchema, Rulebook as RulebookSchema } from '../domain/types';
 import type { Advertisement, Campaign, ContentAsset, Material, Rulebook } from '../domain/types';
 import { NewArtifact as NewArtifactSchema } from '../domain/artifact';
 import { BoardSession, realBoardModels, realPerceptionModels, type BoardModels } from '../board/session';
@@ -961,6 +961,22 @@ app.post('/api/campaigns/:id/materials', (c) => addMaterial(c));
 
 // The advertisement is addressed in the URL path (TASK spec). Add-anytime.
 app.post('/api/campaigns/:id/advertisements/:adId/materials', (c) => addMaterial(c, c.req.param('adId')));
+
+// A band.ai per-material verdict lands here, so the dashboard reflects the review
+// (status + report link) on the material even though the review ran in the separate
+// agents process. Finds the material across campaigns (legacy single assets are
+// surfaced as one-material campaigns) by id and persists the verdict on it.
+app.post('/api/materials/:materialId/review', async (c) => {
+  const materialId = c.req.param('materialId') ?? '';
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const parsed = MaterialReviewSchema.omit({ reviewedAt: true }).safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const review = { ...parsed.data, reviewedAt: Date.now() };
+  const camp = store.listCampaigns().find((cp) => cp.advertisements.some((ad) => ad.materials.some((m) => m.id === materialId)));
+  if (!camp) return c.json({ error: 'material not found' }, 404);
+  store.saveCampaign(patchMaterial(camp, materialId, (m) => ({ ...m, review })));
+  return c.json({ ok: true, campaignId: camp.id, materialId, review });
+});
 
 // Campaign review state for the UI: status, the observational rollup (worst-case
 // per region + the material x region matrix), and the full event stream.
