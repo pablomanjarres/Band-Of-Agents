@@ -12,13 +12,34 @@
 // PREFIX_API_KEY in .env (see AGENT_ENV_PREFIX below for the prefix per role).
 
 import 'dotenv/config';
+import { createServer } from 'node:http';
 import { RealBandTransport } from '../band/real';
 import { connectPodBoardAgents, type PodBoardModels } from '../board/pod-board';
 import type { AgentConnection, BandTransport, ConnectOptions } from '../band/types';
 import { activeMode, describeRoutes, imageClientFor, modelFor } from '../models/route';
 import { findCampaignByName, loadBrandDna, loadRulebook } from '../domain/load';
 import { Store } from '../store/store';
+import { makePublishArtifact } from '../store/artifacts';
+import type { Artifact, NewArtifact } from '../domain/artifact';
 import { spend } from '../models/spend';
+
+// A small, dependency-free HTML page for a report artifact: the report text with
+// URLs linkified and any promo images shown as a gallery. Rendered at GET /a/:id so
+// the link the Adjudicator posts into band.ai opens a readable report in the browser.
+function renderArtifactHtml(a: Artifact): string {
+  const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] ?? c));
+  const images: string[] = [];
+  const body = esc(a.content ?? a.src ?? '').replace(/https?:\/\/[^\s)]+/g, (u) => {
+    if (/\.(png|jpe?g|webp|gif)(\?|$)/i.test(u) || /\/api\/images\//.test(u)) images.push(u);
+    return `<a href="${u}" target="_blank" rel="noopener">${u}</a>`;
+  });
+  const gallery = images.length
+    ? `<h2>Promotional images</h2><div class=g>${images.map((u) => `<a href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="promo"></a>`).join('')}</div>`
+    : '';
+  return `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>${esc(a.title)}</title>
+<style>:root{color-scheme:light dark}body{font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-width:780px;margin:0 auto;padding:40px 22px;color:#16161d}h1{font-size:21px;margin:0 0 4px}h2{font-size:16px;margin-top:28px}.m{color:#8a8a99;font-size:13px;margin-bottom:22px}.r{white-space:pre-wrap;background:#f7f7fb;border:1px solid #ececf3;border-radius:12px;padding:20px}a{color:#3b6cf6;word-break:break-all}.g{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}.g img{width:200px;height:auto;border-radius:10px;border:1px solid #ececf3}</style>
+</head><body><h1>${esc(a.title)}</h1><div class=m>${esc(a.createdBy ?? 'Review board')}</div><div class=r>${body}</div>${gallery}</body></html>`;
+}
 
 const ASSETS = new URL('../../assets/', import.meta.url).pathname;
 const DATA_DIR = new URL('../../data/', import.meta.url).pathname;
@@ -84,6 +105,84 @@ async function main(): Promise<void> {
   const store = new Store(DATA_DIR);
   const lookupCampaign = (query: string) => findCampaignByName(store.listAssets(), query);
 
+  // Serve regenerated promo images over HTTP so Remediation can post a short,
+  // clickable link into the Band room (a base64 data URL is too large for band.ai,
+  // and Vertex image generation returns base64, not a hosted URL). Self-contained:
+  // the runner hosts the image into data/images and serves it here, so no separate
+  // web server is needed. The link resolves from the same machine the band.ai UI
+  // runs on; set PUBLIC_BASE_URL to override the origin (e.g. a tunnel).
+  const imagePort = Number(process.env.IMAGE_PORT ?? 8788);
+  const localBase = `http://localhost:${imagePort}`;
+  // Publish reports + images to the DEPLOYED backend so the links the Adjudicator
+  // posts open in the real dashboard (artifact-viewer), not localhost. The local
+  // server below is only a fallback host, used if the backend is unreachable.
+  const BACKEND = (process.env.REPORT_BACKEND ?? 'https://band-backend-1068570846548.us-east1.run.app').replace(/\/+$/, '');
+  const APP = (process.env.PUBLIC_BASE_URL ?? 'https://artifact-viewer-one.vercel.app').replace(/\/+$/, '');
+  const localPublish = makePublishArtifact(store, localBase);
+  const httpServer = createServer((req, res) => {
+    const url = req.url ?? '';
+    const img = /^\/api\/images\/([^/?#]+)/.exec(url);
+    if (img) {
+      const buf = store.readImage(img[1]!);
+      if (!buf) { res.statusCode = 404; res.end('not found'); return; }
+      const ext = img[1]!.split('.').pop()?.toLowerCase();
+      res.setHeader('content-type', ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png');
+      res.end(buf);
+      return;
+    }
+    // /a/<id> renders the report; /api/artifacts/<id> returns it as JSON (for the SPA).
+    const art = /^\/(?:a|api\/artifacts)\/([^/?#]+)/.exec(url);
+    if (art) {
+      const a = store.getArtifact(art[1]!);
+      if (!a) { res.statusCode = 404; res.end('not found'); return; }
+      if (url.startsWith('/api/artifacts/')) {
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ artifact: a }));
+      } else {
+        res.setHeader('content-type', 'text/html; charset=utf-8');
+        res.end(renderArtifactHtml(a));
+      }
+      return;
+    }
+    res.statusCode = 404; res.end('not found');
+  });
+  httpServer.on('error', (err: unknown) => console.warn(`[http] local fallback host not serving on ${imagePort}: ${(err as Error)?.message ?? err}.`));
+  httpServer.listen(imagePort, () => console.log(`[http] publishing reports/images to ${APP} (local fallback on ${localBase})`));
+
+  // Publish the report to the deployed backend; the returned link opens in the live
+  // dashboard. Fall back to the local viewer only if the backend is unreachable.
+  const publishArtifact = async (input: NewArtifact): Promise<{ id: string; url: string }> => {
+    try {
+      const res = await fetch(`${BACKEND}/api/artifacts`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { id } = (await res.json()) as { id: string };
+      return { id, url: `${APP}/a/${id}` };
+    } catch (err) {
+      console.warn(`[artifacts] backend publish failed (${(err as Error)?.message ?? err}); using local viewer`);
+      return localPublish(input);
+    }
+  };
+
+  // Upload a generated image to the deployed backend so it renders in the dashboard;
+  // fall back to local hosting. Returns '' on total failure (caller treats as no image).
+  const hostImage = async (u: string): Promise<string> => {
+    if (/^https?:\/\//.test(u)) return u;
+    const m = /^data:(image\/[\w.+-]+);base64,(.+)$/s.exec(u);
+    if (!m) return u;
+    try {
+      const form = new FormData();
+      form.append('image', new Blob([Buffer.from(m[2]!, 'base64')], { type: m[1] }), 'promo.png');
+      const res = await fetch(`${BACKEND}/api/images`, { method: 'POST', body: form });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { imageUrl } = (await res.json()) as { imageUrl: string };
+      return imageUrl.startsWith('/') ? `${APP}${imageUrl}` : imageUrl;
+    } catch (err) {
+      console.warn(`[images] backend upload failed (${(err as Error)?.message ?? err}); using local host`);
+      const hosted = store.hostImage(u);
+      return hosted?.startsWith('/') ? `${localBase}${hosted}` : (hosted ?? '');
+    }
+  };
+
   // Live rulebook overrides (UI edits) and recent human-ruling precedents, read
   // per review so the long-lived runner picks them up between reviews.
   const getRulebook = (region: string) =>
@@ -98,6 +197,8 @@ async function main(): Promise<void> {
     brand,
     rulebooks: { us: usRules, eu: euRules, latam: latamRules },
     models,
+    hostImage,
+    publishArtifact,
     lookupCampaign,
     getRulebook,
     getPrecedents,
