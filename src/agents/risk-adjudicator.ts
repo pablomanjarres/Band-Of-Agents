@@ -139,10 +139,10 @@ export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler 
     const blocking = [...claimMap.values()].filter(Boolean).length;
     const nFixes = fixes?.length ?? 0;
     const tldrByDecision: Record<ReportDecision, string> = {
-      asking: `TL;DR: ${name} — ${flagged} claim(s) flagged, ${blocking} blocking. ${s.pendingSplit ? 'These markets cannot share one compliant version; reply "yes" to ship one version per market, or "reject".' : 'Reply "yes" to fix and re-review, or "reject".'}`,
-      published: `TL;DR: ${name} — PUBLISHED${nFixes > 1 ? ` as ${nFixes} market-tailored version(s)` : nFixes ? ' with a fix' : blocking ? '' : ', nothing blocking'}.`,
-      spiked: `TL;DR: ${name} — SPIKED.`,
-      escalated: `TL;DR: ${name} — ESCALATED, needs your ruling on ${blocking} blocking claim(s).`,
+      asking: `TL;DR: ${name}: ${flagged} claim(s) flagged, ${blocking} blocking. ${s.pendingSplit ? 'These markets cannot share one compliant version; reply "yes" to ship one version per market, or "reject".' : 'Reply "yes" to fix and re-review, or "reject".'}`,
+      published: `TL;DR: ${name}: PUBLISHED${nFixes > 1 ? ` as ${nFixes} market-tailored version(s)` : nFixes ? ' with a fix' : blocking ? '' : ', nothing blocking'}.`,
+      spiked: `TL;DR: ${name}: SPIKED.`,
+      escalated: `TL;DR: ${name}: ESCALATED, needs your ruling on ${blocking} blocking claim(s).`,
     };
     const human = matchParticipant(await tools.getParticipants(), opts.humanHandle, 'user');
     await tools.sendMessage(`${tldrByDecision[decision]}\n\n${head}${report}${tail}`, human ? [{ id: human.id, handle: human.handle }] : []);
