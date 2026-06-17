@@ -40,6 +40,23 @@ const VERDICTS: { label: string; tone: string; desc: string }[] = [
   { label: 'Escalate', tone: 'bg-danger/10 text-danger ring-danger/25', desc: 'A genuine deadlock goes to a human.' },
 ];
 
+// The "one shared vault, a specialist in every seat" idea. The shared vault is the
+// context every agent reads (so they judge against one truth); the specialist column
+// is the narrow expertise each agent owns (so the debate is real, not an echo).
+const SHARED_VAULT: { label: string; desc: string }[] = [
+  { label: 'Campaign dossier', desc: 'The approved claims and the substantiation behind them. Edit it once and every agent re-grounds against the same truth.' },
+  { label: 'Brand DNA', desc: 'Voice, approved vocabulary and forbidden phrases, read by every reviewer.' },
+  { label: 'What it saw and heard', desc: 'The perception pass transcribes the audio and reads the frames; that text cascades to all of them, so a claim in a voiceover is caught too.' },
+  { label: 'Precedent log', desc: 'Every past human ruling on a gray area, so the team applies your prior calls instead of re-litigating them.' },
+];
+
+const SPECIALIST: { label: string; desc: string }[] = [
+  { label: 'US / EU / LATAM reviewers', desc: 'Each carries only its own market rulebook and argues compliance from it.' },
+  { label: 'Claims reviewer', desc: 'Evidence, prior rulings, and required-disclosure expertise: does the asset back what it says?' },
+  { label: 'Brand reviewer', desc: 'Voice, channel-fit and imagery judgement against the brand DNA.' },
+  { label: 'A different model in each seat', desc: 'Agents run on different models, so you get genuinely independent judgement, not one model nodding at itself.' },
+];
+
 // The step-by-step walkthrough. Each step shows the concrete action and an example
 // of what is said in the room: who posts it (you), or that it happens automatically.
 type ExampleKind = 'post' | 'auto' | 'you';
@@ -101,16 +118,16 @@ const STEPS: { n: string; title: string; body: string; example: string; kind: Ex
   },
   {
     n: '8',
-    title: 'The board reconciles',
-    body: 'The Risk Adjudicator scores the board and asks the Mediator to broker the conflicts; if that fails, one Remediation pass rewrites the copy and regenerates a localized image for re-review.',
-    example: 'Mediator: no movement -> Adjudicator: remediate (attempt 1)',
-    kind: 'auto',
+    title: 'The board reconciles, then asks you',
+    body: 'The Risk Adjudicator scores the board and asks the Mediator to broker cross-pod conflicts. If anything still blocks, it does not fix it silently: it tells you exactly what is wrong and asks permission to fix it.',
+    example: 'Adjudicator -> you: here is what is blocking. Reply "yes" to remediate, or "reject".',
+    kind: 'you',
   },
   {
     n: '9',
-    title: 'Terminal verdict',
-    body: 'The spine lands on published or spiked. A genuine deadlock escalates to you, and your ruling is logged as precedent for next time.',
-    example: 'Publish with: "These statements have not been evaluated by the FDA."',
+    title: 'You approve, it shows the fix',
+    body: 'Say "yes" and Remediation rewrites the blocked copy, regenerates an on-brand image, and posts the new copy plus the image link. When the markets cannot share one compliant version (legal in the US, banned in the EU), it instead proposes one market-tailored version per market and publishes per-market, rather than a watered-down global one. Say "reject" and it is spiked.',
+    example: 'Proposed market-tailored versions: US ... EU ... LATAM ... + image links',
     kind: 'you',
   },
 ];
@@ -231,6 +248,51 @@ export function HowItWorksPage() {
               <p className="mt-2 text-sm leading-relaxed text-muted">{d.body}</p>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* One shared vault of intelligence, plus a specialist in every seat. */}
+      <section>
+        <div className="mb-6 text-center">
+          <p className="eyebrow mb-2">Shared brain, specialist seats</p>
+          <h2 className="font-display text-3xl text-fg">One vault of intelligence, an expert in every seat</h2>
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+            Every agent reads from the same shared vault, so they all judge against one source of truth. But each one
+            carries deep, narrow expertise in its own field and runs on its own model, so when they disagree the debate
+            is real, not an echo.
+          </p>
+        </div>
+        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="surface rounded-2xl p-6">
+            <p className="eyebrow mb-1 text-accent">The shared vault</p>
+            <p className="mb-4 text-xs leading-relaxed text-faint">Every agent reads all of this.</p>
+            <ul className="space-y-3.5">
+              {SHARED_VAULT.map((k) => (
+                <li key={k.label} className="flex gap-2.5">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                  <span>
+                    <span className="text-sm font-semibold text-fg">{k.label}</span>
+                    <span className="mt-0.5 block text-sm leading-relaxed text-muted">{k.desc}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="surface rounded-2xl p-6">
+            <p className="eyebrow mb-1 text-warn">Specialist knowledge</p>
+            <p className="mb-4 text-xs leading-relaxed text-faint">Each agent owns only its field.</p>
+            <ul className="space-y-3.5">
+              {SPECIALIST.map((k) => (
+                <li key={k.label} className="flex gap-2.5">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
+                  <span>
+                    <span className="text-sm font-semibold text-fg">{k.label}</span>
+                    <span className="mt-0.5 block text-sm leading-relaxed text-muted">{k.desc}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </section>
 
