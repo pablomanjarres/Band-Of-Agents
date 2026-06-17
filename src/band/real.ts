@@ -55,6 +55,29 @@ interface BandAdapterArgs {
   agentName?: string;
 }
 
+// A recent message as returned by link.rest.listMessages (snake_case), used by the
+// catch-up poll to replay a message the live socket missed.
+interface PlatformChatMsg {
+  id: string;
+  content?: string;
+  sender_id: string;
+  sender_type: string;
+  sender_name?: string | null;
+  message_type?: string;
+  metadata?: { mentions?: Array<{ id?: string }> } & Record<string, unknown>;
+  inserted_at: string;
+}
+// The slice of agent.runtime we reach for the catch-up: list rooms, list a room's
+// recent messages, and re-inject one through the normal handler (with tools).
+interface AgentRuntimeLike {
+  link?: {
+    subscribeAgentRooms?: () => Promise<void>;
+    listAllChats?: () => Promise<Array<{ id?: unknown; updated_at?: unknown; room?: { id?: unknown } }>>;
+    rest?: { listMessages?: (a: { chatId: string; page: number; pageSize: number }) => Promise<{ data?: PlatformChatMsg[] }> };
+  };
+  bootstrapRoomMessage?: (roomId: string, message: BandPlatformMessage) => Promise<void>;
+}
+
 // The REST facade reached via agent.runtime.link.rest (verified by intake-probe).
 interface IntakeRest {
   createChat?: (taskId?: string) => Promise<{ id: string }>;
@@ -118,9 +141,19 @@ export class RealBandTransport implements BandTransport {
         ? { agentId: opts.agentId, apiKey: opts.apiKey }
         : loadAgentConfigFromEnv();
 
+    // Dedup across live delivery and the catch-up poll: whichever sees a message id
+    // first handles it; the other skips. Prevents double-processing.
+    const seen = new Set<string>();
+    const markSeen = (id: string): void => {
+      seen.add(id);
+      if (seen.size > 2000) { let i = 0; for (const k of seen) { seen.delete(k); if (++i >= 1000) break; } }
+    };
+
     const adapter = new GenericAdapter(async (raw: unknown): Promise<void> => {
       const args = raw as BandAdapterArgs;
       const message = toRoomMessage(args.message);
+      if (message.id && seen.has(message.id)) return;
+      if (message.id) markSeen(message.id);
       dbg(`${opts.name} <- ${message.senderName ?? message.senderType}: ${message.content.slice(0, 100)}`);
       const emit: EmitActivity = (kind, content, messageType) =>
         this.emit(kind, args.message.roomId, config.agentId, opts.name, content, messageType);
@@ -146,15 +179,59 @@ export class RealBandTransport implements BandTransport {
     // pick it up within a few seconds without restarting the server.
     const subscribeRooms = (): void => {
       const link = (agent as { runtime?: { link?: { subscribeAgentRooms?: () => Promise<void> } } })?.runtime?.link;
-      dbg(`${opts.name} subscribeAgentRooms: link=${!!link} method=${typeof link?.subscribeAgentRooms}`);
       try {
         void link?.subscribeAgentRooms?.();
       } catch (e) {
         dbg(`${opts.name} subscribe error: ${(e as Error)?.message ?? String(e)}`);
       }
     };
-    const initial = setTimeout(subscribeRooms, 1500);
-    const interval = setInterval(subscribeRooms, 8000);
+
+    // Catch-up: the SDK does not replay a message posted in the window before the
+    // agent subscribed to a (often brand-new) room. So each cycle, fetch recent
+    // messages per room and re-inject any unseen @mention to us through the normal
+    // handler (bootstrapRoomMessage routes through the adapter with working tools).
+    // This makes the FIRST post in a new room reliable, no re-post needed.
+    // Only re-inject the LATEST message of a room, and only if it is a still-unanswered
+    // @mention to us within a recent window. That catches a just-missed post (human ->
+    // Conductor, or Conductor -> a late-joined pod) without replaying old history.
+    const CATCHUP_WINDOW_MS = 12 * 60 * 1000;
+    const catchUp = async (): Promise<void> => {
+      const rt = (agent as { runtime?: AgentRuntimeLike }).runtime;
+      const link = rt?.link;
+      if (!rt?.bootstrapRoomMessage || !link?.listAllChats || !link.rest?.listMessages) return;
+      let chats: Array<{ id?: unknown; updated_at?: unknown; room?: { id?: unknown } }> = [];
+      try { chats = await link.listAllChats(); } catch { return; } // optional SDK feature; skip if unsupported
+      for (const chat of chats ?? []) {
+        const roomId = typeof chat?.id === 'string' ? chat.id : typeof chat?.room?.id === 'string' ? chat.room.id : null;
+        if (!roomId) continue;
+        // Skip rooms with no recent activity, so we only poll messages where a catch-up
+        // could matter (keeps this cheap across many rooms).
+        const ua = typeof chat?.updated_at === 'string' ? chat.updated_at : null;
+        if (ua && Date.now() - new Date(ua).getTime() > CATCHUP_WINDOW_MS) continue;
+        let data: PlatformChatMsg[] = [];
+        try { data = (await link.rest.listMessages({ chatId: roomId, page: 1, pageSize: 10 })).data ?? []; } catch { continue; }
+        if (!data.length) continue;
+        const latest = [...data].sort((a, b) => new Date(a.inserted_at).getTime() - new Date(b.inserted_at).getTime())[data.length - 1];
+        if (!latest?.id || seen.has(latest.id)) continue;
+        if (latest.sender_id === config.agentId) { markSeen(latest.id); continue; } // our own message
+        const mine = (latest.metadata?.mentions ?? []).some((x) => x?.id === config.agentId);
+        const fresh = Date.now() - new Date(latest.inserted_at).getTime() < CATCHUP_WINDOW_MS;
+        if (!mine || !fresh) { markSeen(latest.id); continue; }
+        dbg(`${opts.name} catch-up replay <- ${latest.sender_name ?? latest.sender_type}: ${(latest.content ?? '').slice(0, 80)}`);
+        try {
+          await rt.bootstrapRoomMessage(roomId, {
+            id: latest.id, roomId, content: latest.content ?? '', senderId: latest.sender_id,
+            senderType: String(latest.sender_type ?? 'user').toLowerCase(), senderName: latest.sender_name ?? null,
+            messageType: latest.message_type ?? 'chat', metadata: latest.metadata ?? {}, createdAt: new Date(latest.inserted_at),
+          });
+        } catch (e) { dbg(`${opts.name} catch-up error: ${(e as Error)?.message ?? String(e)}`); }
+        markSeen(latest.id);
+      }
+    };
+
+    const tick = (): void => { subscribeRooms(); void catchUp(); };
+    const initial = setTimeout(tick, 1500);
+    const interval = setInterval(tick, 8000);
     return {
       stop: async () => {
         clearTimeout(initial);
