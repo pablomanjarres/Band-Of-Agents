@@ -44,7 +44,7 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
     const fromAdjudicator = (message.senderName ?? '').toLowerCase().includes('adjudic');
     const plan = fromAdjudicator ? opts.podHub?.splitPlan(message.roomId) : undefined;
     if (plan?.length) {
-      const base = assetByRoom.get(message.roomId) ?? opts.podHub?.asset(message.roomId);
+      const base = opts.podHub?.asset(message.roomId) ?? assetByRoom.get(message.roomId);
       if (base) {
         const versions: SplitVersion[] = [];
         for (const { region, findings } of plan) {
@@ -81,7 +81,7 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
     if (!directive && opts.podHub && (message.senderName ?? '').toLowerCase().includes('adjudic')) {
       const cs = opts.podHub.conflicts(message.roomId);
       if (cs.length) {
-        const primed = assetByRoom.get(message.roomId) ?? opts.podHub.asset(message.roomId);
+        const primed = opts.podHub.asset(message.roomId) ?? assetByRoom.get(message.roomId);
         directive = {
           kind: 'remediation',
           region: cs[0]?.blockedBy[0] ?? primed?.markets?.[0] ?? 'EU',
@@ -90,7 +90,7 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
       }
     }
     if (!directive) return;
-    const base = assetByRoom.get(message.roomId) ?? opts.podHub?.asset(message.roomId);
+    const base = opts.podHub?.asset(message.roomId) ?? assetByRoom.get(message.roomId);
     if (!base) return;
 
     const rewritten = await rewriteCopy(opts.copyModel, opts.brand, base, directive);

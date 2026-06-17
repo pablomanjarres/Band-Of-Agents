@@ -81,4 +81,19 @@ export class PodHub {
   // Tailored per-market versions (Remediation -> Adjudicator).
   setSplitVersions(roomId: string, versions: SplitVersion[] | undefined): void { this.state(roomId).splitVersions = versions; }
   splitVersions(roomId: string): SplitVersion[] | undefined { return this.state(roomId).splitVersions; }
+
+  // Clear all per-review state so the SAME room can review the next material of a
+  // campaign cleanly (the Conductor calls this before dispatching the next material).
+  // The asset is not cleared here; the Conductor sets the next material right after.
+  resetReview(roomId: string): void {
+    const s = this.state(roomId);
+    s.findings.clear();
+    s.podFindings.clear();
+    s.conflicts = [];
+    s.mediation = undefined;
+    s.challenges.clear();
+    s.revised = undefined;
+    s.splitPlan = undefined;
+    s.splitVersions = undefined;
+  }
 }
