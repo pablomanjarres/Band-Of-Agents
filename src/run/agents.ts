@@ -118,6 +118,10 @@ async function main(): Promise<void> {
   type CampaignFull = { id?: string; name?: string; advertisements?: AdFull[] };
   const FILLER = new Set(['the', 'a', 'an', 'review', 'campaign', 'advertisement', 'ad', 'ads', 'please', 'for', 'and', 'of', 'material', 'materials']);
   const tok = (s: string): string[] => s.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  // Backend image urls are stored relative (/api/images/x.png); make them absolute so
+  // the link in the report actually opens (against the deployed dashboard origin).
+  const absMaterials = (mats: ContentAsset[]): ContentAsset[] =>
+    mats.map((m) => (m.imageUrl?.startsWith('/api/') ? { ...m, imageUrl: `${APP}${m.imageUrl}` } : m));
 
   const lookupMaterials = async (query: string): Promise<{ name: string; materials: ContentAsset[] } | undefined> => {
     try {
@@ -132,7 +136,7 @@ async function main(): Promise<void> {
       const winner = findCampaignByName([...assets, ...summaries], query);
       if (winner) {
         const direct = assets.find((x) => x.id === winner.id);
-        if (direct) return { name: direct.name ?? direct.id, materials: [direct] }; // flat asset = one material
+        if (direct) return { name: direct.name ?? direct.id, materials: absMaterials([direct]) }; // flat asset = one material
         // A campaign: fetch the full record; review one advertisement (if the query
         // names it) or every material across all advertisements.
         const full = await fetch(`${BACKEND}/api/campaigns/${winner.id}`).then((r) => r.json() as Promise<{ campaign?: CampaignFull }>).catch(() => ({ campaign: undefined }));
@@ -146,13 +150,13 @@ async function main(): Promise<void> {
           if (score > best) { best = score; chosen = ad; }
         }
         const materials = (chosen ? chosen.materials : ads.flatMap((ad) => ad.materials ?? [])) ?? [];
-        if (materials.length) return { name: chosen ? `${camp?.name} / ${chosen.name}` : (camp?.name ?? winner.name ?? winner.id), materials };
+        if (materials.length) return { name: chosen ? `${camp?.name} / ${chosen.name}` : (camp?.name ?? winner.name ?? winner.id), materials: absMaterials(materials) };
       }
     } catch (err) {
       console.warn(`[campaigns] backend fetch failed (${(err as Error)?.message ?? err}); using local data`);
     }
     const local = findCampaignByName(store.listAssets(), query);
-    return local ? { name: local.name ?? local.id, materials: [local] } : undefined;
+    return local ? { name: local.name ?? local.id, materials: absMaterials([local]) } : undefined;
   };
   const lookupCampaign = async (query: string): Promise<ContentAsset | undefined> => (await lookupMaterials(query))?.materials[0];
 
