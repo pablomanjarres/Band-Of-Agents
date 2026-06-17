@@ -17,6 +17,8 @@ export interface RiskAdjudicatorOptions {
   hub?: PodHub;               // when set, read pod findings/mediation from the hub (prose on the wire)
   /** Publish the report as an artifact and get back a viewer URL to link in the room. */
   publishArtifact?: (input: NewArtifact) => { id: string; url: string } | Promise<{ id: string; url: string }>;
+  /** The Conductor's handle: notified on each terminal so it advances a multi-material campaign. */
+  notifyHandle?: string;
 }
 
 interface RoomState {
@@ -128,6 +130,14 @@ export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler 
     await tools.sendMessage(head + report + tail, human ? [{ id: human.id, handle: human.handle }] : []);
   };
 
+  // Tell the Conductor a material reached a terminal, so a multi-material campaign
+  // advances to the next material. No-op for a single, queue-less review.
+  const notifyDone = async (roomId: string, tools: RoomTools, decision: string): Promise<void> => {
+    if (!opts.notifyHandle) return;
+    const t = matchParticipant(await tools.getParticipants(), opts.notifyHandle, 'agent');
+    if (t) await tools.sendMessage(`Material review complete: ${decision}.`, [{ id: t.id, handle: t.handle }]);
+  };
+
   // Stash every problem as a conflict-shaped item on the hub so Remediation can
   // rewrite all of them at once (it reads hub.conflicts). Blocks already covered by
   // a cross-pod conflict are not duplicated.
@@ -219,6 +229,7 @@ export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler 
     await postReport(roomId, tools, 'published', fixes);
     await tools.sendEvent(`Published ${markets.length} market version(s)`, 'terminal', { decision: 'published' });
     await tools.sendEvent('done', 'status', { status: 'complete' });
+    await notifyDone(roomId, tools, 'published');
     opts.hub?.setSplitVersions(roomId, undefined);
     rooms.delete(roomId);
   };
@@ -251,6 +262,7 @@ export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler 
       await postReport(roomId, tools, 'published');
       await tools.sendEvent('PUBLISHED', 'terminal', { decision: 'published' });
       await tools.sendEvent('done', 'status', { status: 'complete' });
+      await notifyDone(roomId, tools, 'published');
       rooms.delete(roomId);
       return;
     }
@@ -320,6 +332,7 @@ export function makeRiskAdjudicator(opts: RiskAdjudicatorOptions): AgentHandler 
       await postReport(roomId, tools, decision);
       await tools.sendEvent(decision === 'spiked' ? 'SPIKED' : 'PUBLISHED', 'terminal', { decision });
       await tools.sendEvent('done', 'status', { status: 'complete' });
+      await notifyDone(roomId, tools, decision);
       rooms.delete(roomId);
       return;
     }
