@@ -14,7 +14,15 @@ interface ReviewChatProps {
   reviewId?: string;
   /** Reports the review id back to the page so it survives a close/reopen. */
   onReviewStarted?: (reviewId: string) => void;
+  /** Fired with the report's artifact id when the agents publish one, so the page can show it. */
+  onReport?: (artifactId: string) => void;
   onClose: () => void;
+}
+
+/** Extract the artifact id from a report URL like `<base>/a/<id>`. */
+function artifactIdFromUrl(url: string): string | null {
+  const m = /\/a\/([^/?#]+)/.exec(url) ?? /\/api\/artifacts\/([^/?#]+)/.exec(url);
+  return m ? (m[1] ?? null) : null;
 }
 
 type Phase = 'picking' | 'starting' | 'live' | 'done' | 'error';
@@ -81,7 +89,7 @@ function lineFor(e: BoardEvent): Omit<FeedLine, 'key'> | null {
  * region, and reconcile, every step streaming in. No band.ai login: our server drives
  * the review and relays the agents' activity over SSE.
  */
-export function ReviewChat({ campaignId, advertisementId, campaignName, advertisementName, materialId, materialName, reviewId, onReviewStarted, onClose }: ReviewChatProps) {
+export function ReviewChat({ campaignId, advertisementId, campaignName, advertisementName, materialId, materialName, reviewId, onReviewStarted, onReport, onClose }: ReviewChatProps) {
   const [phase, setPhase] = useState<Phase>(reviewId ? 'live' : materialId ? 'starting' : 'picking');
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<FeedLine[]>([]);
@@ -90,6 +98,9 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
   const [pickedName, setPickedName] = useState<string | undefined>(materialName);
   const seen = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Stable ref so the subscribe effect can surface a report without re-subscribing.
+  const onReportRef = useRef(onReport);
+  onReportRef.current = onReport;
 
   // Run the real band.ai review for one chosen material.
   const startReview = useCallback(
@@ -143,7 +154,14 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
         return;
       }
       const ln = lineFor(e);
-      if (ln) setLines((prev) => [...prev, { ...withReportLink(ln), key }]);
+      if (ln) {
+        const withLink = withReportLink(ln);
+        setLines((prev) => [...prev, { ...withLink, key }]);
+        if (withLink.url) {
+          const aid = artifactIdFromUrl(withLink.url);
+          if (aid) onReportRef.current?.(aid);
+        }
+      }
     });
     return () => { sub?.close(); sub = null; };
   }, [rid]);

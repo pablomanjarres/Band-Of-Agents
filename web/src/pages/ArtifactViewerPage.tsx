@@ -81,7 +81,7 @@ function Shell({
   );
 }
 
-function ArtifactBody({ artifact }: { artifact: Artifact }) {
+export function ArtifactBody({ artifact }: { artifact: Artifact }) {
   switch (artifact.kind) {
     case 'image':
       return artifact.src ? (
