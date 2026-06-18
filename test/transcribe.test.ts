@@ -73,12 +73,14 @@ function videoMaterial(extra: Partial<Material> = {}): Material {
 describe('transcribeVideoMaterial: stub STT over a real local video', () => {
   it('sets the transcript from the STT client (and samples keyframes)', async () => {
     if (!hasFfmpeg || !toneMp4) {
-      // No ffmpeg/clip: nothing to extract; assert it does not throw and stays empty.
+      // No ffmpeg/clip: nothing to extract; the STT text must not leak (no local
+      // file), and the text-on-screen fallback synthesizes a perception instead.
       const p = await transcribeVideoMaterial(videoMaterial(), {
         sttModel: new StubSttClient(() => ({ text: 'should not appear without a local file' })),
         resolveVideoPath: () => undefined,
       });
-      expect(p.transcript).toBeUndefined();
+      expect(p.transcript).not.toContain('should not appear');
+      expect(p.transcript && p.transcript.length).toBeTruthy();
       return;
     }
     const stt = new StubSttClient(() => ({ text: 'Northwind Immune plus helps maintain your immune response.' }));
@@ -105,35 +107,43 @@ describe('transcribeVideoMaterial: stub STT over a real local video', () => {
   });
 });
 
-describe('transcribeVideoMaterial: graceful degradation (no throw, empty transcript)', () => {
-  it('no STT client => empty transcript, no throw', async () => {
+describe('transcribeVideoMaterial: graceful degradation (no throw, synthesized text-on-screen perception)', () => {
+  // A video with no SPOKEN transcript carries its message as on-screen text, so the
+  // fallback synthesizes a coherent perception (never throws, never leaks STT text).
+  it('no STT client => synthesized perception, no throw', async () => {
     if (!hasFfmpeg || !toneMp4) return;
     const perception = await transcribeVideoMaterial(videoMaterial(), {
       resolveVideoPath: () => toneMp4,
       maxFrames: 0,
     });
-    expect(perception.transcript).toBeUndefined();
+    expect(perception.transcript && perception.transcript.length).toBeTruthy();
+    expect(perception.onScreenText && perception.onScreenText.length).toBeTruthy();
+    expect(perception.detectedClaims && perception.detectedClaims.length).toBeGreaterThan(0);
   });
 
-  it('no local file (unresolvable videoUrl) => empty transcript, no throw', async () => {
+  it('no local file (unresolvable videoUrl) => synthesized perception, no throw, no frames', async () => {
     const perception = await transcribeVideoMaterial(videoMaterial(), {
       sttModel: new StubSttClient(() => ({ text: 'canned' })),
       resolveVideoPath: () => undefined,
     });
-    expect(perception.transcript).toBeUndefined();
+    // No real audio was read, so the STT canned text must not leak; a synthesized
+    // transcript stands in instead, and there are still no frames.
+    expect(perception.transcript).not.toBe('canned');
+    expect(perception.transcript && perception.transcript.length).toBeTruthy();
     expect(perception.frames).toEqual([]);
   });
 
-  it('a video with NO audio track => empty transcript, no throw (even with a stub STT)', async () => {
+  it('a video with NO audio track => synthesized perception, no throw (STT text never leaks)', async () => {
     if (!hasFfmpeg || !silentMp4) return;
     const perception = await transcribeVideoMaterial(videoMaterial(), {
       // The stub WOULD return canned text, but no audio is extracted so STT is
-      // never reached: the transcript stays empty.
+      // never reached: the synthesized text-on-screen perception stands in.
       sttModel: new StubSttClient(() => ({ text: 'canned should not appear' })),
       resolveVideoPath: () => silentMp4,
       maxFrames: 0,
     });
-    expect(perception.transcript).toBeUndefined();
+    expect(perception.transcript).not.toContain('canned should not appear');
+    expect(perception.transcript && perception.transcript.length).toBeTruthy();
   });
 
   it('a non-video material is left untouched', async () => {
