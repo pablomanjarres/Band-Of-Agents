@@ -21,8 +21,11 @@ const RELAY_ENV_PREFIX = process.env.RELAY_ENV_PREFIX ?? 'INTAKE';
 // The Conductor we @mention. add_participant on band.ai resolves by the registered
 // agent NAME (per pod-board.ts), so the participant identifier defaults to the name.
 const CONDUCTOR_HANDLE = process.env.CONDUCTOR_HANDLE ?? '@conductor';
-const CONDUCTOR_PARTICIPANT = process.env.CONDUCTOR_PARTICIPANT ?? 'Conductor';
-const CONDUCTOR_ID = process.env.COORDINATOR_AGENT_ID ?? process.env.CONDUCTOR_AGENT_ID ?? CONDUCTOR_PARTICIPANT;
+// band.ai add_participant requires the agent's UUID (not a name/handle), so the
+// orchestrator id must be a real agent id. Prefer an explicit CONDUCTOR_AGENT_ID,
+// else the COORDINATOR_AGENT_ID from .env (the band-session orchestrator the
+// band-agents service runs). The mention is delivered by this id.
+const CONDUCTOR_ID = process.env.CONDUCTOR_AGENT_ID ?? process.env.COORDINATOR_AGENT_ID ?? '';
 
 /** True when the relay identity's credentials are present (else the routes 503). */
 export function relayConfigured(): boolean {
