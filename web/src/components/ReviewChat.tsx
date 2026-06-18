@@ -7,6 +7,9 @@ interface ReviewChatProps {
   advertisementId?: string;
   campaignName: string;
   advertisementName?: string;
+  /** When set, the review is scoped to this single material (one band.ai room). */
+  materialId?: string;
+  materialName?: string;
   /** Resume an already-running review (so closing/reopening the panel keeps progress). */
   reviewId?: string;
   /** Reports the review id back to the page so it survives a close/reopen. */
@@ -72,7 +75,7 @@ function lineFor(e: BoardEvent): Omit<FeedLine, 'key'> | null {
  * every step streaming in. No band.ai login: our server drives the review and relays
  * the agents' activity over SSE.
  */
-export function ReviewChat({ campaignId, advertisementId, campaignName, advertisementName, reviewId, onReviewStarted, onClose }: ReviewChatProps) {
+export function ReviewChat({ campaignId, advertisementId, campaignName, advertisementName, materialId, materialName, reviewId, onReviewStarted, onClose }: ReviewChatProps) {
   const [phase, setPhase] = useState<Phase>(reviewId ? 'live' : 'starting');
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<FeedLine[]>([]);
@@ -86,7 +89,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
     let cancelled = false;
     (async () => {
       try {
-        const res = await startCampaignReview(campaignId, advertisementId);
+        const res = await startCampaignReview(campaignId, advertisementId, materialId);
         if (cancelled) return;
         setRid(res.id);
         onReviewStarted?.(res.id);
@@ -98,7 +101,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
       }
     })();
     return () => { cancelled = true; };
-  }, [campaignId, advertisementId, reviewId]);
+  }, [campaignId, advertisementId, materialId, reviewId]);
 
   // Subscribe to the review's live event stream.
   useEffect(() => {
@@ -121,7 +124,11 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [lines]);
 
-  const scope = advertisementName ? `${campaignName} · ${advertisementName}` : campaignName;
+  const scope = materialName
+    ? `${materialName}${advertisementName ? ` · ${advertisementName}` : ''}`
+    : advertisementName
+      ? `${campaignName} · ${advertisementName}`
+      : campaignName;
   const statusText =
     phase === 'starting' ? 'Starting the review…' : phase === 'error' ? 'Review error' : phase === 'done' ? 'Review complete' : 'Agents reviewing live';
 

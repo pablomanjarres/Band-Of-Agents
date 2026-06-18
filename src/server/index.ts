@@ -499,7 +499,7 @@ app.post('/api/reviews', async (c) => {
   // into a room, the connected agents review, we observe); in local mode it runs
   // the in-process CampaignSession. The single-asset payload below stays band.ai-
   // only in band mode (no regression to the local single-asset path).
-  const b = (body ?? {}) as { campaignId?: unknown; campaign?: unknown; advertisementId?: unknown };
+  const b = (body ?? {}) as { campaignId?: unknown; campaign?: unknown; advertisementId?: unknown; materialId?: unknown };
   if (typeof b.campaignId === 'string' || (b.campaign && typeof b.campaign === 'object')) {
     let campaign: Campaign | undefined;
     if (typeof b.campaignId === 'string') {
@@ -517,18 +517,34 @@ app.post('/api/reviews', async (c) => {
     if (advertisementId !== undefined && !campaign.advertisements.some((ad) => ad.id === advertisementId)) {
       return c.json({ error: `advertisement ${advertisementId} not found` }, 404);
     }
-    const scopedMaterials = (advertisementId !== undefined
-      ? campaign.advertisements.filter((ad) => ad.id === advertisementId)
-      : campaign.advertisements
+    // Optional scope to a SINGLE material: prune the campaign to just that material's
+    // advertisement carrying only that material, so the review opens exactly ONE
+    // band.ai room (one click = one chat) instead of one room per material.
+    const materialId = typeof b.materialId === 'string' ? b.materialId : undefined;
+    let reviewCampaign = campaign;
+    let reviewAdId = advertisementId;
+    if (materialId !== undefined) {
+      const candidateAds = advertisementId !== undefined
+        ? campaign.advertisements.filter((ad) => ad.id === advertisementId)
+        : campaign.advertisements;
+      const ad = candidateAds.find((a) => a.materials.some((m) => m.id === materialId));
+      if (!ad) return c.json({ error: `material ${materialId} not found` }, 404);
+      reviewCampaign = { ...campaign, advertisements: [{ ...ad, materials: ad.materials.filter((m) => m.id === materialId) }] };
+      reviewAdId = ad.id;
+    }
+    const scopedMaterials = (reviewAdId !== undefined
+      ? reviewCampaign.advertisements.filter((ad) => ad.id === reviewAdId)
+      : reviewCampaign.advertisements
     ).flatMap((ad) => ad.materials);
     if (scopedMaterials.length === 0) {
       return c.json({ error: advertisementId !== undefined ? `advertisement ${advertisementId} has no materials` : 'campaign has no materials' }, 400);
     }
-    const id = runCampaignReview(campaign, advertisementId);
+    const id = runCampaignReview(reviewCampaign, reviewAdId);
     return c.json({
       id,
       kind: 'campaign',
       ...(advertisementId !== undefined ? { advertisementId } : {}),
+      ...(materialId !== undefined ? { materialId } : {}),
       materials: scopedMaterials.map((m) => m.id),
     });
   }

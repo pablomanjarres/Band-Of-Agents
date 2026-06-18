@@ -299,11 +299,16 @@ export async function uploadImage(file: File): Promise<ImageUploadResponse> {
 export async function startCampaignReview(
   campaignId: string,
   advertisementId?: string,
+  materialId?: string,
 ): Promise<CreateCampaignReviewResponse> {
   const res = await fetch('/api/reviews', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ campaignId, ...(advertisementId ? { advertisementId } : {}) }),
+    body: JSON.stringify({
+      campaignId,
+      ...(advertisementId ? { advertisementId } : {}),
+      ...(materialId ? { materialId } : {}),
+    }),
   });
   return asJson<CreateCampaignReviewResponse>(res);
 }
