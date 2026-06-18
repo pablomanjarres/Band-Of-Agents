@@ -237,6 +237,56 @@ export interface MaterialReview {
   summary?: string;
 }
 
+/** Live run mirror (Stage B): a band.ai review streamed into the dashboard so the
+    UI shows the workflow live. The agents POST a run + one event per lifecycle beat. */
+export type RunStage =
+  | 'requested'
+  | 'perceiving'
+  | 'reviewing'
+  | 'report'
+  | 'awaiting-decision'
+  | 'decided'
+  | 'material'
+  | 'log';
+export type RunStatus = 'running' | 'awaiting-decision' | 'complete' | 'error';
+export interface RunArtifact {
+  kind: 'image' | 'report';
+  url: string;
+  title?: string;
+}
+export interface RunEvent {
+  seq: number;
+  at: number;
+  stage: RunStage;
+  message: string;
+  agent?: string;
+  materialId?: string;
+  artifact?: RunArtifact;
+}
+export interface Run {
+  id: string;
+  campaignId: string;
+  advertisementId?: string;
+  materialId?: string;
+  label: string;
+  status: RunStatus;
+  createdAt: number;
+  updatedAt: number;
+  events: RunEvent[];
+}
+export interface RunSummary {
+  id: string;
+  campaignId: string;
+  advertisementId?: string;
+  label: string;
+  status: RunStatus;
+  createdAt: number;
+  updatedAt: number;
+  eventCount: number;
+  lastStage?: RunStage;
+  lastMessage?: string;
+}
+
 /** A single marketing creative inside an advertisement. */
 export interface Material extends ContentAsset {
   kind: MaterialKind;

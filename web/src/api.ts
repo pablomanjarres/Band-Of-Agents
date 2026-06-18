@@ -26,6 +26,9 @@ import type {
   RulebookResponse,
   Spending,
   VideoUploadResponse,
+  Run,
+  RunEvent,
+  RunSummary,
 } from './types';
 
 async function asJson<T>(res: Response): Promise<T> {
@@ -338,9 +341,9 @@ export interface EventSubscription {
 
 // Shared EventSource wiring: replay buffered events on connect, stream new ones,
 // drop malformed payloads (heartbeats) rather than crash the stream.
-function subscribeSSE(
+function subscribeSSE<T>(
   path: string,
-  onEvent: (event: BoardEvent) => void,
+  onEvent: (event: T) => void,
   onError?: (err: Event) => void,
 ): EventSubscription {
   const source = new EventSource(path);
@@ -348,8 +351,7 @@ function subscribeSSE(
   source.onmessage = (message: MessageEvent<string>) => {
     if (!message.data) return;
     try {
-      const parsed = JSON.parse(message.data) as BoardEvent;
-      onEvent(parsed);
+      onEvent(JSON.parse(message.data) as T);
     } catch {
       // Ignore malformed payloads (e.g. heartbeat comments) rather than crash.
     }
@@ -375,5 +377,28 @@ export function subscribeToCampaignEvents(
   onEvent: (event: BoardEvent) => void,
   onError?: (err: Event) => void,
 ): EventSubscription {
-  return subscribeSSE(`/api/campaign-reviews/${encodeURIComponent(id)}/events`, onEvent, onError);
+  return subscribeSSE<BoardEvent>(`/api/campaign-reviews/${encodeURIComponent(id)}/events`, onEvent, onError);
+}
+
+// --- Live run mirror (Stage B): the dashboard reads runs the band.ai agents post. ---
+
+/** Recent runs for a campaign (newest first), for the Runs list. */
+export async function getCampaignRuns(campaignId: string): Promise<{ runs: RunSummary[] }> {
+  const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/runs`);
+  return asJson<{ runs: RunSummary[] }>(res);
+}
+
+/** A single run with its full lifecycle timeline. */
+export async function getRun(id: string): Promise<{ run: Run }> {
+  const res = await fetch(`/api/runs/${encodeURIComponent(id)}`);
+  return asJson<{ run: Run }>(res);
+}
+
+/** Subscribe to a run's live lifecycle stream via EventSource. */
+export function subscribeToRun(
+  id: string,
+  onEvent: (event: RunEvent) => void,
+  onError?: (err: Event) => void,
+): EventSubscription {
+  return subscribeSSE<RunEvent>(`/api/runs/${encodeURIComponent(id)}/events`, onEvent, onError);
 }

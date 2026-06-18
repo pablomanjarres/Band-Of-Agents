@@ -6,7 +6,9 @@ import { AdvertisementTabs } from '../components/AdvertisementTabs';
 import { DossierEditor } from '../components/DossierEditor';
 import { MaterialCard } from '../components/MaterialCard';
 import { MaterialDetail } from '../components/MaterialDetail';
-import type { Campaign, MaterialReview, VerdictDecision } from '../types';
+import { RunTimeline } from '../components/RunTimeline';
+import { useRunFeed } from '../runFeed';
+import type { Campaign, MaterialReview, RunStatus, VerdictDecision } from '../types';
 
 type LoadState =
   | { kind: 'loading' }
@@ -55,6 +57,8 @@ export function CampaignDetailPage() {
   const [detailMaterialId, setDetailMaterialId] = useState<string | undefined>(undefined);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
   const [showAddAd, setShowAddAd] = useState(false);
+  // Live band.ai run mirror: polls this campaign's runs and streams the active one.
+  const { runs, activeRun, selectRun } = useRunFeed(id);
 
   useEffect(() => {
     if (!id) return;
@@ -141,23 +145,53 @@ export function CampaignDetailPage() {
 
       {/* Two-pane workspace: LEFT = live processing (filled by a band.ai run); MAIN = ads + materials. */}
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <aside className="lg:sticky lg:top-6 lg:w-80 lg:shrink-0">
+        <aside className="space-y-4 lg:sticky lg:top-6 lg:w-80 lg:shrink-0">
           <div className="surface rounded-2xl p-4">
             <p className="eyebrow">Live processing</p>
-            <div className="mt-3 flex aspect-video w-full items-center justify-center rounded-xl border border-dashed border-border-strong bg-bg-soft/60 px-3 text-center text-xs text-faint">
-              When a review runs in band.ai, the live analysis streams here.
-            </div>
-            <p className="mt-3 text-xs text-muted">
-              Open the band.ai room and mention <span className="font-mono text-fg">@Conductor</span> with an advertisement.
-              The transcript, keyframes, and per-material verdicts will appear here and on the cards.
-            </p>
+            {activeRun ? (
+              <div className="mt-3">
+                <RunTimeline run={activeRun} />
+              </div>
+            ) : (
+              <>
+                <div className="mt-3 flex aspect-video w-full items-center justify-center rounded-xl border border-dashed border-border-strong bg-bg-soft/60 px-3 text-center text-xs text-faint">
+                  When a review runs in band.ai, the live timeline streams here.
+                </div>
+                <p className="mt-3 text-xs text-muted">
+                  Open the band.ai room and mention <span className="font-mono text-fg">@Conductor</span> with an advertisement.
+                  Each beat (perception, pods reviewing, report, your decision, new material) lands here live.
+                </p>
+              </>
+            )}
             {campaignVerdict ? (
-              <div className="mt-3 flex items-center gap-2">
+              <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
                 <span className="text-xs text-faint">Campaign worst-case:</span>
                 <VerdictPill decision={campaignVerdict} />
               </div>
             ) : null}
           </div>
+
+          {runs.length > 1 ? (
+            <div className="surface rounded-2xl p-4">
+              <p className="eyebrow">Recent runs</p>
+              <ul className="mt-2 space-y-1">
+                {runs.map((r) => (
+                  <li key={r.id}>
+                    <button
+                      type="button"
+                      onClick={() => selectRun(r.id)}
+                      className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
+                        activeRun?.id === r.id ? 'bg-accent/10 text-fg' : 'text-muted hover:bg-bg-soft/60 hover:text-fg'
+                      }`}
+                    >
+                      <span className="truncate">{r.label}</span>
+                      <RunStatusDot status={r.status} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </aside>
 
         <section className="min-w-0 flex-1 space-y-4">
@@ -281,6 +315,16 @@ function VerdictPill({ decision }: { decision: ReviewDecision }) {
       {REVIEW_LABEL[decision]}
     </span>
   );
+}
+
+const RUN_STATUS_DOT: Record<RunStatus, string> = {
+  running: 'bg-accent',
+  'awaiting-decision': 'bg-warn',
+  complete: 'bg-human',
+  error: 'bg-danger',
+};
+function RunStatusDot({ status }: { status: RunStatus }) {
+  return <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${RUN_STATUS_DOT[status]}`} title={status} />;
 }
 
 // Reviews happen in band.ai. This copies the exact mention to paste into the room,
