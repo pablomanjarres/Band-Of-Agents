@@ -365,8 +365,21 @@ export class RealBandTransport implements BandTransport {
       throw new Error('Relay REST facade unavailable (agent.runtime.link.rest createChat/addChatParticipant/createChatMessage/listMessages)');
     }
     const api = rest;
+    // The SDK only surfaces a room's messages to an agent that has subscribed to it,
+    // and a freshly-created room is not auto-subscribed, so keep re-subscribing on a
+    // short interval (mirrors connectAgent). Without this listMessages returns [].
+    const subscribe = (): void => {
+      try {
+        void (agent as { runtime?: { link?: { subscribeAgentRooms?: () => Promise<void> } } }).runtime?.link?.subscribeAgentRooms?.();
+      } catch {
+        /* best effort */
+      }
+    };
+    subscribe();
+    const subTimer = setInterval(subscribe, 4000);
     const onTaskBind: TaskBindNote = (roomId, taskId) => dbg(`relay room ${roomId} bound to task ${taskId}`);
     const control = buildIntakeControl(api, onTaskBind, async () => {
+      clearInterval(subTimer);
       await agent.stop();
     });
     const listMessages = async (roomId: string, pageSize = 30): Promise<RelayMessage[]> => {
@@ -383,7 +396,7 @@ export class RealBandTransport implements BandTransport {
         }))
         .sort((a, b) => a.ts - b.ts);
     };
-    return { control, listMessages, stop: async () => { await agent.stop(); } };
+    return { control, listMessages, stop: async () => { clearInterval(subTimer); await agent.stop(); } };
   }
 
   /**
