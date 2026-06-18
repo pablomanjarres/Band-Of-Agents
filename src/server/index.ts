@@ -24,6 +24,8 @@ import { z } from 'zod';
 import { loadBrandDna, loadRulebook } from '../domain/load';
 import { Advertisement as AdvertisementSchema, Campaign as CampaignSchema, ContentAsset as ContentAssetSchema, Material as MaterialSchema, MaterialReview as MaterialReviewSchema, Rulebook as RulebookSchema } from '../domain/types';
 import type { Advertisement, Campaign, ContentAsset, Material, Rulebook } from '../domain/types';
+import { CreateRunSchema, RunEventInputSchema, toRunSummary } from '../domain/runs';
+import type { Run, RunEvent, RunStatus } from '../domain/runs';
 import { NewArtifact as NewArtifactSchema } from '../domain/artifact';
 import { BoardSession, realBoardModels, realPerceptionModels, type BoardModels } from '../board/session';
 import { transcribeVideoMaterial } from '../perception/transcribe';
@@ -94,6 +96,36 @@ interface CampaignReviewRecord {
 
 const reviews = new Map<string, ReviewRecord>();
 const campaignReviews = new Map<string, CampaignReviewRecord>();
+
+// Live band.ai run mirror (Stage B): the agents POST a run when a review starts and
+// append one lifecycle event per beat; the dashboard subscribes (SSE) and lists them.
+// In-memory like campaignReviews: the DURABLE record of "this was reviewed" is the
+// material.review verdict (GCS-backed); a run is the ephemeral live timeline.
+interface RunRecord extends Run {
+  subscribers: Set<(event: RunEvent) => void>;
+}
+const runs = new Map<string, RunRecord>();
+const MAX_RUNS = 60; // keep memory bounded; oldest runs drop off
+
+function appendRunEvent(
+  record: RunRecord,
+  input: { stage: RunEvent['stage']; message: string; agent?: string; materialId?: string; artifact?: RunEvent['artifact']; status?: RunStatus },
+): RunEvent {
+  const event: RunEvent = {
+    seq: record.events.length,
+    at: Date.now(),
+    stage: input.stage,
+    message: input.message,
+    ...(input.agent ? { agent: input.agent } : {}),
+    ...(input.materialId ? { materialId: input.materialId } : {}),
+    ...(input.artifact ? { artifact: input.artifact } : {}),
+  };
+  record.events.push(event);
+  record.updatedAt = event.at;
+  if (input.status) record.status = input.status;
+  for (const sub of record.subscribers) sub(event);
+  return event;
+}
 // The long-lived BandBoard (BOARD_MODE=band): connected once in main(), it hosts
 // the agents that do the reviewing in band.ai. runCampaignReview drives it via a
 // CampaignBandSession (Intake posts each material into a band.ai room; the board
@@ -976,6 +1008,106 @@ app.post('/api/materials/:materialId/review', async (c) => {
   if (!camp) return c.json({ error: 'material not found' }, 404);
   store.saveCampaign(patchMaterial(camp, materialId, (m) => ({ ...m, review })));
   return c.json({ ok: true, campaignId: camp.id, materialId, review });
+});
+
+// --- Live run mirror (Stage B): the band.ai agents POST a run when a review starts
+// and append one lifecycle event per beat; the dashboard subscribes (SSE) and lists
+// them. This is the visible bridge between band.ai and the UI. See src/domain/runs.ts. ---
+
+// Open a run (the Conductor calls this when a human asks for a review in band.ai).
+app.post('/api/runs', async (c) => {
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const parsed = CreateRunSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const now = Date.now();
+  const id = `run-${randomUUID().slice(0, 8)}`;
+  const record: RunRecord = {
+    id,
+    campaignId: parsed.data.campaignId,
+    ...(parsed.data.advertisementId ? { advertisementId: parsed.data.advertisementId } : {}),
+    ...(parsed.data.materialId ? { materialId: parsed.data.materialId } : {}),
+    label: parsed.data.label ?? 'Review',
+    status: 'running',
+    createdAt: now,
+    updatedAt: now,
+    events: [],
+    subscribers: new Set(),
+  };
+  runs.set(id, record);
+  // Bound memory: drop the oldest runs beyond MAX_RUNS.
+  if (runs.size > MAX_RUNS) {
+    for (const r of [...runs.values()].sort((a, b) => a.createdAt - b.createdAt).slice(0, runs.size - MAX_RUNS)) {
+      runs.delete(r.id);
+    }
+  }
+  return c.json({ id, run: toRunSummary(record) });
+});
+
+// Append a lifecycle event to a run (and optionally advance its status).
+app.post('/api/runs/:id/events', async (c) => {
+  const record = runs.get(c.req.param('id'));
+  if (!record) return c.json({ error: 'not found' }, 404);
+  const body: unknown = await c.req.json().catch(() => ({}));
+  const parsed = RunEventInputSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
+  const event = appendRunEvent(record, parsed.data);
+  return c.json({ ok: true, event, status: record.status });
+});
+
+// The full run (timeline) for the UI.
+app.get('/api/runs/:id', (c) => {
+  const record = runs.get(c.req.param('id'));
+  if (!record) return c.json({ error: 'not found' }, 404);
+  const { subscribers, ...run } = record;
+  void subscribers;
+  return c.json({ run });
+});
+
+// Recent runs for a campaign (summaries, newest first), so the dashboard can list them.
+app.get('/api/campaigns/:id/runs', (c) => {
+  const campaignId = c.req.param('id');
+  // Map preserves creation order (oldest -> newest); reverse = newest first, stable
+  // even when several runs are created within the same millisecond.
+  const list = [...runs.values()]
+    .filter((r) => r.campaignId === campaignId)
+    .reverse()
+    .map(toRunSummary);
+  return c.json({ runs: list });
+});
+
+// Live SSE stream of a run's events: replay what happened, then stream new beats,
+// closing when the run reaches a terminal status (complete / error).
+app.get('/api/runs/:id/events', (c) => {
+  const record = runs.get(c.req.param('id'));
+  if (!record) return c.json({ error: 'not found' }, 404);
+  // status is mutated asynchronously by appendRunEvent; read it through a helper so
+  // TS does not narrow it away after the early-return guard.
+  const isTerminal = (): boolean => record.status === 'complete' || record.status === 'error';
+  return streamSSE(c, async (stream) => {
+    for (const event of record.events) await stream.writeSSE({ data: JSON.stringify(event) });
+    if (isTerminal()) return;
+    const queue: RunEvent[] = [];
+    let wake: (() => void) | null = null;
+    const sub = (event: RunEvent): void => {
+      queue.push(event);
+      if (wake) {
+        wake();
+        wake = null;
+      }
+    };
+    record.subscribers.add(sub);
+    try {
+      for (;;) {
+        if (queue.length === 0) await new Promise<void>((resolve) => (wake = resolve));
+        const event = queue.shift();
+        if (!event) continue;
+        await stream.writeSSE({ data: JSON.stringify(event) });
+        if (isTerminal()) break;
+      }
+    } finally {
+      record.subscribers.delete(sub);
+    }
+  });
 });
 
 // Campaign review state for the UI: status, the observational rollup (worst-case

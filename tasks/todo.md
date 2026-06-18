@@ -2,23 +2,37 @@
 
 Sequencing chosen by user: Stage A first, then Stage B.
 
-## Stage A: clarity + honesty (now)
-- [ ] Remove the stub-review buttons (Run review / Re-run review / Review this ad) from CampaignDetailPage
-- [ ] Stop the in-UI fake review (POST /api/reviews) trigger; give LIVE PROCESSING + matrix honest empty states (no fake greens)
-- [ ] MaterialDetail: replace "PER-REGION VALIDATION not validated" with the REAL band.ai verdict (material.review: decision pill + report link + summary); honest "not yet reviewed" empty state
-- [ ] Campaign header badge derived from real verdicts (worst-case of material.review), not the fake rollup
-- [ ] AddMaterialForm: plain-language labels + tooltips on every field (NAME, KIND, COPY, CLAIM, CHANNEL, MARKETS)
-- [ ] Upload box: confirm "uploaded" only; move the transcription/frames copy out
-- [ ] Cross-app guidance: "Reviews run in band.ai. Open the room and @Conductor to review this advertisement." (+ link to the band.ai room)
-- [ ] Verify: web typecheck + build, deploy (push main), visual check on the deployed app
+## Stage A: clarity + honesty (DONE, deployed)
+- [x] Remove the stub-review buttons (Run review / Re-run review / Review this ad)
+- [x] Stop the in-UI fake review trigger; honest empty states (no fake greens)
+- [x] MaterialDetail: show the REAL band.ai verdict (decision pill + summary + report link)
+- [x] Campaign header + ad tabs + worst-case derived from real verdicts
+- [x] AddMaterialForm: plain-language hints on every field (copy vs claim) + examples
+- [x] Upload box: confirm "uploaded" only
+- [x] Cross-app guidance: "Reviews run in band.ai" + Review-in-band.ai button (copies @Conductor command)
+- [x] Verified: web build clean; deployed; live build hash confirmed
 
-## Stage B: live run mirror (next)
-- [ ] Backend: runs store + POST /api/runs, POST /api/runs/:id/events, SSE GET /api/runs/:id/events (reuse the existing BoardEvent + SSE infra)
-- [ ] Agents: forward lifecycle events (received, transcript, frames/vision, pod reviewing, report ready, awaiting-decision, decided, new-material) to the backend run
-- [ ] UI: LIVE PROCESSING panel becomes the live run timeline; a Runs list; agent-created images render as proposals; decision reflected back
-- [ ] Verify end to end against a real band.ai review
+## Stage B: live run mirror
+### Slice 1: backend runs store (DONE, verified)
+- [x] src/domain/runs.ts: Run / RunEvent / RunStage / schemas + toRunSummary
+- [x] server: runs Map + appendRunEvent; POST /api/runs, POST /api/runs/:id/events, GET /api/runs/:id, GET /api/campaigns/:id/runs, SSE GET /api/runs/:id/events
+- [x] test/runs.test.ts: 7 tests pass; src typecheck clean
+- [x] Confirmed the 5 server-campaigns failures are pre-existing (load-driven timeouts), not from this change
+
+### Slice 2: agents forward lifecycle to a run (next)
+- [ ] run/agents.ts: openRun (POST /api/runs) + recordRunEvent (POST /api/runs/:id/events) against BACKEND
+- [ ] Wire emit points: requested (Conductor), perceiving/transcript, pods reviewing, report (Adjudicator), awaiting-decision, decided, new material (Remediation image/copy)
+- [ ] Unit-test the wiring (a fake poster captures the run events)
+
+### Slice 3: UI live run timeline (next)
+- [ ] api.ts: getCampaignRuns, getRun, subscribeToRun (SSE)
+- [ ] LIVE PROCESSING panel becomes the live run timeline; a Runs list; new-material proposals render
+- [ ] web build clean
+
+### Deploy + verify end to end
+- [ ] Redeploy backend (runs endpoints) + push frontend + restart agents
+- [ ] Drive a real band.ai review -> run appears live in the dashboard with new material
 
 ## Notes
-- The fake review = stub models returning zero findings -> reconciler auto-stamps every region "publish" (src/run/demo-fixtures.ts + src/agents/reconcile.ts decideRegion). Removing the trigger is safe.
-- Real verdicts already persist on material.review via POST /api/materials/:id/review (written by the band.ai Adjudicator's recordVerdict).
-- Do NOT delete PerceptionPanel / matrix / board reducer: Stage B repurposes them for the live run feed.
+- Runs are in-memory (like campaignReviews). Durable "this was reviewed" is material.review (GCS). For a single Cloud Run instance this is fine; if it scales, pin max-instances=1 or persist runs.
+- The backend POST /api/reviews stub path still exists (now unused by the UI); its tests are the load-sensitive ones. Candidate for later removal.
