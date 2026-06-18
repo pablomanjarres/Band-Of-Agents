@@ -18,7 +18,8 @@ import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
+import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { loadBrandDna, loadRulebook } from '../domain/load';
@@ -683,10 +684,47 @@ app.get('/api/images/:name', (c) => {
   return c.body(new Uint8Array(buf), 200, { 'content-type': imageContentType(c.req.param('name')), 'cache-control': 'public, max-age=31536000, immutable' });
 });
 
+// Serve a hosted video. Streams from disk (so large files never load fully into
+// memory) and honours HTTP Range requests, which browsers use to scrub/seek a
+// <video>. A missing or unreadable file is a clean 404, never a 500: the client
+// then shows its graceful "preview unavailable" fallback instead of a broken icon.
 app.get('/api/videos/:name', (c) => {
-  const buf = store.readVideo(c.req.param('name'));
-  if (!buf) return c.json({ error: 'not found' }, 404);
-  return c.body(new Uint8Array(buf), 200, { 'content-type': videoContentType(c.req.param('name')), 'cache-control': 'public, max-age=31536000, immutable' });
+  try {
+    const name = c.req.param('name');
+    const file = store.videoFile(name);
+    if (!file) return c.json({ error: 'not found' }, 404);
+    const { path, size } = file;
+    const contentType = videoContentType(name);
+    const range = c.req.header('range');
+    const m = range ? /^bytes=(\d*)-(\d*)$/.exec(range.trim()) : null;
+    if (m) {
+      let start = m[1] ? parseInt(m[1], 10) : 0;
+      let end = m[2] ? parseInt(m[2], 10) : size - 1;
+      if (!Number.isFinite(start) || start < 0) start = 0;
+      if (!Number.isFinite(end) || end >= size) end = size - 1;
+      if (start > end || start >= size) {
+        return c.body(null, 416, { 'content-range': `bytes */${size}`, 'accept-ranges': 'bytes' });
+      }
+      const stream = Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream;
+      return c.body(stream, 206, {
+        'content-type': contentType,
+        'content-range': `bytes ${start}-${end}/${size}`,
+        'accept-ranges': 'bytes',
+        'content-length': String(end - start + 1),
+        'cache-control': 'public, max-age=31536000, immutable',
+      });
+    }
+    const stream = Readable.toWeb(createReadStream(path)) as ReadableStream;
+    return c.body(stream, 200, {
+      'content-type': contentType,
+      'content-length': String(size),
+      'accept-ranges': 'bytes',
+      'cache-control': 'public, max-age=31536000, immutable',
+    });
+  } catch (err) {
+    console.warn('[videos] read failed:', (err as Error)?.message ?? err);
+    return c.json({ error: 'not found' }, 404);
+  }
 });
 
 // Multipart video upload. Hosts the file under data/videos/ and returns its served
