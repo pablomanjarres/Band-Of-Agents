@@ -88,6 +88,35 @@ interface IntakeRest {
   ) => Promise<unknown>;
 }
 
+// The same facade plus listMessages, used by the relay so our UI can READ a room's
+// messages (the agent replies) and stream them back to a judge who never logs in.
+interface RelayRest extends IntakeRest {
+  listMessages?: (a: { chatId: string; page: number; pageSize: number }) => Promise<{ data?: PlatformChatMsg[] }>;
+}
+
+/** One room message normalized for our UI (the relay's read shape). */
+export interface RelayMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  /** 'user' for a human/intake post, otherwise the agent type/role. */
+  senderType: string;
+  content: string;
+  /** epoch ms (from inserted_at). */
+  ts: number;
+}
+
+/**
+ * A relay connection: an IntakeControl to create rooms / add agents / post as the
+ * human (INTAKE identity), plus listMessages to read the room back. Used by the
+ * server's chat-relay routes so judges talk to the agents from our UI without auth.
+ */
+export interface RelayConnection {
+  control: IntakeControl;
+  listMessages(roomId: string, pageSize?: number): Promise<RelayMessage[]>;
+  stop(): Promise<void>;
+}
+
 type EmitActivity = (kind: 'message' | 'event', content: string, messageType: string) => void;
 
 /** A trace sink for the task binding: called with the new room id and the task (asset) id. */
@@ -311,6 +340,50 @@ export class RealBandTransport implements BandTransport {
     return buildIntakeControl(api, onTaskBind, async () => {
       await agent.stop();
     });
+  }
+
+  /**
+   * Connect the relay identity (default INTAKE) and return both an IntakeControl
+   * (create room / add agents / post as the human) AND a listMessages reader, so our
+   * server can drive a band.ai room on a judge's behalf and stream the agents' replies
+   * back into our UI without the judge ever authenticating. Mirrors connectIntake but
+   * also requires the listMessages REST method (for reading the room).
+   */
+  async connectRelay(opts: { envPrefix?: string; name?: string } = {}): Promise<RelayConnection> {
+    const config = opts.envPrefix ? loadAgentConfigFromEnv({ prefix: opts.envPrefix }) : loadAgentConfigFromEnv();
+    const agent = Agent.create({ adapter: new GenericAdapter(async () => {}), config });
+    dbg(`${opts.name ?? 'Relay'} connecting (${config.agentId})`);
+    void agent.run({ signals: false });
+
+    let rest: RelayRest | undefined;
+    for (let i = 0; i < 20; i += 1) {
+      rest = (agent as { runtime?: { link?: { rest?: RelayRest } } })?.runtime?.link?.rest;
+      if (rest?.createChat && rest.addChatParticipant && rest.createChatMessage && rest.listMessages) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!rest?.createChat || !rest.addChatParticipant || !rest.createChatMessage || !rest.listMessages) {
+      throw new Error('Relay REST facade unavailable (agent.runtime.link.rest createChat/addChatParticipant/createChatMessage/listMessages)');
+    }
+    const api = rest;
+    const onTaskBind: TaskBindNote = (roomId, taskId) => dbg(`relay room ${roomId} bound to task ${taskId}`);
+    const control = buildIntakeControl(api, onTaskBind, async () => {
+      await agent.stop();
+    });
+    const listMessages = async (roomId: string, pageSize = 30): Promise<RelayMessage[]> => {
+      const res = await api.listMessages!({ chatId: roomId, page: 1, pageSize });
+      const data = res.data ?? [];
+      return data
+        .map((m) => ({
+          id: m.id,
+          senderId: m.sender_id,
+          senderName: m.sender_name ?? m.sender_type ?? 'agent',
+          senderType: m.sender_type ?? 'agent',
+          content: m.content ?? '',
+          ts: new Date(m.inserted_at).getTime(),
+        }))
+        .sort((a, b) => a.ts - b.ts);
+    };
+    return { control, listMessages, stop: async () => { await agent.stop(); } };
   }
 
   /**

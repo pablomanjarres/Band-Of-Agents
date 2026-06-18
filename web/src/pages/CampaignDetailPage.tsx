@@ -6,6 +6,7 @@ import { AdvertisementTabs } from '../components/AdvertisementTabs';
 import { DossierEditor } from '../components/DossierEditor';
 import { MaterialCard } from '../components/MaterialCard';
 import { MaterialDetail } from '../components/MaterialDetail';
+import { ReviewChat } from '../components/ReviewChat';
 import type { Campaign, MaterialReview, VerdictDecision } from '../types';
 
 type LoadState =
@@ -55,6 +56,8 @@ export function CampaignDetailPage() {
   const [detailMaterialId, setDetailMaterialId] = useState<string | undefined>(undefined);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
   const [showAddAd, setShowAddAd] = useState(false);
+  // When set, opens the live chat with the agents scoped to this advertisement.
+  const [chatAdId, setChatAdId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -190,6 +193,15 @@ export function CampaignDetailPage() {
                       <span className="ml-2 font-sans text-xs font-normal text-faint">{selectedAd.materials.length} material{selectedAd.materials.length === 1 ? '' : 's'}</span>
                     </h2>
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setChatAdId(selectedAd.id)}
+                        disabled={selectedAd.materials.length === 0}
+                        className="btn border border-violet-400/40 bg-violet-500/10 px-3 py-1.5 text-violet-200 hover:bg-violet-500/15"
+                        title="Open a live chat with the agents to review this advertisement"
+                      >
+                        Open review chat
+                      </button>
                       <ReviewInBand command={`@Conductor review the ${selectedAd.name} advertisement`} />
                       <button
                         type="button"
@@ -271,6 +283,21 @@ export function CampaignDetailPage() {
           }}
         />
       ) : null}
+
+      {/* Live chat with the agents, scoped to one advertisement (judge-facing, no auth). */}
+      {chatAdId ? (() => {
+        const chatAd = campaign.advertisements.find((a) => a.id === chatAdId);
+        return (
+          <ReviewChat
+            key={chatAdId}
+            campaignId={campaign.id}
+            advertisementId={chatAdId}
+            campaignName={campaign.name}
+            {...(chatAd ? { advertisementName: chatAd.name } : {})}
+            onClose={() => setChatAdId(null)}
+          />
+        );
+      })() : null}
     </div>
   );
 }

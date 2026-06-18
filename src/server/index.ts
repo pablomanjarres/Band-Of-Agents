@@ -34,6 +34,7 @@ import { type ModelClient, type SttClient } from '../models/client';
 import { demoCampaignModels, demoPerception } from '../run/demo-fixtures';
 import { CampaignSession, type CampaignRollup } from '../board/campaign';
 import { CampaignBandSession } from '../board/campaign-band';
+import { createReviewRoom, postUserMessage, listRoomMessages, selectNewMessages, relayConfigured } from './relay';
 import { BandBoard } from '../board/band-session';
 import { modelFor } from '../models/route';
 import { importRulebook, type ImportFormat } from '../domain/rulebook-import';
@@ -817,6 +818,72 @@ app.post('/api/videos/finalize', async (c) => {
   return c.json(
     await finalizeVideoUpload(videoUrl, body.campaignId ?? '', body.advertisementId ?? '', body.materialId ?? ''),
   );
+});
+
+// --- Chat relay: judges talk to the band.ai agents from our UI, no auth ----------
+// Our server drives a real band.ai room as the INTAKE identity (see ./relay): create
+// a room + add the Conductor + post on the judge's behalf, and stream the agents'
+// replies back. The reviewer agents run as their own always-on process and
+// self-assemble once the Conductor is @mentioned. With no relay creds these 503.
+
+app.post('/api/rooms', async (c) => {
+  if (!relayConfigured()) return c.json({ error: 'chat relay not configured' }, 503);
+  const body = (await c.req.json().catch(() => ({}))) as { campaignId?: unknown; advertisementId?: unknown };
+  const campaignId = typeof body.campaignId === 'string' ? body.campaignId : '';
+  const advertisementId = typeof body.advertisementId === 'string' ? body.advertisementId : '';
+  const campaign = campaignId ? store.getCampaign(campaignId) : undefined;
+  if (!campaign) return c.json({ error: 'unknown campaignId' }, 400);
+  const ad = advertisementId ? campaign.advertisements.find((a) => a.id === advertisementId) : undefined;
+  try {
+    const roomId = await createReviewRoom({
+      taskId: campaignId,
+      campaignName: campaign.name,
+      ...(ad ? { advertisementName: ad.name } : {}),
+    });
+    return c.json({ roomId });
+  } catch (err) {
+    console.warn('[rooms] create failed:', (err as Error)?.message ?? err);
+    return c.json({ error: 'could not start the chat (band.ai relay unavailable)' }, 502);
+  }
+});
+
+app.post('/api/rooms/:id/messages', async (c) => {
+  if (!relayConfigured()) return c.json({ error: 'chat relay not configured' }, 503);
+  const roomId = c.req.param('id');
+  const body = (await c.req.json().catch(() => ({}))) as { text?: unknown };
+  const text = typeof body.text === 'string' ? body.text.trim() : '';
+  if (!text) return c.json({ error: 'text required' }, 400);
+  try {
+    await postUserMessage(roomId, text);
+    return c.json({ ok: true });
+  } catch (err) {
+    console.warn('[rooms] post failed:', (err as Error)?.message ?? err);
+    return c.json({ error: 'could not send the message' }, 502);
+  }
+});
+
+// SSE stream of a room's messages (agent replies + our posts). Polls band.ai every
+// ~2s and emits each not-yet-seen message; a periodic ping keeps the connection open.
+app.get('/api/rooms/:id/events', (c) => {
+  if (!relayConfigured()) return c.json({ error: 'chat relay not configured' }, 503);
+  const roomId = c.req.param('id');
+  return streamSSE(c, async (stream) => {
+    const seen = new Set<string>();
+    let aborted = false;
+    stream.onAbort(() => {
+      aborted = true;
+    });
+    while (!aborted) {
+      try {
+        const fresh = selectNewMessages(seen, await listRoomMessages(roomId));
+        for (const m of fresh) await stream.writeSSE({ data: JSON.stringify(m) });
+      } catch (err) {
+        await stream.writeSSE({ event: 'poll-error', data: JSON.stringify({ message: (err as Error)?.message ?? 'poll failed' }) }).catch(() => {});
+      }
+      await stream.writeSSE({ event: 'ping', data: '' }).catch(() => {});
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+    }
+  });
 });
 
 // Multipart image upload. Hosts the file under data/images/ and returns its served
