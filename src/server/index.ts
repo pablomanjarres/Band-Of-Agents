@@ -475,13 +475,45 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
         // roomId, so rooms never collide across reviews. session.dispose() exists
         // for an explicit teardown if a caller ever needs it.
         rollup = await session.run();
+      } else if (BOARD_TOPOLOGY === 'pods') {
+        // Pods topology: run each material through PodBoardSession concurrently (the
+        // full 3-pod deliberation + decision spine per material).
+        const ads = advertisementId
+          ? campaign.advertisements.filter((a) => a.id === advertisementId)
+          : campaign.advertisements;
+        const materials = ads.flatMap((ad) => ad.materials.map((m) => ({ ad, material: m })));
+        const perMaterial = materials.map(({ ad, material }) => {
+          const asset = {
+            id: material.id,
+            name: material.name ?? material.id,
+            channel: material.kind ?? 'social',
+            markets: ad.markets ?? campaign.markets ?? ['US', 'EU', 'LATAM'],
+            copy: material.copy ?? '',
+            claim: material.claim ?? material.copy ?? '',
+            ...(material.imageUrl ? { imageUrl: material.imageUrl } : {}),
+            ...(material.substantiation ? { substantiation: material.substantiation } : {}),
+            ...(material.imagePrompt ? { imagePrompt: material.imagePrompt } : {}),
+          };
+          const roomId = `campaign-${id}::${ad.id}::${material.id}`;
+          return new PodBoardSession({
+            roomId,
+            asset,
+            brand,
+            rulebooks: currentRulebooks(),
+            models: realPodBoardModels(),
+            onEvent: (e) => onEvent({ ...e, campaignId: campaign.id, advertisementId: ad.id, materialId: material.id } as BoardEvent),
+            onPrecedent: (p) => store.appendPrecedent({ roomId, regions: [], decision: `${p.decision}: ${p.claim}` }),
+            hostImage: (u) => store.hostImage(u) ?? u,
+            getPrecedents: recentPrecedents,
+            getRulebook: (region) => store.getRulebookOverride(region) ?? defaultRulebooks[region.toLowerCase() as RegionKey] ?? defaultRulebooks.us,
+          });
+        });
+        await Promise.all(perMaterial.map((s) => s.run()));
+        rollup = { campaignId: campaign.id, worstCaseByRegion: [], perAdvertisement: [], matrix: [], perMaterial: [] };
       } else {
         const session = new CampaignSession({
           roomId: `campaign-${id}`,
           campaign,
-          // Optional scope: when present, only this advertisement's materials are
-          // reviewed (still concurrent, still per material); the rollup then covers
-          // just that ad. Absent => the unchanged whole-campaign review.
           ...(advertisementId ? { advertisementId } : {}),
           brand,
           rulebooks: currentRulebooks(),
