@@ -32,6 +32,12 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
   // arrived, so the pod adapts to a partial roster (e.g. band.ai's 14-agent room
   // cap) instead of waiting forever for an absent member.
   const expectedKeys = new Map<string, string[]>();
+  // band.ai delivery is at-most-once: it can DROP a present member's reply message,
+  // which would hang haveAll forever. A per-room fallback timer consolidates from the
+  // hub (where reviewers write their findings directly) even if a reply message never
+  // lands, so the pod always files and the review concludes.
+  const fallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const POD_FALLBACK_MS = Number(process.env.POD_FALLBACK_MS ?? 40000);
 
   const detectConflicts = (all: MemberReply[], keys: string[]): ConflictItem[] => {
     const byClaim = new Map<string, { blockedBy: string[]; passedBy: string[]; rationale: string }>();
@@ -63,7 +69,11 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
     const map = replies.get(roomId);
     if (!map) return;
     const keys = expectedKeys.get(roomId) ?? opts.memberKeys;
-    const all = keys.map((k) => map.get(k)).filter((r): r is MemberReply => Boolean(r));
+    // Recover a dropped member's findings from the hub (reviewers write there directly),
+    // so a lost reply message does not lose that region's findings.
+    const all = keys
+      .map((k) => map.get(k) ?? (opts.hub ? { key: k, findings: opts.hub.finding(roomId, k) ?? [] } : undefined))
+      .filter((r): r is MemberReply => Boolean(r));
     const findings = all.flatMap((r) => r.findings);
     const conflicts = detectConflicts(all, keys);
     const pf: PodFinding = {
@@ -86,6 +96,8 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
     replies.delete(roomId);
     debated.delete(roomId);
     expectedKeys.delete(roomId);
+    const timer = fallbackTimers.get(roomId);
+    if (timer) { clearTimeout(timer); fallbackTimers.delete(roomId); }
   };
 
   // Solo mode: the lead reviews the asset itself (one model call) and files the pod
@@ -165,6 +177,16 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
       }
       expectedKeys.set(roomId, present);
       await tools.sendEvent(`${opts.pod} pod deliberating (${present.length} members)`, 'recruited', { pod: opts.pod });
+      // Arm the fallback: if a member's reply message is dropped, consolidate from the
+      // hub after a timeout so the pod never hangs. Cleared when all replies arrive.
+      if (present.length > 0) {
+        const prev = fallbackTimers.get(roomId);
+        if (prev) clearTimeout(prev);
+        fallbackTimers.set(roomId, setTimeout(() => {
+          fallbackTimers.delete(roomId);
+          void consolidateAndFile(roomId, tools, participants).catch(() => { /* best effort */ });
+        }, POD_FALLBACK_MS));
+      }
       // A pod with no members present files an empty finding at once so the spine still gets it.
       if (present.length === 0) await consolidateAndFile(roomId, tools, participants);
       return;
