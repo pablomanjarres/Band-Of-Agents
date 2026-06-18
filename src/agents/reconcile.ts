@@ -1,4 +1,4 @@
-import type { AgentHandler, Mention, Participant, RoomMessage, RoomTools } from '../band/types';
+import type { AgentContext, AgentHandler, Mention, Participant, RoomMessage, RoomTools } from '../band/types';
 import type { Finding, RegionVerdict, ReviewResult } from '../domain/types';
 import type { NewArtifact } from '../domain/artifact';
 import type { SharedBoard } from '../board/shared';
@@ -51,55 +51,37 @@ const MAX_REMEDIATION_ROUNDS = 1;
 // precedent. All structured data is read/written on the board, not the chat.
 export function makeReconcile(opts: ReconcileOptions): AgentHandler {
   const pendingByRoom = new Map<string, string[]>();
+  // One pending finalize timer per room. Reconcile normally waits for EVERY expected
+  // reviewer, but against real band.ai a reviewer's cue is sometimes not delivered, so
+  // it would wait forever. The timer concludes with whatever reviews arrived after a
+  // grace period, so a review always reaches a verdict. Tunable via RECONCILE_TIMEOUT_MS.
+  const timersByRoom = new Map<string, ReturnType<typeof setTimeout>>();
+  const TIMEOUT_MS = Number(process.env.RECONCILE_TIMEOUT_MS ?? 45000);
 
-  return async (message, tools, ctx) => {
-    const fromHumanProxy =
-      opts.humanProxyHandle !== undefined &&
-      message.senderType === 'agent' &&
-      nameMatchesHandle(message.senderName, opts.humanProxyHandle);
+  const clearRoomTimer = (roomId: string): void => {
+    const t = timersByRoom.get(roomId);
+    if (t) {
+      clearTimeout(t);
+      timersByRoom.delete(roomId);
+    }
+  };
 
-    // A human ruling on a pending escalation.
-    if (message.senderType === 'user' || fromHumanProxy) {
-      const regions = pendingByRoom.get(ctx.roomId);
-      if (!regions) return;
-      pendingByRoom.delete(ctx.roomId);
-      opts.logPrecedent?.({ roomId: ctx.roomId, regions, decision: message.content });
-      opts.board.decided(ctx.roomId, message.content);
-      await tools.sendEvent(
-        `Human decision recorded for ${regions.join('/')}: "${message.content}". Logged as precedent.`,
-        'decision',
-      );
+  // Produce and route the verdict for a room. `expected` is the full set; we decide
+  // only over the regions that actually reported (the all-in path passes a set where
+  // that is everyone; the timeout path passes a partial set). Idempotent per round.
+  const finalize = async (message: RoomMessage, tools: RoomTools, ctx: AgentContext, expected: string[]): Promise<void> => {
+    clearRoomTimer(ctx.roomId);
+    if (opts.board.hasVerdicts(ctx.roomId)) return;
+    const reviews = opts.board.reviews(ctx.roomId);
+    const byRegion = new Map<string, ReviewResult>(reviews.map((r) => [r.region, r]));
+    // Only verdict the regions that reported; a missing reviewer (band.ai didn't
+    // deliver its cue) is left out rather than blocking the conclusion forever.
+    const decideRegions = expected.filter((r) => byRegion.has(r));
+    if (decideRegions.length === 0) {
+      opts.board.complete(ctx.roomId);
       return;
     }
-
-    if (message.senderType !== 'agent') return;
-    if (!opts.board.campaign(ctx.roomId)) return;
-    // Decide once per round: reconcile is pinged once per reviewer report plus the
-    // coordinator's recruit, so skip if this round's verdicts are already in. A
-    // re-review clears them (startReReview), reopening the decision for that round.
-    if (opts.board.hasVerdicts(ctx.roomId)) return;
-
-    // Wait only for the reviewers this asset actually recruited. With targeted
-    // recruitment a single-market asset engages a subset of the regions, so a
-    // market-bound region not in the asset's markets is dropped from the wait set
-    // (Reconcile would otherwise block on a reviewer that never joins). Non-market
-    // reviewers like Brand are always expected. With no marketRegions configured
-    // this is a no-op and Reconcile waits for every expected region, as before.
-    const markets = opts.board.campaign(ctx.roomId)?.markets ?? [];
-    const marketBound = new Set(opts.marketRegions ?? []);
-    const expected =
-      marketBound.size === 0
-        ? opts.expectedRegions
-        : opts.expectedRegions.filter((r) => !marketBound.has(r) || markets.includes(r));
-
-    // A reviewer just reported. Read the running tally off the board.
-    const reviews = opts.board.reviews(ctx.roomId);
-    const have = new Set(reviews.map((r) => r.region));
-    await tools.sendEvent(`${have.size}/${expected.length} reviews in.`, 'reconcile');
-    if (!expected.every((r) => have.has(r))) return; // wait for the rest
-
-    const byRegion = new Map<string, ReviewResult>(reviews.map((r) => [r.region, r]));
-    const verdicts = expected.map((r) => decideRegion(byRegion.get(r)!));
+    const verdicts = decideRegions.map((r) => decideRegion(byRegion.get(r)!));
 
     // Re-review cap: once a region has been remediated MAX_REMEDIATION_ROUNDS
     // times, a still-fixable 'adapt' escalates to the human instead of looping.
@@ -189,6 +171,70 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
     // All clear: nothing to adapt or escalate.
     if (adaptRegions.length === 0 && escalateRegions.length === 0) {
       opts.board.complete(ctx.roomId);
+    }
+  };
+
+  return async (message, tools, ctx) => {
+    const fromHumanProxy =
+      opts.humanProxyHandle !== undefined &&
+      message.senderType === 'agent' &&
+      nameMatchesHandle(message.senderName, opts.humanProxyHandle);
+
+    // A human ruling on a pending escalation.
+    if (message.senderType === 'user' || fromHumanProxy) {
+      const regions = pendingByRoom.get(ctx.roomId);
+      if (!regions) return;
+      pendingByRoom.delete(ctx.roomId);
+      opts.logPrecedent?.({ roomId: ctx.roomId, regions, decision: message.content });
+      opts.board.decided(ctx.roomId, message.content);
+      await tools.sendEvent(
+        `Human decision recorded for ${regions.join('/')}: "${message.content}". Logged as precedent.`,
+        'decision',
+      );
+      return;
+    }
+
+    if (message.senderType !== 'agent') return;
+    if (!opts.board.campaign(ctx.roomId)) return;
+    // Decide once per round: reconcile is pinged once per reviewer report plus the
+    // coordinator's recruit, so skip if this round's verdicts are already in. A
+    // re-review clears them (startReReview), reopening the decision for that round.
+    if (opts.board.hasVerdicts(ctx.roomId)) return;
+
+    // Wait only for the reviewers this asset actually recruited. With targeted
+    // recruitment a single-market asset engages a subset of the regions, so a
+    // market-bound region not in the asset's markets is dropped from the wait set
+    // (Reconcile would otherwise block on a reviewer that never joins). Non-market
+    // reviewers like Brand are always expected. With no marketRegions configured
+    // this is a no-op and Reconcile waits for every expected region, as before.
+    const markets = opts.board.campaign(ctx.roomId)?.markets ?? [];
+    const marketBound = new Set(opts.marketRegions ?? []);
+    const expected =
+      marketBound.size === 0
+        ? opts.expectedRegions
+        : opts.expectedRegions.filter((r) => !marketBound.has(r) || markets.includes(r));
+
+    // A reviewer just reported. Read the running tally off the board.
+    const reviews = opts.board.reviews(ctx.roomId);
+    const have = new Set(reviews.map((r) => r.region));
+    await tools.sendEvent(`${have.size}/${expected.length} reviews in.`, 'reconcile');
+
+    if (expected.every((r) => have.has(r))) {
+      // Everyone reported: conclude now.
+      await finalize(message, tools, ctx, expected);
+      return;
+    }
+    // Not all in yet: arm a one-shot timer to conclude with whatever arrived, so a
+    // reviewer band.ai never delivered a cue to does not block the verdict forever.
+    // The captured tools/ctx stay valid (the agent connection is long-lived); unref
+    // so a pending timer never keeps a test process alive.
+    if (!timersByRoom.has(ctx.roomId)) {
+      const timer = setTimeout(() => {
+        timersByRoom.delete(ctx.roomId);
+        void finalize(message, tools, ctx, expected).catch(() => {});
+      }, TIMEOUT_MS);
+      (timer as { unref?: () => void }).unref?.();
+      timersByRoom.set(ctx.roomId, timer);
     }
   };
 }

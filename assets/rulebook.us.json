@@ -56,6 +56,159 @@
       "check": "'Free' offers must state all terms clearly up front and rest on a 30-day regular-price basis.",
       "requiredDisclosure": "Free-offer terms",
       "sourceUrl": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-251"
+    },
+    {
+      "id": "us-influencer-disclosure",
+      "region": "US",
+      "category": "endorsement",
+      "severity": "block",
+      "check": "Influencers and paid partners must include a clear and conspicuous disclosure (e.g. #ad, #sponsored, or 'Paid partnership with [brand]') that is immediately visible without scrolling. The disclosure must appear in the native language of the post and cannot be buried in a list of hashtags.",
+      "requiredDisclosure": "#ad or equivalent clear disclosure",
+      "sourceUrl": "https://www.ftc.gov/business-guidance/resources/disclosures-101-social-media-influencers"
+    },
+    {
+      "id": "us-green-claims",
+      "region": "US",
+      "category": "environmental",
+      "severity": "warn",
+      "check": "Environmental marketing claims ('eco-friendly', 'sustainable', 'carbon neutral', 'biodegradable', 'recyclable') must be truthful, not misleading, and qualified if they apply only to part of the product or under specific conditions. Unqualified 'green' or 'eco' labels are presumed deceptive.",
+      "requiredDisclosure": "Qualification of scope or conditions if not universally true",
+      "sourceUrl": "https://www.ftc.gov/business-guidance/resources/ftcs-green-guides"
+    },
+    {
+      "id": "us-native-advertising",
+      "region": "US",
+      "category": "disclosure",
+      "severity": "block",
+      "check": "Sponsored content that resembles editorial, news, or organic social content must be labeled clearly as advertising before the user engages. Labels like 'Sponsored', 'Ad', or 'Promoted' must be visually distinct and not disguised as organic posts.",
+      "requiredDisclosure": "Clear 'Sponsored' or 'Ad' label before content",
+      "sourceUrl": "https://www.ftc.gov/business-guidance/resources/native-advertising-guide-businesses"
+    },
+    {
+      "id": "us-children-coppa",
+      "region": "US",
+      "category": "children",
+      "severity": "block",
+      "check": "Content directed at children under 13 cannot collect personal information without verifiable parental consent (COPPA). Advertising to children must not exploit their inexperience or credulity, and host-selling (program character promoting products) in children's media is prohibited.",
+      "requiredDisclosure": "Verifiable parental consent mechanism if data is collected",
+      "sourceUrl": "https://www.ftc.gov/legal-library/browse/rules/childrens-online-privacy-protection-rule-coppa"
+    },
+    {
+      "id": "us-pricing-strikethrough",
+      "region": "US",
+      "category": "pricing",
+      "severity": "warn",
+      "check": "Strikethrough or 'was/now' pricing must reflect an actual former price at which the item was genuinely offered for a reasonable time in the recent past. Artificial inflation of the 'was' price to create a fictitious discount is deceptive.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/legal-library/browse/guides-use-word-free-similar-representations"
+    },
+    {
+      "id": "us-savings-claims",
+      "region": "US",
+      "category": "pricing",
+      "severity": "warn",
+      "check": "'Up to X% off', 'save $X', or 'as low as $X' claims must be substantiated. 'Up to' claims are misleading if only a trivial portion of items actually reach the maximum discount.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/business-guidance/resources/ftcs-revised-endorsement-guides-what-people-are-asking"
+    },
+    {
+      "id": "us-limited-time-urgency",
+      "region": "US",
+      "category": "pricing",
+      "severity": "warn",
+      "check": "Limited-time or limited-quantity urgency claims ('Only 3 left!', 'Offer ends tonight!') must reflect actual scarcity or deadline. Fake countdown timers or perpetually renewing 'limited' offers are deceptive.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/news-events/news/press-releases/2022/10/ftc-report-warns-about-harmful-dark-patterns"
+    },
+    {
+      "id": "us-clinically-proven",
+      "region": "US",
+      "category": "substantiation",
+      "severity": "block",
+      "check": "'Clinically proven', 'dermatologist tested', 'scientifically shown', or similar phrases imply a level of substantiation beyond a single study. At least two well-controlled clinical studies are typically expected to support these phrases for consumer products.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/business-guidance/resources/health-products-compliance-guidance"
+    },
+    {
+      "id": "us-before-after",
+      "region": "US",
+      "category": "substantiation",
+      "severity": "warn",
+      "check": "Before-and-after images must represent typical results. If depicted results are atypical, the ad must clearly state the typical consumer outcome. Images must not be enhanced or altered to exaggerate efficacy.",
+      "requiredDisclosure": "Typical-results disclosure if depicted results are exceptional",
+      "sourceUrl": "https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-255"
+    },
+    {
+      "id": "us-made-in-usa",
+      "region": "US",
+      "category": "origin",
+      "severity": "block",
+      "check": "Unqualified 'Made in USA' claims require that the product is all or virtually all made in the US (final assembly and substantially all parts domestic). Qualified claims (e.g. 'Assembled in USA with imported components') must be accurate.",
+      "requiredDisclosure": "Qualification if not all or virtually all domestic",
+      "sourceUrl": "https://www.ftc.gov/business-guidance/resources/complying-made-usa-standard"
+    },
+    {
+      "id": "us-negative-option",
+      "region": "US",
+      "category": "subscription",
+      "severity": "block",
+      "check": "Negative-option or auto-renewal offers must clearly and conspicuously disclose all material terms before purchase, obtain express affirmative consent, and provide a simple cancellation mechanism that is at least as easy as sign-up (FTC Click-to-Cancel rule).",
+      "requiredDisclosure": "Auto-renewal terms and cancellation method before checkout",
+      "sourceUrl": "https://www.ftc.gov/news-events/news/press-releases/2024/10/ftc-announces-final-click-cancel-rule-making-it-easier-consumers-end-subscriptions"
+    },
+    {
+      "id": "us-fake-reviews",
+      "region": "US",
+      "category": "endorsement",
+      "severity": "block",
+      "check": "Purchasing reviews, providing incentives for undisclosed positive reviews, suppressing negative reviews, or using insiders to post reviews without disclosure are all prohibited. AI-generated reviews not based on actual consumer experience are also prohibited.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/news-events/news/press-releases/2024/08/ftc-announces-final-rule-banning-fake-reviews-testimonials"
+    },
+    {
+      "id": "us-ai-generated-content",
+      "region": "US",
+      "category": "disclosure",
+      "severity": "warn",
+      "check": "Materially AI-generated images, video, or voice likenesses of real people used in advertising may require disclosure and consent depending on context. Deepfake-style content of identifiable individuals without consent is a deceptive practice.",
+      "requiredDisclosure": "Disclosure if AI-generated likeness of a real person is used",
+      "sourceUrl": "https://www.ftc.gov/policy/advocacy-research/tech-at-ftc/2023/02/how-ai-might-be-used-deceive-consumers"
+    },
+    {
+      "id": "us-dark-patterns",
+      "region": "US",
+      "category": "dark_pattern",
+      "severity": "block",
+      "check": "Deceptive design that obscures opt-out, hides cancellation, pre-selects paid add-ons, uses confusing double negatives in consent language, or creates false urgency to pressure purchase decisions violates FTC deception standards.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.ftc.gov/news-events/news/press-releases/2022/10/ftc-report-warns-about-harmful-dark-patterns"
+    },
+    {
+      "id": "us-number-one-claim",
+      "region": "US",
+      "category": "substantiation",
+      "severity": "warn",
+      "check": "'#1 brand', 'most trusted', 'America's favorite', or 'best-selling' claims must be supported by current, independently verifiable data. The claim must specify the basis (e.g. sales volume, survey, time period) if not self-evident.",
+      "requiredDisclosure": "Basis of claim (survey, sales data, time frame)",
+      "sourceUrl": "https://www.ftc.gov/tips-advice/competition-guidance/guide-antitrust-laws/single-firm-conduct/advertising-marketing"
+    },
+    {
+      "id": "us-prize-promotions",
+      "region": "US",
+      "category": "promotion",
+      "severity": "warn",
+      "check": "Sweepstakes and contests must disclose no-purchase-necessary alternatives, odds of winning, prize descriptions, and sponsor identity. Purchase cannot be required for sweepstakes entry.",
+      "requiredDisclosure": "Official rules including odds, ARV, and no-purchase-necessary statement",
+      "sourceUrl": "https://www.ftc.gov/tips-advice/business-center/guidance/business-guidance-concerning-multi-level-marketing"
+    },
+    {
+      "id": "us-financial-claims",
+      "region": "US",
+      "category": "financial",
+      "severity": "block",
+      "check": "Income or earnings opportunity claims ('earn $5,000 a month', 'financial freedom') must be substantiated with real typical earnings data. Claims that are only achievable by a small fraction of participants must clearly disclose typical or median earnings.",
+      "requiredDisclosure": "Income disclosure statement with typical-earnings data",
+      "sourceUrl": "https://www.ftc.gov/news-events/news/press-releases/2021/10/ftc-rulemaking-record-shows-multi-level-marketing-companies-continuing-make-deceptive-income-claims"
     }
   ]
 }

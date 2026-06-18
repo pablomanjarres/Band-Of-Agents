@@ -18,7 +18,8 @@ import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
+import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { loadBrandDna, loadRulebook } from '../domain/load';
@@ -35,6 +36,7 @@ import { type ModelClient, type SttClient } from '../models/client';
 import { demoCampaignModels, demoPerception } from '../run/demo-fixtures';
 import { CampaignSession, type CampaignRollup } from '../board/campaign';
 import { CampaignBandSession } from '../board/campaign-band';
+import { createReviewRoom, postUserMessage, listRoomMessages, selectNewMessages, relayConfigured } from './relay';
 import { BandBoard } from '../board/band-session';
 import { modelFor } from '../models/route';
 import { importRulebook, type ImportFormat } from '../domain/rulebook-import';
@@ -529,7 +531,7 @@ app.post('/api/reviews', async (c) => {
   // into a room, the connected agents review, we observe); in local mode it runs
   // the in-process CampaignSession. The single-asset payload below stays band.ai-
   // only in band mode (no regression to the local single-asset path).
-  const b = (body ?? {}) as { campaignId?: unknown; campaign?: unknown; advertisementId?: unknown };
+  const b = (body ?? {}) as { campaignId?: unknown; campaign?: unknown; advertisementId?: unknown; materialId?: unknown };
   if (typeof b.campaignId === 'string' || (b.campaign && typeof b.campaign === 'object')) {
     let campaign: Campaign | undefined;
     if (typeof b.campaignId === 'string') {
@@ -547,18 +549,34 @@ app.post('/api/reviews', async (c) => {
     if (advertisementId !== undefined && !campaign.advertisements.some((ad) => ad.id === advertisementId)) {
       return c.json({ error: `advertisement ${advertisementId} not found` }, 404);
     }
-    const scopedMaterials = (advertisementId !== undefined
-      ? campaign.advertisements.filter((ad) => ad.id === advertisementId)
-      : campaign.advertisements
+    // Optional scope to a SINGLE material: prune the campaign to just that material's
+    // advertisement carrying only that material, so the review opens exactly ONE
+    // band.ai room (one click = one chat) instead of one room per material.
+    const materialId = typeof b.materialId === 'string' ? b.materialId : undefined;
+    let reviewCampaign = campaign;
+    let reviewAdId = advertisementId;
+    if (materialId !== undefined) {
+      const candidateAds = advertisementId !== undefined
+        ? campaign.advertisements.filter((ad) => ad.id === advertisementId)
+        : campaign.advertisements;
+      const ad = candidateAds.find((a) => a.materials.some((m) => m.id === materialId));
+      if (!ad) return c.json({ error: `material ${materialId} not found` }, 404);
+      reviewCampaign = { ...campaign, advertisements: [{ ...ad, materials: ad.materials.filter((m) => m.id === materialId) }] };
+      reviewAdId = ad.id;
+    }
+    const scopedMaterials = (reviewAdId !== undefined
+      ? reviewCampaign.advertisements.filter((ad) => ad.id === reviewAdId)
+      : reviewCampaign.advertisements
     ).flatMap((ad) => ad.materials);
     if (scopedMaterials.length === 0) {
       return c.json({ error: advertisementId !== undefined ? `advertisement ${advertisementId} has no materials` : 'campaign has no materials' }, 400);
     }
-    const id = runCampaignReview(campaign, advertisementId);
+    const id = runCampaignReview(reviewCampaign, reviewAdId);
     return c.json({
       id,
       kind: 'campaign',
       ...(advertisementId !== undefined ? { advertisementId } : {}),
+      ...(materialId !== undefined ? { materialId } : {}),
       materials: scopedMaterials.map((m) => m.id),
     });
   }
@@ -715,10 +733,47 @@ app.get('/api/images/:name', (c) => {
   return c.body(new Uint8Array(buf), 200, { 'content-type': imageContentType(c.req.param('name')), 'cache-control': 'public, max-age=31536000, immutable' });
 });
 
+// Serve a hosted video. Streams from disk (so large files never load fully into
+// memory) and honours HTTP Range requests, which browsers use to scrub/seek a
+// <video>. A missing or unreadable file is a clean 404, never a 500: the client
+// then shows its graceful "preview unavailable" fallback instead of a broken icon.
 app.get('/api/videos/:name', (c) => {
-  const buf = store.readVideo(c.req.param('name'));
-  if (!buf) return c.json({ error: 'not found' }, 404);
-  return c.body(new Uint8Array(buf), 200, { 'content-type': videoContentType(c.req.param('name')), 'cache-control': 'public, max-age=31536000, immutable' });
+  try {
+    const name = c.req.param('name');
+    const file = store.videoFile(name);
+    if (!file) return c.json({ error: 'not found' }, 404);
+    const { path, size } = file;
+    const contentType = videoContentType(name);
+    const range = c.req.header('range');
+    const m = range ? /^bytes=(\d*)-(\d*)$/.exec(range.trim()) : null;
+    if (m) {
+      let start = m[1] ? parseInt(m[1], 10) : 0;
+      let end = m[2] ? parseInt(m[2], 10) : size - 1;
+      if (!Number.isFinite(start) || start < 0) start = 0;
+      if (!Number.isFinite(end) || end >= size) end = size - 1;
+      if (start > end || start >= size) {
+        return c.body(null, 416, { 'content-range': `bytes */${size}`, 'accept-ranges': 'bytes' });
+      }
+      const stream = Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream;
+      return c.body(stream, 206, {
+        'content-type': contentType,
+        'content-range': `bytes ${start}-${end}/${size}`,
+        'accept-ranges': 'bytes',
+        'content-length': String(end - start + 1),
+        'cache-control': 'public, max-age=31536000, immutable',
+      });
+    }
+    const stream = Readable.toWeb(createReadStream(path)) as ReadableStream;
+    return c.body(stream, 200, {
+      'content-type': contentType,
+      'content-length': String(size),
+      'accept-ranges': 'bytes',
+      'cache-control': 'public, max-age=31536000, immutable',
+    });
+  } catch (err) {
+    console.warn('[videos] read failed:', (err as Error)?.message ?? err);
+    return c.json({ error: 'not found' }, 404);
+  }
 });
 
 // Multipart video upload. Hosts the file under data/videos/ and returns its served
@@ -811,6 +866,71 @@ app.post('/api/videos/finalize', async (c) => {
   return c.json(
     await finalizeVideoUpload(videoUrl, body.campaignId ?? '', body.advertisementId ?? '', body.materialId ?? ''),
   );
+});
+
+// --- Chat relay: judges talk to the band.ai agents from our UI, no auth ----------
+// Our server drives a real band.ai room as the INTAKE identity (see ./relay): create
+// a room + add the Conductor + post on the judge's behalf, and stream the agents'
+// replies back. The reviewer agents run as their own always-on process and
+// self-assemble once the Conductor is @mentioned. With no relay creds these 503.
+
+app.post('/api/rooms', async (c) => {
+  if (!relayConfigured()) return c.json({ error: 'chat relay not configured' }, 503);
+  const body = (await c.req.json().catch(() => ({}))) as { campaignId?: unknown; advertisementId?: unknown };
+  const campaignId = typeof body.campaignId === 'string' ? body.campaignId : '';
+  const advertisementId = typeof body.advertisementId === 'string' ? body.advertisementId : '';
+  const campaign = campaignId ? store.getCampaign(campaignId) : undefined;
+  if (!campaign) return c.json({ error: 'unknown campaignId' }, 400);
+  const ad = advertisementId ? campaign.advertisements.find((a) => a.id === advertisementId) : undefined;
+  try {
+    const roomId = await createReviewRoom({
+      campaignName: campaign.name,
+      ...(ad ? { advertisementName: ad.name } : {}),
+    });
+    return c.json({ roomId });
+  } catch (err) {
+    console.warn('[rooms] create failed:', (err as Error)?.message ?? err);
+    return c.json({ error: 'could not start the chat (band.ai relay unavailable)' }, 502);
+  }
+});
+
+app.post('/api/rooms/:id/messages', async (c) => {
+  if (!relayConfigured()) return c.json({ error: 'chat relay not configured' }, 503);
+  const roomId = c.req.param('id');
+  const body = (await c.req.json().catch(() => ({}))) as { text?: unknown };
+  const text = typeof body.text === 'string' ? body.text.trim() : '';
+  if (!text) return c.json({ error: 'text required' }, 400);
+  try {
+    await postUserMessage(roomId, text);
+    return c.json({ ok: true });
+  } catch (err) {
+    console.warn('[rooms] post failed:', (err as Error)?.message ?? err);
+    return c.json({ error: 'could not send the message' }, 502);
+  }
+});
+
+// SSE stream of a room's messages (agent replies + our posts). Polls band.ai every
+// ~2s and emits each not-yet-seen message; a periodic ping keeps the connection open.
+app.get('/api/rooms/:id/events', (c) => {
+  if (!relayConfigured()) return c.json({ error: 'chat relay not configured' }, 503);
+  const roomId = c.req.param('id');
+  return streamSSE(c, async (stream) => {
+    const seen = new Set<string>();
+    let aborted = false;
+    stream.onAbort(() => {
+      aborted = true;
+    });
+    while (!aborted) {
+      try {
+        const fresh = selectNewMessages(seen, await listRoomMessages(roomId));
+        for (const m of fresh) await stream.writeSSE({ data: JSON.stringify(m) });
+      } catch (err) {
+        await stream.writeSSE({ event: 'poll-error', data: JSON.stringify({ message: (err as Error)?.message ?? 'poll failed' }) }).catch(() => {});
+      }
+      await stream.writeSSE({ event: 'ping', data: '' }).catch(() => {});
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+    }
+  });
 });
 
 // Multipart image upload. Hosts the file under data/images/ and returns its served

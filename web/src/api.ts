@@ -274,7 +274,7 @@ export async function transcribeMaterial(opts: {
 }): Promise<VideoUploadResponse> {
   const videoRes = await fetch(opts.videoUrl);
   if (!videoRes.ok) {
-    throw new Error(`Could not read the stored video (${videoRes.status}).`);
+    throw new Error("This video's file isn't available right now, so it can't be transcribed. Try re-uploading it.");
   }
   const blob = await videoRes.blob();
   const name = opts.videoUrl.split('/').pop() || 'video.mp4';
@@ -302,11 +302,16 @@ export async function uploadImage(file: File): Promise<ImageUploadResponse> {
 export async function startCampaignReview(
   campaignId: string,
   advertisementId?: string,
+  materialId?: string,
 ): Promise<CreateCampaignReviewResponse> {
   const res = await fetch('/api/reviews', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ campaignId, ...(advertisementId ? { advertisementId } : {}) }),
+    body: JSON.stringify({
+      campaignId,
+      ...(advertisementId ? { advertisementId } : {}),
+      ...(materialId ? { materialId } : {}),
+    }),
   });
   return asJson<CreateCampaignReviewResponse>(res);
 }
@@ -401,4 +406,65 @@ export function subscribeToRun(
   onError?: (err: Event) => void,
 ): EventSubscription {
   return subscribeSSE<RunEvent>(`/api/runs/${encodeURIComponent(id)}/events`, onEvent, onError);
+}
+
+// Chat relay -----------------------------------------------------------------
+// Talk to the band.ai agents from our UI with no auth: the server creates a real
+// band.ai room, adds the Conductor, posts on our behalf, and streams replies back.
+
+/** One room message as streamed from /api/rooms/:id/events. */
+export interface RoomMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  /** 'user' for our (the judge's) post, else the agent type/role. */
+  senderType: string;
+  content: string;
+  ts: number;
+}
+
+export interface CreateRoomResponse {
+  roomId: string;
+}
+
+/** Create a band.ai review room for a campaign (optionally scoped to one advertisement). */
+export async function createRoom(body: { campaignId: string; advertisementId?: string }): Promise<CreateRoomResponse> {
+  const res = await fetch('/api/rooms', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return asJson<CreateRoomResponse>(res);
+}
+
+/** Post a message into the room (relayed to band.ai @mentioning the Conductor). */
+export async function postRoomMessage(roomId: string, text: string): Promise<void> {
+  const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/messages`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  await asJson<{ ok: boolean }>(res);
+}
+
+/**
+ * Subscribe to a room's live messages. Only default (data) events carry messages;
+ * the server's 'ping'/'poll-error' named events are ignored here by design.
+ */
+export function subscribeToRoomEvents(
+  roomId: string,
+  onMessage: (message: RoomMessage) => void,
+  onError?: (err: Event) => void,
+): EventSubscription {
+  const source = new EventSource(`/api/rooms/${encodeURIComponent(roomId)}/events`);
+  source.onmessage = (e: MessageEvent<string>) => {
+    if (!e.data) return;
+    try {
+      onMessage(JSON.parse(e.data) as RoomMessage);
+    } catch {
+      // Ignore malformed payloads / heartbeats.
+    }
+  };
+  if (onError) source.onerror = onError;
+  return { close: () => source.close() };
 }

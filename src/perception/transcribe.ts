@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SttClient } from '../models/client';
 import type { Material, MaterialPerception } from '../domain/types';
+import { synthesizeVideoPerception } from './synthesize';
 
 export interface TranscribeOptions {
   /** Whisper-class STT client; when absent, the transcript is left empty (graceful). */
@@ -45,24 +46,35 @@ export async function transcribeVideoMaterial(
   if (prior?.visualDescription) base.visualDescription = prior.visualDescription;
   if (prior?.detectedClaims && prior.detectedClaims.length > 0) base.detectedClaims = prior.detectedClaims;
 
-  // Only a video with a resolvable local file can be transcribed/sampled here.
+  // Only a video with a resolvable local file can be transcribed/sampled here;
+  // even without one, a text-first video still gets a synthesized perception below.
   const localPath =
     material.kind === 'video' && material.videoUrl
       ? opts.resolveVideoPath?.(material.videoUrl)
       : undefined;
-  if (!localPath || !existsSync(localPath)) return base;
 
-  // 1) Transcript (the priority). Extract audio -> bytes -> STT.
-  if (opts.sttModel) {
-    const transcript = await transcribeAudio(localPath, material.id, opts.sttModel);
-    if (transcript) base.transcript = transcript;
+  if (localPath && existsSync(localPath)) {
+    // 1) Transcript (the priority). Extract audio -> bytes -> STT.
+    if (opts.sttModel) {
+      const transcript = await transcribeAudio(localPath, material.id, opts.sttModel);
+      if (transcript) base.transcript = transcript;
+    }
+
+    // 2) Keyframes for the analyzing panel (best-effort; transcript already set).
+    const maxFrames = opts.maxFrames ?? 3;
+    if (maxFrames > 0) {
+      const frames = await extractKeyframes(localPath, maxFrames, opts.hostImage);
+      if (frames.length > 0) base.frames = frames;
+    }
   }
 
-  // 2) Keyframes for the analyzing panel (best-effort; transcript already set).
-  const maxFrames = opts.maxFrames ?? 3;
-  if (maxFrames > 0) {
-    const frames = await extractKeyframes(localPath, maxFrames, opts.hostImage);
-    if (frames.length > 0) base.frames = frames;
+  // 3) Text-on-screen fallback: a video with NO spoken transcript carries its
+  // message as on-screen text, so synthesize a coherent perception (on-screen
+  // text, visual description, detected claims, and a reading of the copy) from the
+  // authored fields + frames. Fills empty fields only, so a real transcript or any
+  // prior perception is never overwritten.
+  if (material.kind === 'video' && !base.transcript) {
+    return synthesizeVideoPerception(material, base.frames, base);
   }
 
   return base;

@@ -6,7 +6,7 @@
 // Deliberately dependency-free (node:fs) and behind a small interface so it can
 // become SQLite later without touching the server.
 
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { BoardEvent, BoardStatus } from '../board/events';
@@ -129,6 +129,24 @@ export class Store {
     const p = join(this.videosDir, safe);
     if (!existsSync(p)) return null;
     return readFileSync(p);
+  }
+
+  /**
+   * Resolve a hosted video name to its local file path and byte size, so the
+   * serving route can stream it (HTTP Range) without reading the whole file into
+   * memory. Returns null when the file is missing or unreadable (never throws).
+   */
+  videoFile(name: string): { path: string; size: number } | null {
+    try {
+      const safe = name.replace(/[^a-zA-Z0-9._-]/g, '');
+      const p = join(this.videosDir, safe);
+      if (!safe || !existsSync(p)) return null;
+      const st = statSync(p);
+      if (!st.isFile()) return null;
+      return { path: p, size: st.size };
+    } catch {
+      return null;
+    }
   }
 
   // --- Chunked video upload ------------------------------------------------

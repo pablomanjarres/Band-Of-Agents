@@ -6,9 +6,32 @@ import { AdvertisementTabs } from '../components/AdvertisementTabs';
 import { DossierEditor } from '../components/DossierEditor';
 import { MaterialCard } from '../components/MaterialCard';
 import { MaterialDetail } from '../components/MaterialDetail';
+import { ReviewChat } from '../components/ReviewChat';
+import { ReportPanel } from '../components/ReportPanel';
 import { RunTimeline } from '../components/RunTimeline';
 import { useRunFeed } from '../runFeed';
 import type { Campaign, MaterialReview, RunStatus, VerdictDecision } from '../types';
+
+/** A past review the judge ran, kept in localStorage so chats/reports are not lost. */
+interface ReviewHistoryEntry {
+  reviewId: string;
+  adId: string;
+  label: string;
+  reportArtifactId?: string;
+  ts: number;
+}
+
+function historyKey(campaignId: string): string {
+  return `band.reviewHistory.${campaignId}`;
+}
+function loadHistory(campaignId: string): ReviewHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(historyKey(campaignId));
+    return raw ? (JSON.parse(raw) as ReviewHistoryEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 type LoadState =
   | { kind: 'loading' }
@@ -57,8 +80,30 @@ export function CampaignDetailPage() {
   const [detailMaterialId, setDetailMaterialId] = useState<string | undefined>(undefined);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
   const [showAddAd, setShowAddAd] = useState(false);
-  // Live band.ai run mirror: polls this campaign's runs and streams the active one.
+  // When set, opens the live chat with the agents scoped to this advertisement.
+  const [chatAdId, setChatAdId] = useState<string | null>(null);
+  // Remember the running review per advertisement so closing + reopening the panel
+  // resumes the same review instead of starting a new one.
+  const [reviewByAd, setReviewByAd] = useState<Record<string, string>>({});
+  // The report currently shown in the left pane (set when the agents publish one).
+  const [reportArtifactId, setReportArtifactId] = useState<string | null>(null);
+  // The review the open panel is streaming, so a published report attaches to the
+  // right history entry.
+  const [activeReviewId, setActiveReviewId] = useState<string | null>(null);
+  // Persisted history of the judge's reviews (chats + reports), so nothing is lost
+  // on reload. Loaded per campaign from localStorage; saved on every change.
+  const [history, setHistory] = useState<ReviewHistoryEntry[]>([]);
+  // Live band.ai run mirror: polls this campaign's runs and streams the active one
+  // into the left pane (complements the interactive ReviewChat).
   const { runs, activeRun, selectRun } = useRunFeed(id);
+  useEffect(() => {
+    if (id) setHistory(loadHistory(id));
+  }, [id]);
+  useEffect(() => {
+    if (id) {
+      try { localStorage.setItem(historyKey(id), JSON.stringify(history)); } catch { /* quota/full: skip */ }
+    }
+  }, [id, history]);
 
   useEffect(() => {
     if (!id) return;
@@ -145,30 +190,35 @@ export function CampaignDetailPage() {
 
       {/* Two-pane workspace: LEFT = live processing (filled by a band.ai run); MAIN = ads + materials. */}
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <aside className="space-y-4 lg:sticky lg:top-6 lg:w-80 lg:shrink-0">
+        <aside className="lg:sticky lg:top-6 lg:w-80 lg:shrink-0 space-y-3">
           <div className="surface rounded-2xl p-4">
-            <p className="eyebrow">Live processing</p>
-            {activeRun ? (
+            <div className="flex items-center justify-between">
+              <p className="eyebrow">{reportArtifactId ? 'Review report' : 'Live processing'}</p>
+              {reportArtifactId ? (
+                <button type="button" onClick={() => setReportArtifactId(null)} className="text-[11px] text-faint hover:text-fg">Clear</button>
+              ) : null}
+            </div>
+            {reportArtifactId ? (
+              <div className="mt-3">
+                <ReportPanel artifactId={reportArtifactId} />
+              </div>
+            ) : activeRun ? (
               <div className="mt-3">
                 <RunTimeline run={activeRun} />
               </div>
             ) : (
               <>
                 <div className="mt-3 flex aspect-video w-full items-center justify-center rounded-xl border border-dashed border-border-strong bg-bg-soft/60 px-3 text-center text-xs text-faint">
-                  When a review runs in band.ai, the live timeline streams here.
+                  A review streams here live. Open a review chat, or mention <span className="font-mono text-fg">@Conductor</span> in band.ai; the report lands here when the agents finish.
                 </div>
-                <p className="mt-3 text-xs text-muted">
-                  Open the band.ai room and mention <span className="font-mono text-fg">@Conductor</span> with an advertisement.
-                  Each beat (perception, pods reviewing, report, your decision, new material) lands here live.
-                </p>
+                {campaignVerdict ? (
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="text-xs text-faint">Campaign worst-case:</span>
+                    <VerdictPill decision={campaignVerdict} />
+                  </div>
+                ) : null}
               </>
             )}
-            {campaignVerdict ? (
-              <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
-                <span className="text-xs text-faint">Campaign worst-case:</span>
-                <VerdictPill decision={campaignVerdict} />
-              </div>
-            ) : null}
           </div>
 
           {runs.length > 1 ? (
@@ -186,6 +236,31 @@ export function CampaignDetailPage() {
                     >
                       <span className="truncate">{r.label}</span>
                       <RunStatusDot status={r.status} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {history.length > 0 ? (
+            <div className="surface rounded-2xl p-4">
+              <p className="eyebrow">Your reviews</p>
+              <ul className="mt-2 space-y-1.5">
+                {[...history].sort((a, b) => b.ts - a.ts).map((h) => (
+                  <li key={h.reviewId}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (h.reportArtifactId) setReportArtifactId(h.reportArtifactId);
+                        setChatAdId(h.adId);
+                        setActiveReviewId(h.reviewId);
+                        setReviewByAd((prev) => ({ ...prev, [h.adId]: h.reviewId }));
+                      }}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/[0.06]"
+                    >
+                      <span className="truncate text-fg/90">{h.label}</span>
+                      <span className="shrink-0 text-[10px] text-faint">{h.reportArtifactId ? 'report' : '…'}</span>
                     </button>
                   </li>
                 ))}
@@ -224,6 +299,15 @@ export function CampaignDetailPage() {
                       <span className="ml-2 font-sans text-xs font-normal text-faint">{selectedAd.materials.length} material{selectedAd.materials.length === 1 ? '' : 's'}</span>
                     </h2>
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setChatAdId(selectedAd.id)}
+                        disabled={selectedAd.materials.length === 0}
+                        className="btn border border-violet-400/40 bg-violet-500/10 px-3 py-1.5 text-violet-200 hover:bg-violet-500/15"
+                        title="Open a live chat with the agents to review this advertisement"
+                      >
+                        Open review chat
+                      </button>
                       <ReviewInBand command={`@Conductor review the ${selectedAd.name} advertisement`} />
                       <button
                         type="button"
@@ -305,6 +389,35 @@ export function CampaignDetailPage() {
           }}
         />
       ) : null}
+
+      {/* Live chat with the agents, scoped to one advertisement (judge-facing, no auth). */}
+      {chatAdId ? (() => {
+        const chatAd = campaign.advertisements.find((a) => a.id === chatAdId);
+        return (
+          <ReviewChat
+            key={chatAdId}
+            campaignId={campaign.id}
+            advertisementId={chatAdId}
+            campaignName={campaign.name}
+            {...(chatAd ? { advertisementName: chatAd.name } : {})}
+            {...(reviewByAd[chatAdId] ? { reviewId: reviewByAd[chatAdId] } : {})}
+            onReviewStarted={(rid, label) => {
+              setReviewByAd((prev) => ({ ...prev, [chatAdId]: rid }));
+              setActiveReviewId(rid);
+              setHistory((prev) =>
+                prev.some((h) => h.reviewId === rid)
+                  ? prev
+                  : [...prev, { reviewId: rid, adId: chatAdId, label: label ?? chatAd?.name ?? 'Review', ts: Date.now() }],
+              );
+            }}
+            onReport={(artifactId) => {
+              setReportArtifactId(artifactId);
+              setHistory((prev) => prev.map((h) => (h.reviewId === activeReviewId ? { ...h, reportArtifactId: artifactId } : h)));
+            }}
+            onClose={() => setChatAdId(null)}
+          />
+        );
+      })() : null}
     </div>
   );
 }

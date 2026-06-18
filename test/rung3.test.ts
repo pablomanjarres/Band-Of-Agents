@@ -64,8 +64,8 @@ describe('Rung 3: a region reviewer produces structured findings on the sample a
     expect(usMsg!.content.toLowerCase()).toContain('us review');
   });
 
-  it('loads valid rulebooks (US has 6 rules, EU has 7)', () => {
-    expect(loadRulebook(`${ASSETS}rulebook.us.json`).rules).toHaveLength(6);
-    expect(loadRulebook(`${ASSETS}rulebook.eu.json`).rules).toHaveLength(7);
+  it('loads valid rulebooks (US has 23 rules, EU has 23)', () => {
+    expect(loadRulebook(`${ASSETS}rulebook.us.json`).rules).toHaveLength(23);
+    expect(loadRulebook(`${ASSETS}rulebook.eu.json`).rules).toHaveLength(23);
   });
 });

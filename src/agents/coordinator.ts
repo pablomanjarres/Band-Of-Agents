@@ -127,7 +127,8 @@ export function makeCoordinator(opts: CoordinatorOptions): AgentHandler {
       );
       if (present) continue;
       const segment = handle.replace(/^@/, '').split('/').pop() ?? handle;
-      await tools.addParticipant(segment, 'reviewer');
+      // band.ai participant role is a fixed enum; 'member' is valid, 'reviewer' 422s.
+      await tools.addParticipant(segment, 'member');
       await tools.sendEvent(`Recruited the ${code} reviewer (${segment}) into the room for this asset.`, 'intake');
     }
 

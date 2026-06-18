@@ -91,6 +91,10 @@ export function MaterialDetail({ material, board, campaignId, advertisementId, o
 
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
+  // The stored video file may be unavailable (e.g. lost on a redeploy). Rather than
+  // show the browser's broken-media icon, <video onError> flips this and we fall back
+  // to a sampled frame / a clean "preview unavailable" card.
+  const [videoFailed, setVideoFailed] = useState(false);
 
   // Edit mode for the authored fields. Seeded from the material; the parent keys
   // this component by material id, so state resets when a different material opens.
@@ -186,11 +190,32 @@ export function MaterialDetail({ material, board, campaignId, advertisementId, o
         </header>
 
         <div className="space-y-5 px-5 py-5">
-          {/* Media preview: a real player for video, the image otherwise. */}
-          {material.videoUrl ? (
-            <video src={material.videoUrl} controls poster={poster} className="aspect-video w-full rounded-xl bg-bg object-cover" />
+          {/* Media preview: a real player for a playable video, otherwise a sampled
+              frame, otherwise a clean "preview unavailable" / "no media" card. The
+              video's onError flips to the fallback so a missing file never shows the
+              browser's broken-media icon. */}
+          {material.videoUrl && !videoFailed ? (
+            <video
+              src={material.videoUrl}
+              controls
+              poster={poster}
+              onError={() => setVideoFailed(true)}
+              className="aspect-video w-full rounded-xl bg-bg object-cover"
+            />
           ) : poster ? (
-            <img src={poster} alt={material.name ?? material.id} className="aspect-video w-full rounded-xl bg-bg-soft object-cover" />
+            <div className="relative">
+              <img src={poster} alt={material.name ?? material.id} className="aspect-video w-full rounded-xl bg-bg-soft object-cover" />
+              {videoFailed ? (
+                <span className="absolute bottom-2 left-2 rounded-md bg-bg/80 px-2 py-1 text-[10px] font-medium text-muted backdrop-blur-sm">
+                  Video preview unavailable, showing a sampled frame
+                </span>
+              ) : null}
+            </div>
+          ) : videoFailed ? (
+            <div className="flex aspect-video w-full flex-col items-center justify-center gap-1 rounded-xl bg-bg-soft px-4 text-center">
+              <p className="text-sm font-medium text-muted">Video preview unavailable</p>
+              <p className="text-xs text-faint">The stored file could not be loaded. The review still works from the details below.</p>
+            </div>
           ) : (
             <div className="flex aspect-video w-full items-center justify-center rounded-xl bg-bg-soft text-xs text-faint">
               No media attached

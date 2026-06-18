@@ -1,6 +1,6 @@
 {
   "region": "LATAM",
-  "label": "Latin America (illustrative; e.g. Brazil CONAR, Mexico PROFECO). Demo rules, not legal advice.",
+  "label": "Latin America (illustrative; e.g. Brazil CONAR/ANVISA/CDC, Mexico PROFECO/COFEPRIS, Colombia SIC, Chile SERNAC). Demo rules, not legal advice.",
   "notLegalAdvice": true,
   "rules": [
     {
@@ -35,6 +35,132 @@
       "check": "Consumer-protection rules (e.g. Mexico PROFECO) require clear terms for promotions and 'free' offers.",
       "requiredDisclosure": "Promotion terms",
       "sourceUrl": "https://www.gob.mx/profeco"
+    },
+    {
+      "id": "latam-brazil-anvisa-health",
+      "region": "LATAM",
+      "category": "health_claim",
+      "severity": "block",
+      "check": "In Brazil, health products (alimentos, suplementos, cosmeticos, medicamentos) require ANVISA registration before being advertised. Advertising of regulated products must include the ANVISA registry number and the required disclaimer: 'Este produto foi registrado no Ministerio da Saude'.",
+      "requiredDisclosure": "ANVISA registro number and ministerio-da-saude disclaimer",
+      "sourceUrl": "https://www.gov.br/anvisa/pt-br"
+    },
+    {
+      "id": "latam-brazil-cdc-warranty",
+      "region": "LATAM",
+      "category": "disclosure",
+      "severity": "warn",
+      "check": "Under Brazil's Codigo de Defesa do Consumidor (CDC, Lei 8.078/1990), all product advertising must be transparent about price, characteristics, and guarantee terms. The ad must not use techniques that the consumer cannot identify as advertising (subconscious or subliminal advertising is explicitly prohibited).",
+      "requiredDisclosure": "Warranty terms and product characteristics if implied",
+      "sourceUrl": "https://www.planalto.gov.br/ccivil_03/leis/l8078compilado.htm"
+    },
+    {
+      "id": "latam-brazil-conar-children",
+      "region": "LATAM",
+      "category": "children",
+      "severity": "block",
+      "check": "CONAR's Annex H (Brazil) restricts advertising directed at children under 12. Ads must not use appeals that exploit children's inexperience, use characters designed to appeal to children to promote alcohol, tobacco, or age-restricted products, or air during children's programming without express clearance.",
+      "requiredDisclosure": null,
+      "sourceUrl": "http://www.conar.org.br/codigo/codigo.php"
+    },
+    {
+      "id": "latam-brazil-influencer",
+      "region": "LATAM",
+      "category": "endorsement",
+      "severity": "block",
+      "check": "CONAR Representacao 2021 and CONAR guidelines require influencers to label paid partnerships clearly as '#publi', '#publicidade', or equivalent. The disclosure must appear at the beginning of the post and be visible without clicking 'more'.",
+      "requiredDisclosure": "#publi or equivalent at post start",
+      "sourceUrl": "http://www.conar.org.br"
+    },
+    {
+      "id": "latam-mexico-nom-labeling",
+      "region": "LATAM",
+      "category": "disclosure",
+      "severity": "block",
+      "check": "In Mexico, food and beverage advertising must comply with NOM-051-SCFI/SSA1-2010 and the 2020 front-of-pack warning seal regulation. Products with black warning seals ('Exceso de azucares', 'Exceso de grasas saturadas', etc.) cannot be advertised to children and must not use cartoon characters, celebrities, or mascots in those ads.",
+      "requiredDisclosure": "Front-of-pack seal content reflected in advertising restrictions",
+      "sourceUrl": "https://www.dof.gob.mx/nota_detalle.php?codigo=5590161&fecha=27/03/2020"
+    },
+    {
+      "id": "latam-mexico-cofepris",
+      "region": "LATAM",
+      "category": "health_claim",
+      "severity": "block",
+      "check": "In Mexico, advertising of health products (medicamentos, suplementos, dispositivos medicos) requires prior COFEPRIS authorization. Ads must display the authorization number and may not make claims beyond the registered indications.",
+      "requiredDisclosure": "COFEPRIS authorization number",
+      "sourceUrl": "https://www.gob.mx/cofepris"
+    },
+    {
+      "id": "latam-colombia-sic",
+      "region": "LATAM",
+      "category": "misleading",
+      "severity": "warn",
+      "check": "In Colombia, the SIC (Superintendencia de Industria y Comercio) enforces Ley 1480/2011 (Estatuto del Consumidor). Advertising must not be misleading, abusive, or create false expectations about product characteristics, price, or availability.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://www.sic.gov.co"
+    },
+    {
+      "id": "latam-chile-sernac",
+      "region": "LATAM",
+      "category": "pricing",
+      "severity": "warn",
+      "check": "In Chile, SERNAC and Ley 19.496 (Proteccion de los Derechos de los Consumidores) require that advertised prices include all taxes and mandatory charges. Conditional pricing or hidden fees disclosed only at checkout are prohibited.",
+      "requiredDisclosure": "All-inclusive price (with IVA and fees)",
+      "sourceUrl": "https://www.sernac.cl"
+    },
+    {
+      "id": "latam-alcohol-restrictions",
+      "region": "LATAM",
+      "category": "restricted_category",
+      "severity": "block",
+      "check": "Alcohol advertising across most LATAM markets (Brazil CONAR Annex P, Mexico NOM-142, Colombia Res. 003280) must not target minors, must include age-verification messaging ('Venda proibida para menores de 18 anos' in Brazil), and cannot be aired during children's programming or adjacent to schools.",
+      "requiredDisclosure": "Age-gate or 18+ declaration",
+      "sourceUrl": "http://www.conar.org.br/codigo/codigo.php"
+    },
+    {
+      "id": "latam-prize-promotions",
+      "region": "LATAM",
+      "category": "promotion",
+      "severity": "warn",
+      "check": "Prize promotions, sweepstakes, and contests in Brazil require SEAE/SPA authorization if the total prize pool exceeds a legal threshold. In Mexico, SEGOB authorization is required. All markets require clear disclosure of rules, odds, prize value, and end date.",
+      "requiredDisclosure": "Official rules, prize ARV, end date, and applicable regulatory authorization number",
+      "sourceUrl": "https://www.gov.br/seae/pt-br"
+    },
+    {
+      "id": "latam-environmental-claims",
+      "region": "LATAM",
+      "category": "environmental",
+      "severity": "warn",
+      "check": "Environmental claims ('ecologico', 'sustentavel', 'carbono neutro', 'biodegradable') must be truthful and verifiable under applicable consumer protection laws. Brazil's CDC Article 36 prohibits misleading environmental advertising; CONAR also reviews greenwashing complaints.",
+      "requiredDisclosure": "Specific substantiation basis for environmental claim",
+      "sourceUrl": "https://www.planalto.gov.br/ccivil_03/leis/l8078compilado.htm"
+    },
+    {
+      "id": "latam-financial-services",
+      "region": "LATAM",
+      "category": "financial",
+      "severity": "block",
+      "check": "Financial product advertising in Brazil (Banco Central, Resolucao CMN 4.860/2020) must display the CET (Custo Efetivo Total) for credit products. In Mexico, CONDUSEF requires APR (CAT - Costo Anual Total) disclosure. Misleading interest-rate representations are prohibited.",
+      "requiredDisclosure": "CET (Brazil) or CAT (Mexico) as applicable",
+      "sourceUrl": "https://www.bcb.gov.br"
+    },
+    {
+      "id": "latam-before-after",
+      "region": "LATAM",
+      "category": "substantiation",
+      "severity": "warn",
+      "check": "Before-and-after images for cosmetic, health, or weight-loss products must represent typical results achievable by average consumers under normal conditions. Digitally altered or exceptional results presented without disclosure breach consumer protection laws across the region.",
+      "requiredDisclosure": "Disclaimer if results are atypical or individually variable",
+      "sourceUrl": "http://www.conar.org.br"
+    },
+    {
+      "id": "latam-subscription-terms",
+      "region": "LATAM",
+      "category": "subscription",
+      "severity": "warn",
+      "check": "Auto-renewing subscription offers must clearly disclose renewal terms, price, and cancellation method before the consumer commits. In Brazil, CDC Article 49 grants a 7-day cooling-off period for distance sales. Cancellation must be offered through the same channel as subscription.",
+      "requiredDisclosure": "Renewal terms, price after trial, and cancellation instructions",
+      "sourceUrl": "https://www.planalto.gov.br/ccivil_03/leis/l8078compilado.htm"
     }
   ]
 }
