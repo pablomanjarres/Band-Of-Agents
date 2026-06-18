@@ -1,73 +1,60 @@
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import {
-  createAdvertisement,
-  getCampaign,
-  getCampaignReview,
-  saveCampaign,
-  startCampaignReview,
-  submitCampaignDecision,
-  subscribeToCampaignEvents,
-} from '../api';
-import type { EventSubscription } from '../api';
-import {
-  activePerceivingLanes,
-  applyCampaignEvent,
-  buildMatrix,
-  deriveAggregateVerdict,
-  initialCampaignState,
-} from '../boardState';
-import type { CampaignBoardState } from '../boardState';
+import { createAdvertisement, getCampaign, saveCampaign } from '../api';
 import { AddMaterialForm } from '../components/AddMaterialForm';
 import { AdvertisementTabs } from '../components/AdvertisementTabs';
 import { DossierEditor } from '../components/DossierEditor';
 import { MaterialCard } from '../components/MaterialCard';
 import { MaterialDetail } from '../components/MaterialDetail';
-import { PerceptionPanel } from '../components/PerceptionPanel';
-import { Timeline } from '../components/Timeline';
-import { StatusBadge } from '../components/StatusBadge';
-import { AggregateBadge } from '../components/VerdictBadge';
-import type { BoardEvent, Campaign, CampaignRollup, VerdictDecision } from '../types';
+import type { Campaign, MaterialReview, VerdictDecision } from '../types';
 
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; campaign: Campaign };
 
-type CampaignAction =
-  | { kind: 'event'; event: BoardEvent }
-  | { kind: 'reset'; campaign: Campaign }
-  | { kind: 'rollup'; rollup: CampaignRollup };
+// Reviews run in band.ai, not in this UI. The dashboard reflects the REAL verdict
+// the agents persist on each material (material.review). Worst-case across a set of
+// materials drives the ad tab + campaign badge. published (ok) < escalated (needs a
+// human ruling) < spiked (blocked) is the severity order.
+type ReviewDecision = MaterialReview['decision'];
+const REVIEW_RANK: Record<ReviewDecision, number> = { published: 0, escalated: 1, spiked: 2 };
+const REVIEW_TONE: Record<ReviewDecision, string> = {
+  published: 'bg-human/15 text-human ring-human/30',
+  spiked: 'bg-danger/15 text-danger ring-danger/30',
+  escalated: 'bg-warn/15 text-warn ring-warn/30',
+};
+const REVIEW_LABEL: Record<ReviewDecision, string> = {
+  published: 'published',
+  spiked: 'spiked',
+  escalated: 'needs decision',
+};
+// The ad-tab dots reuse the live verdict palette (publish/adapt/escalate).
+const REVIEW_TO_VERDICT: Record<ReviewDecision, VerdictDecision> = {
+  published: 'publish',
+  escalated: 'adapt',
+  spiked: 'escalate',
+};
 
-function reducer(state: CampaignBoardState, action: CampaignAction): CampaignBoardState {
-  switch (action.kind) {
-    case 'reset':
-      return initialCampaignState(action.campaign);
-    case 'event':
-      return applyCampaignEvent(state, action.event);
-    case 'rollup':
-      return { ...state, rollup: action.rollup };
-  }
+function worstReview(reviews: MaterialReview[]): ReviewDecision | undefined {
+  return reviews.reduce<ReviewDecision | undefined>(
+    (acc, r) => (acc === undefined || REVIEW_RANK[r.decision] > REVIEW_RANK[acc] ? r.decision : acc),
+    undefined,
+  );
 }
 
-const RANK: Record<VerdictDecision, number> = { publish: 0, adapt: 1, escalate: 2 };
+function reviewsOf(materials: { review?: MaterialReview }[]): MaterialReview[] {
+  return materials.map((m) => m.review).filter((r): r is MaterialReview => Boolean(r));
+}
 
 export function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
-  const [board, dispatch] = useReducer(reducer, undefined, () => initialCampaignState());
-  const [reviewId, setReviewId] = useState<string | null>(null);
-  // null = campaign-wide review; an id = review scoped to that one advertisement.
-  const [reviewScopeAdId, setReviewScopeAdId] = useState<string | null>(null);
   const [tab, setTab] = useState<'advertisements' | 'dossier'>('advertisements');
   const [selectedAdId, setSelectedAdId] = useState<string | undefined>(undefined);
   const [detailMaterialId, setDetailMaterialId] = useState<string | undefined>(undefined);
-  const [debateMaterialId, setDebateMaterialId] = useState<string | undefined>(undefined);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
   const [showAddAd, setShowAddAd] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
-  const subscriptionRef = useRef<EventSubscription | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -77,7 +64,6 @@ export function CampaignDetailPage() {
       .then((res) => {
         if (!active) return;
         setLoad({ kind: 'ready', campaign: res.campaign });
-        dispatch({ kind: 'reset', campaign: res.campaign });
         setSelectedAdId((prev) => prev ?? res.campaign.advertisements[0]?.id);
       })
       .catch((err: unknown) => {
@@ -89,62 +75,9 @@ export function CampaignDetailPage() {
     };
   }, [id]);
 
-  useEffect(() => {
-    return () => {
-      subscriptionRef.current?.close();
-      subscriptionRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (board.status === 'complete' || board.status === 'error') {
-      subscriptionRef.current?.close();
-      subscriptionRef.current = null;
-    }
-  }, [board.status]);
-
   function refreshCampaign(next: Campaign) {
     setLoad({ kind: 'ready', campaign: next });
     setSelectedAdId((prev) => (prev && next.advertisements.some((a) => a.id === prev) ? prev : next.advertisements[0]?.id));
-    if (!reviewId) dispatch({ kind: 'reset', campaign: next });
-  }
-
-  // Runs a campaign review. With an advertisementId the review is SCOPED to that
-  // one ad (still per-material concurrent, reconciled per material): it just runs
-  // fewer materials. Without it, the whole campaign is reviewed (unchanged).
-  async function handleRun(advertisementId?: string) {
-    if (load.kind !== 'ready') return;
-    setStarting(true);
-    setStartError(null);
-    try {
-      dispatch({ kind: 'reset', campaign: load.campaign });
-      const res = await startCampaignReview(load.campaign.id, advertisementId);
-      setReviewId(res.id);
-      setReviewScopeAdId(advertisementId ?? null);
-      subscriptionRef.current = subscribeToCampaignEvents(res.id, (event) => dispatch({ kind: 'event', event }));
-      void pollRollup(res.id);
-    } catch (err) {
-      setStartError(err instanceof Error ? err.message : 'Failed to start the review.');
-    } finally {
-      setStarting(false);
-    }
-  }
-
-  async function pollRollup(rid: string) {
-    try {
-      const res = await getCampaignReview(rid);
-      if (res.rollup) dispatch({ kind: 'rollup', rollup: res.rollup });
-      if (res.status !== 'complete' && res.status !== 'error') {
-        window.setTimeout(() => void pollRollup(rid), 1500);
-      }
-    } catch {
-      // The stream stays the primary source; a failed poll is non-fatal.
-    }
-  }
-
-  async function handleDecision(materialId: string, decision: string) {
-    if (!reviewId) return;
-    await submitCampaignDecision(reviewId, materialId, decision);
   }
 
   async function handleAddAd(name: string) {
@@ -167,32 +100,22 @@ export function CampaignDetailPage() {
 
   const campaign = load.campaign;
   const selectedAd = campaign.advertisements.find((a) => a.id === selectedAdId) ?? campaign.advertisements[0];
-  const adMaterialIds = selectedAd?.materials.map((m) => m.id) ?? [];
-  const matrix = buildMatrix(board, adMaterialIds);
-  const cellsByMaterial = Object.fromEntries(matrix.map((row) => [row.materialId, row.cells]));
-  const aggregate = deriveAggregateVerdict(board);
-  const perceivingLanes = activePerceivingLanes(board);
-  const reviewing = Boolean(reviewId);
-  const inProgress = reviewing && board.status === 'running';
-  // The ad a scoped review is currently running against (null when campaign-wide).
-  const scopedAd = reviewScopeAdId ? campaign.advertisements.find((a) => a.id === reviewScopeAdId) : undefined;
+
+  const allMaterials = campaign.advertisements.flatMap((a) => a.materials);
+  const campaignVerdict = worstReview(reviewsOf(allMaterials));
 
   const worstByAd: Record<string, VerdictDecision | undefined> = {};
-  for (const ad of board.rollup?.perAdvertisement ?? []) {
-    worstByAd[ad.advertisementId] = ad.worstCaseByRegion.reduce<VerdictDecision | undefined>(
-      (acc, r) => (acc === undefined || RANK[r.decision] > RANK[acc] ? r.decision : acc),
-      undefined,
-    );
+  for (const ad of campaign.advertisements) {
+    const worst = worstReview(reviewsOf(ad.materials));
+    worstByAd[ad.id] = worst ? REVIEW_TO_VERDICT[worst] : undefined;
   }
 
   const detailMaterial = detailMaterialId
-    ? campaign.advertisements.flatMap((a) => a.materials).find((m) => m.id === detailMaterialId)
+    ? allMaterials.find((m) => m.id === detailMaterialId)
     : undefined;
   const detailAdId = detailMaterialId
     ? campaign.advertisements.find((a) => a.materials.some((m) => m.id === detailMaterialId))?.id
     : undefined;
-  const detailLane = detailMaterialId ? board.lanes[detailMaterialId] : undefined;
-  const debateLane = debateMaterialId ? board.lanes[debateMaterialId] : undefined;
 
   return (
     <div className="space-y-6">
@@ -201,59 +124,40 @@ export function CampaignDetailPage() {
           <Link to="/campaigns" className="text-sm text-muted transition-colors hover:text-fg">← All campaigns</Link>
           <div className="mt-2 flex items-center gap-3">
             <h1 className="font-display text-4xl leading-none text-fg">{campaign.name}</h1>
-            <AggregateBadge {...(aggregate ? { decision: aggregate } : {})} />
+            {campaignVerdict ? <VerdictPill decision={campaignVerdict} /> : <span className="text-xs text-faint">not reviewed</span>}
           </div>
           <p className="mt-2 font-mono text-[11px] text-faint">
             Product campaign · {campaign.advertisements.length} advertisement{campaign.advertisements.length === 1 ? '' : 's'} ·{' '}
-            {campaign.advertisements.reduce((n, a) => n + a.materials.length, 0)} materials
+            {allMaterials.length} materials
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {reviewing && scopedAd ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 font-mono text-[11px] font-medium text-accent">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-              Scoped: {scopedAd.name}
-            </span>
-          ) : null}
-          {reviewing ? <StatusBadge status={board.status} /> : null}
-          <button
-            type="button"
-            onClick={() => handleRun()}
-            disabled={starting || campaign.advertisements.every((a) => a.materials.length === 0) || inProgress}
-            className="btn btn-primary"
-          >
-            {inProgress ? 'Reviewing…' : starting ? 'Starting…' : reviewing ? 'Re-run review' : 'Run review'}
-          </button>
+        <div className="flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/[0.06] px-3 py-2">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+          <p className="text-xs text-muted">
+            Reviews run in <span className="font-medium text-accent">band.ai</span>. Mention <span className="font-mono text-fg">@Conductor</span> with the advertisement to start.
+          </p>
         </div>
       </div>
 
-      {startError ? (
-        <p className="rounded-xl border border-warn/30 bg-warn/[0.07] px-4 py-2.5 text-sm text-warn">{startError}</p>
-      ) : null}
-
-      {/* Two-pane workspace: LEFT = live video processing; MAIN = ads + materials. */}
+      {/* Two-pane workspace: LEFT = live processing (filled by a band.ai run); MAIN = ads + materials. */}
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
         <aside className="lg:sticky lg:top-6 lg:w-80 lg:shrink-0">
-          {perceivingLanes.length > 0 ? (
-            <PerceptionPanel lanes={perceivingLanes} />
-          ) : (
-            <div className="surface rounded-2xl p-4">
-              <p className="eyebrow">Live processing</p>
-              <div className="mt-3 flex aspect-video w-full items-center justify-center rounded-xl border border-dashed border-border-strong bg-bg-soft/60 px-3 text-center text-xs text-faint">
-                Each video is analyzed here, frame by frame, while a review runs.
-              </div>
-              <p className="mt-3 text-xs text-muted">
-                Run a review to watch the perception pass (keyframes + transcript) and the
-                per-material verdicts land concurrently.
-              </p>
-              {aggregate ? (
-                <div className="mt-3 flex items-center gap-2">
-                  <span className="text-xs text-faint">Campaign worst-case:</span>
-                  <AggregateBadge decision={aggregate} />
-                </div>
-              ) : null}
+          <div className="surface rounded-2xl p-4">
+            <p className="eyebrow">Live processing</p>
+            <div className="mt-3 flex aspect-video w-full items-center justify-center rounded-xl border border-dashed border-border-strong bg-bg-soft/60 px-3 text-center text-xs text-faint">
+              When a review runs in band.ai, the live analysis streams here.
             </div>
-          )}
+            <p className="mt-3 text-xs text-muted">
+              Open the band.ai room and mention <span className="font-mono text-fg">@Conductor</span> with an advertisement.
+              The transcript, keyframes, and per-material verdicts will appear here and on the cards.
+            </p>
+            {campaignVerdict ? (
+              <div className="mt-3 flex items-center gap-2">
+                <span className="text-xs text-faint">Campaign worst-case:</span>
+                <VerdictPill decision={campaignVerdict} />
+              </div>
+            ) : null}
+          </div>
         </aside>
 
         <section className="min-w-0 flex-1 space-y-4">
@@ -286,15 +190,7 @@ export function CampaignDetailPage() {
                       <span className="ml-2 font-sans text-xs font-normal text-faint">{selectedAd.materials.length} material{selectedAd.materials.length === 1 ? '' : 's'}</span>
                     </h2>
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleRun(selectedAd.id)}
-                        disabled={starting || selectedAd.materials.length === 0 || inProgress}
-                        className="btn border border-accent/40 bg-accent/10 px-3 py-1.5 text-accent hover:bg-accent/15"
-                        title="Review only this advertisement's materials"
-                      >
-                        {inProgress && reviewScopeAdId === selectedAd.id ? 'Reviewing…' : 'Review this ad'}
-                      </button>
+                      <ReviewInBand command={`@Conductor review the ${selectedAd.name} advertisement`} />
                       <button
                         type="button"
                         onClick={() => setShowAddMaterial((v) => !v)}
@@ -325,7 +221,6 @@ export function CampaignDetailPage() {
                         <MaterialCard
                           key={material.id}
                           material={material}
-                          {...(cellsByMaterial[material.id] ? { cells: cellsByMaterial[material.id] } : {})}
                           selected={material.id === detailMaterialId}
                           onClick={() => setDetailMaterialId(material.id)}
                         />
@@ -343,17 +238,14 @@ export function CampaignDetailPage() {
         </section>
       </div>
 
-      {/* Slide-over: the material itself (not the agent diagram). */}
+      {/* Slide-over: the material itself, with its real band.ai verdict (not the agent diagram). */}
       {detailMaterial ? (
         <MaterialDetail
           key={detailMaterial.id}
           material={detailMaterial}
-          {...(detailLane ? { board: detailLane.board } : {})}
           campaignId={campaign.id}
           {...(detailAdId ? { advertisementId: detailAdId } : {})}
-          reviewed={reviewing}
           onClose={() => setDetailMaterialId(undefined)}
-          onViewDebate={() => setDebateMaterialId(detailMaterial.id)}
           onTranscribed={async () => {
             const refreshed = await getCampaign(campaign.id);
             refreshCampaign(refreshed.campaign);
@@ -379,26 +271,39 @@ export function CampaignDetailPage() {
           }}
         />
       ) : null}
-
-      {/* The agents' debate, on demand from the material detail. */}
-      {debateLane ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button type="button" aria-label="Close" onClick={() => setDebateMaterialId(undefined)} className="absolute inset-0 bg-bg/70 backdrop-blur-sm" />
-          <div className="surface-2 relative z-10 flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl">
-            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-              <h2 className="font-display text-lg text-fg">Agents&apos; debate · {debateLane.material.name ?? debateLane.material.id}</h2>
-              <button type="button" onClick={() => setDebateMaterialId(undefined)} className="btn btn-ghost px-2.5 py-1 text-xs">Close</button>
-            </div>
-            <div className="space-y-3 overflow-y-auto p-5">
-              <Timeline events={debateLane.board.events} />
-              {(debateLane.board.status === 'awaiting-decision' || debateLane.board.escalationText) && reviewId ? (
-                <EscalationActions materialId={debateLane.material.id} onDecision={handleDecision} />
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
+  );
+}
+
+function VerdictPill({ decision }: { decision: ReviewDecision }) {
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ring-1 ring-inset ${REVIEW_TONE[decision]}`}>
+      {REVIEW_LABEL[decision]}
+    </span>
+  );
+}
+
+// Reviews happen in band.ai. This copies the exact mention to paste into the room,
+// so the dashboard hands off to the agents instead of running a fake local review.
+function ReviewInBand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(command);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1800);
+        } catch {
+          // Clipboard may be unavailable; the title still shows the command.
+        }
+      }}
+      className="btn border border-accent/40 bg-accent/10 px-3 py-1.5 text-accent hover:bg-accent/15"
+      title={`Copies "${command}" to paste into the band.ai room`}
+    >
+      {copied ? 'Copied, paste in band.ai' : 'Review in band.ai'}
+    </button>
   );
 }
 
@@ -437,37 +342,6 @@ function AddAdvertisement({ onAdd, onCancel }: { onAdd: (name: string) => Promis
         {saving ? 'Adding…' : 'Add'}
       </button>
       <button type="button" onClick={onCancel} className="btn btn-ghost px-3 py-2">Cancel</button>
-    </div>
-  );
-}
-
-function EscalationActions({ materialId, onDecision }: { materialId: string; onDecision: (materialId: string, decision: string) => Promise<void> }) {
-  const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
-  async function send(decision: string) {
-    setSending(true);
-    try { await onDecision(materialId, decision); } finally { setSending(false); setText(''); }
-  }
-  return (
-    <div className="rounded-2xl border border-warn/30 bg-warn/[0.07] p-4 shadow-[inset_0_1px_0_rgb(255_255_255/0.04),0_0_28px_-16px_rgb(251_191_36/0.5)]">
-      <p className="text-sm font-semibold text-warn">This material escalated to a human.</p>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <input
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Record the compliance ruling…"
-          className="flex-1 rounded-xl border border-warn/30 bg-bg-soft/70 p-2.5 text-sm text-fg placeholder:text-faint transition-colors focus:border-warn/60 focus:outline-none focus:ring-2 focus:ring-warn/25"
-        />
-        <button
-          type="button"
-          disabled={sending || !text.trim()}
-          onClick={() => void send(text.trim())}
-          className="btn border border-warn/40 bg-warn/10 text-warn hover:bg-warn/15"
-        >
-          {sending ? 'Recording…' : 'Record decision'}
-        </button>
-      </div>
     </div>
   );
 }

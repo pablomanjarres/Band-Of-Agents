@@ -51,6 +51,18 @@ const STATUS_TONE: Record<RegionStatus, { dot: string; text: string; label: stri
   escalate: { dot: 'bg-danger', text: 'text-danger', label: 'validated · escalate' },
 };
 
+// The band.ai verdict persisted on the material once the agents finish a review.
+const REVIEW_TONE: Record<'published' | 'spiked' | 'escalated', string> = {
+  published: 'bg-human/15 text-human ring-human/30',
+  spiked: 'bg-danger/15 text-danger ring-danger/30',
+  escalated: 'bg-warn/15 text-warn ring-warn/30',
+};
+const REVIEW_LABEL: Record<'published' | 'spiked' | 'escalated', string> = {
+  published: 'published',
+  spiked: 'spiked',
+  escalated: 'needs your decision',
+};
+
 const labelClass = 'block font-mono text-[10px] font-medium uppercase tracking-wider text-faint';
 const inputClass =
   'mt-1.5 w-full rounded-xl border border-border-strong bg-bg-soft/70 p-2 text-sm text-fg placeholder:text-faint transition-colors focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/25';
@@ -70,6 +82,12 @@ export function MaterialDetail({ material, board, campaignId, advertisementId, o
   // then the row lights up with that region's verdict.
   const shownRegions: RegionState[] =
     regions.length > 0 ? regions : REGION_ORDER.map((r) => ({ region: r, status: 'reviewing', findings: [], blocking: 0 }));
+  // The authoritative result is the band.ai verdict (material.review). The per-region
+  // grid only carries real data once a live run streams it; otherwise it is a dim
+  // placeholder, which we hide when a verdict already exists (the report has the detail).
+  const review = material.review;
+  const hasLiveRegions = regions.length > 0;
+  const showRegionGrid = hasLiveRegions || !review;
 
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
@@ -229,11 +247,11 @@ export function MaterialDetail({ material, board, campaignId, advertisementId, o
               </div>
               <div>
                 <label className={labelClass} htmlFor="md-copy">Copy</label>
-                <textarea id="md-copy" value={copyText} onChange={(e) => setCopyText(e.target.value)} rows={3} className={inputClass} placeholder="The marketing copy for this material." />
+                <textarea id="md-copy" value={copyText} onChange={(e) => setCopyText(e.target.value)} rows={3} className={inputClass} placeholder="The full marketing text the audience reads (the caption or script)." />
               </div>
               <div>
                 <label className={labelClass} htmlFor="md-claim">Claim</label>
-                <input id="md-claim" type="text" value={claimText} onChange={(e) => setClaimText(e.target.value)} className={inputClass} placeholder="The central claim this material makes." />
+                <input id="md-claim" type="text" value={claimText} onChange={(e) => setClaimText(e.target.value)} className={inputClass} placeholder="The specific benefit claim the agents fact-check." />
               </div>
               {saveError ? <p className="text-xs text-danger">{saveError}</p> : null}
               <div className="flex items-center gap-2">
@@ -306,6 +324,29 @@ export function MaterialDetail({ material, board, campaignId, advertisementId, o
             </div>
           ) : null}
 
+          {/* The band.ai verdict for THIS material, written when the agents finish a
+              review (POST /api/materials/:id/review). This is the authoritative result. */}
+          {review ? (
+            <div className="space-y-2 rounded-xl border border-border bg-bg-soft/40 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="eyebrow">Band.ai verdict</p>
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ring-1 ring-inset ${REVIEW_TONE[review.decision]}`}>
+                  {REVIEW_LABEL[review.decision]}
+                </span>
+              </div>
+              {review.summary ? <p className="text-sm leading-relaxed text-fg/90">{review.summary}</p> : null}
+              <p className="text-[11px] text-faint">
+                reviewed {new Date(review.reviewedAt).toLocaleString()}
+                {review.reportUrl ? (
+                  <>
+                    {' · '}
+                    <a href={review.reportUrl} target="_blank" rel="noreferrer" className="text-accent underline">view full report</a>
+                  </>
+                ) : null}
+              </p>
+            </div>
+          ) : null}
+
           {/* Per-region validation for THIS material: dim until an agent rules, then
               it lights up with the verdict. */}
           <div>
@@ -317,6 +358,7 @@ export function MaterialDetail({ material, board, campaignId, advertisementId, o
                 </button>
               ) : null}
             </div>
+            {showRegionGrid ? (
             <ul className="space-y-2">
               {shownRegions.map((rs) => {
                 const tone = STATUS_TONE[rs.status];
@@ -347,7 +389,12 @@ export function MaterialDetail({ material, board, campaignId, advertisementId, o
                 );
               })}
             </ul>
-            <p className="mt-2 text-xs text-faint">Run a review to have the agents validate each region.</p>
+            ) : null}
+            <p className="mt-2 text-xs text-faint">
+              {review
+                ? 'Full per-region breakdown is in the report linked above.'
+                : 'Reviews run in band.ai. In the room, mention @Conductor to validate this advertisement.'}
+            </p>
           </div>
         </div>
       </aside>

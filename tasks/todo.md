@@ -1,31 +1,24 @@
-# Task: permission-gated remediation workflow + flagged demo campaign
+# Dashboard as a live mirror of band.ai
 
-## Plan / progress
-- [x] Seed persistent flagged campaign (VitaBoost Focus Q3) in data/assets.json
-- [x] Verify it parses + Conductor resolves "VitaBoost Focus"
-- [x] Risk Adjudicator: gate remediation on HUMAN PERMISSION; trigger on BLOCK findings
-      (solo pods produce blocks, not conflicts), not only cross-pod conflicts
-- [x] Risk Adjudicator: richer publish message (no silent "0 findings")
-- [x] Remediation: rewrite ALL blocked spans; POST rewritten copy + image link visibly
-- [x] Agents runner: self-serve generated promo images (HTTP :8788); wire hostImage
-- [x] Tests: rewrote adjudicator Test B + 2 new; full suite 168 pass; typecheck clean
-- [x] Restart live agents (vertex): 10 agents connected, image server bound :8788
-- [~] Real-model verification on VitaBoost (Claims reviewer flagged 3 findings)
-- [ ] Update docs (LIVE_BAND.md flow + HowItWorks) for the permission-gate beat
-- [ ] Give the user the band.ai steps
+Sequencing chosen by user: Stage A first, then Stage B.
 
-## Review
-(fill after verification)
+## Stage A: clarity + honesty (now)
+- [ ] Remove the stub-review buttons (Run review / Re-run review / Review this ad) from CampaignDetailPage
+- [ ] Stop the in-UI fake review (POST /api/reviews) trigger; give LIVE PROCESSING + matrix honest empty states (no fake greens)
+- [ ] MaterialDetail: replace "PER-REGION VALIDATION not validated" with the REAL band.ai verdict (material.review: decision pill + report link + summary); honest "not yet reviewed" empty state
+- [ ] Campaign header badge derived from real verdicts (worst-case of material.review), not the fake rollup
+- [ ] AddMaterialForm: plain-language labels + tooltips on every field (NAME, KIND, COPY, CLAIM, CHANNEL, MARKETS)
+- [ ] Upload box: confirm "uploaded" only; move the transcription/frames copy out
+- [ ] Cross-app guidance: "Reviews run in band.ai. Open the room and @Conductor to review this advertisement." (+ link to the band.ai room)
+- [ ] Verify: web typecheck + build, deploy (push main), visual check on the deployed app
 
-## Review (done)
-- VitaBoost Focus Q3 seeded (persistent in data/assets.json); Conductor resolves "VitaBoost Focus".
-- Risk Adjudicator now gates remediation on human permission, triggers on BLOCK findings
-  (not only conflicts), publishes with a summary, escalates only a post-fix deadlock.
-- Remediation rewrites all blocked spans and posts the rewritten copy + a clickable image link.
-- Agents runner self-serves generated images on :8788; hostImage wired.
-- Tests: 168 pass (typecheck clean). Docs updated (LIVE_BAND, HowItWorks, README, ARCHITECTURE).
-- Live proof (real Vertex): Claims reviewer returns 3 BLOCKS on VitaBoost
-  ("clinically proven...", "9 out of 10 users...", "Doctor recommended") -> gate fires.
-  Image gen -> hosted PNG served HTTP 200. Live cast: 10 agents connected, image server up.
-- Note: regulatory pod is slow ONLY in the single-threaded fake-transport sim (sequential
-  gemini-2.5-pro); live agents review concurrently. pod-lead/pod-region-reviewer unchanged.
+## Stage B: live run mirror (next)
+- [ ] Backend: runs store + POST /api/runs, POST /api/runs/:id/events, SSE GET /api/runs/:id/events (reuse the existing BoardEvent + SSE infra)
+- [ ] Agents: forward lifecycle events (received, transcript, frames/vision, pod reviewing, report ready, awaiting-decision, decided, new-material) to the backend run
+- [ ] UI: LIVE PROCESSING panel becomes the live run timeline; a Runs list; agent-created images render as proposals; decision reflected back
+- [ ] Verify end to end against a real band.ai review
+
+## Notes
+- The fake review = stub models returning zero findings -> reconciler auto-stamps every region "publish" (src/run/demo-fixtures.ts + src/agents/reconcile.ts decideRegion). Removing the trigger is safe.
+- Real verdicts already persist on material.review via POST /api/materials/:id/review (written by the band.ai Adjudicator's recordVerdict).
+- Do NOT delete PerceptionPanel / matrix / board reducer: Stage B repurposes them for the live run feed.

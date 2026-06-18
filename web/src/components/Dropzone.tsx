@@ -85,10 +85,10 @@ export function Dropzone({ accept, label, hint, busy, onFile, accent = 'indigo',
       <span className="text-sm font-semibold text-fg">
         {busy ? 'Uploading…' : doneName ? `${doneName} uploaded` : label}
       </span>
-      {hint && !busy ? <span className="text-xs text-faint">{hint}</span> : null}
+      {hint && !busy && !doneName ? <span className="text-xs text-faint">{hint}</span> : null}
       {doneName && !busy ? (
         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-human">
-          <span className="h-1.5 w-1.5 rounded-full bg-human" /> ready
+          <span className="h-1.5 w-1.5 rounded-full bg-human" /> uploaded
         </span>
       ) : null}
     </div>

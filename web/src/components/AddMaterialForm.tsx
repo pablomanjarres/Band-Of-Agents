@@ -15,6 +15,7 @@ const MATERIAL_KINDS: MaterialKind[] = ['video', 'post', 'image', 'banner'];
 const MARKET_OPTIONS = ['US', 'EU', 'LATAM'] as const;
 
 const labelClass = 'block font-mono text-[10px] font-medium uppercase tracking-wider text-faint';
+const hintClass = 'mt-0.5 text-[11px] leading-tight text-muted/80';
 const inputClass =
   'mt-1.5 w-full rounded-xl border border-border-strong bg-bg-soft/70 p-2 text-sm text-fg placeholder:text-faint transition-colors focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/25';
 
@@ -134,10 +135,12 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className={labelClass} htmlFor="m-name">Name</label>
+          <p className={hintClass}>A short label for this asset, for your reference.</p>
           <input id="m-name" type="text" value={name} onChange={(e) => setName(e.target.value)} className={inputClass} placeholder="e.g. Hero spot" />
         </div>
         <div>
           <label className={labelClass} htmlFor="m-kind">Kind</label>
+          <p className={hintClass}>What this asset is: video, post, image, or banner.</p>
           <select id="m-kind" value={kind} onChange={(e) => setKind(e.target.value as MaterialKind)} className={inputClass}>
             {MATERIAL_KINDS.map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
@@ -146,9 +149,9 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
 
       {/* Real upload: video for video kinds, image for image/banner kinds. */}
       {kind === 'video' ? (
-        <Dropzone accent="violet" accept="video/*" label="Drop a video, or click to choose" hint="transcribed when added; frames + vision follow on the next review" busy={uploading} doneName={uploadName} onFile={handleVideo} />
+        <Dropzone accent="violet" accept="video/*" label="Drop a video, or click to choose" hint="MP4 or MOV" busy={uploading} doneName={uploadName} onFile={handleVideo} />
       ) : (
-        <Dropzone accent="teal" accept="image/*" label="Drop an image, or click to choose" hint="shown in the material and reviewed by the vision pass" busy={uploading} doneName={uploadName} onFile={handleImage} />
+        <Dropzone accent="teal" accept="image/*" label="Drop an image, or click to choose" hint="PNG or JPG" busy={uploading} doneName={uploadName} onFile={handleImage} />
       )}
 
       {uploading && uploadPct !== null ? (
@@ -162,19 +165,23 @@ export function AddMaterialForm({ campaign, advertisementId, defaultMarkets, onA
 
       <div>
         <label className={labelClass} htmlFor="m-copy">Copy</label>
-        <textarea id="m-copy" value={copy} onChange={(e) => setCopy(e.target.value)} rows={3} className={inputClass} placeholder="The marketing copy for this material." />
+        <p className={hintClass}>The full marketing text the audience reads (the caption or script).</p>
+        <textarea id="m-copy" value={copy} onChange={(e) => setCopy(e.target.value)} rows={3} className={inputClass} placeholder="e.g. 15 seconds to feeling your best. Immune+ supports everyday wellness as part of a balanced diet." />
       </div>
       <div>
         <label className={labelClass} htmlFor="m-claim">Claim</label>
-        <input id="m-claim" type="text" value={claim} onChange={(e) => setClaim(e.target.value)} className={inputClass} placeholder="The central claim this material makes." />
+        <p className={hintClass}>The specific benefit claim the agents fact-check, e.g. "clinically proven to boost immunity".</p>
+        <input id="m-claim" type="text" value={claim} onChange={(e) => setClaim(e.target.value)} className={inputClass} placeholder="e.g. Supports everyday immune health." />
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className={labelClass} htmlFor="m-channel">Channel</label>
+          <p className={hintClass}>Where it runs: instagram, tiktok, youtube, and so on.</p>
           <input id="m-channel" type="text" value={channel} onChange={(e) => setChannel(e.target.value)} className={inputClass} />
         </div>
         <div>
           <span className={labelClass}>Markets</span>
+          <p className={hintClass}>Regions to validate against. Each market has its own ad rules.</p>
           <div className="mt-1 flex flex-wrap gap-2">
             {MARKET_OPTIONS.map((market) => {
               const checked = markets.includes(market);
