@@ -1183,6 +1183,18 @@ app.get('/api/runs/:id', (c) => {
   return c.json({ run });
 });
 
+// Delete a run from the mirror (dashboard clean-up). Marks it terminal so any live
+// SSE subscriber's loop ends, then drops it.
+app.delete('/api/runs/:id', (c) => {
+  const id = c.req.param('id');
+  const record = runs.get(id);
+  if (!record) return c.json({ error: 'not found' }, 404);
+  record.status = 'complete';
+  for (const sub of record.subscribers) sub({ seq: record.events.length, at: Date.now(), stage: 'log', message: 'run deleted' });
+  runs.delete(id);
+  return c.json({ ok: true, id });
+});
+
 // Recent runs for a campaign (summaries, newest first), so the dashboard can list them.
 app.get('/api/campaigns/:id/runs', (c) => {
   const campaignId = c.req.param('id');

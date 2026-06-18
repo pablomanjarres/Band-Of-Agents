@@ -95,7 +95,7 @@ export function CampaignDetailPage() {
   const [history, setHistory] = useState<ReviewHistoryEntry[]>([]);
   // Live band.ai run mirror: polls this campaign's runs and streams the active one
   // into the left pane (complements the interactive ReviewChat).
-  const { runs, activeRun, selectRun } = useRunFeed(id);
+  const { runs, activeRun, selectRun, removeRun } = useRunFeed(id);
   useEffect(() => {
     if (id) setHistory(loadHistory(id));
   }, [id]);
@@ -226,16 +226,25 @@ export function CampaignDetailPage() {
               <p className="eyebrow">Recent runs</p>
               <ul className="mt-2 space-y-1">
                 {runs.map((r) => (
-                  <li key={r.id}>
+                  <li key={r.id} className="group flex items-center gap-1">
                     <button
                       type="button"
                       onClick={() => selectRun(r.id)}
-                      className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
+                      className={`flex flex-1 items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors ${
                         activeRun?.id === r.id ? 'bg-accent/10 text-fg' : 'text-muted hover:bg-bg-soft/60 hover:text-fg'
                       }`}
                     >
                       <span className="truncate">{r.label}</span>
                       <RunStatusDot status={r.status} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void removeRun(r.id)}
+                      title="Delete this run"
+                      aria-label="Delete run"
+                      className="shrink-0 rounded-md px-1.5 py-1 text-faint opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+                    >
+                      ✕
                     </button>
                   </li>
                 ))}

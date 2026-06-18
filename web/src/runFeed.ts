@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getCampaignRuns, getRun, subscribeToRun } from './api';
+import { deleteRun, getCampaignRuns, getRun, subscribeToRun } from './api';
 import type { EventSubscription } from './api';
 import type { Run, RunEvent, RunSummary } from './types';
 
@@ -7,6 +7,7 @@ export interface RunFeed {
   runs: RunSummary[];
   activeRun: Run | undefined;
   selectRun: (id: string) => void;
+  removeRun: (id: string) => Promise<void>;
 }
 
 // Mirrors the band.ai runs for a campaign: polls the run list (so a review started
@@ -85,5 +86,19 @@ export function useRunFeed(campaignId: string | undefined): RunFeed {
     setSelectedId(id);
   };
 
-  return { runs, activeRun, selectRun };
+  const removeRun = async (id: string): Promise<void> => {
+    try {
+      await deleteRun(id);
+    } catch {
+      // Best effort; the optimistic removal below still tidies the UI.
+    }
+    setRuns((prev) => prev.filter((r) => r.id !== id));
+    if (selectedId === id) {
+      pinnedRef.current = false; // let the poll auto-follow the next newest run
+      setSelectedId(undefined);
+      setActiveRun(undefined);
+    }
+  };
+
+  return { runs, activeRun, selectRun, removeRun };
 }

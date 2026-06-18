@@ -408,6 +408,12 @@ export function subscribeToRun(
   return subscribeSSE<RunEvent>(`/api/runs/${encodeURIComponent(id)}/events`, onEvent, onError);
 }
 
+/** Delete a run from the mirror (dashboard clean-up). */
+export async function deleteRun(id: string): Promise<void> {
+  const res = await fetch(`/api/runs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`Failed to delete run (${res.status})`);
+}
+
 // Chat relay -----------------------------------------------------------------
 // Talk to the band.ai agents from our UI with no auth: the server creates a real
 // band.ai room, adds the Conductor, posts on our behalf, and streams replies back.
