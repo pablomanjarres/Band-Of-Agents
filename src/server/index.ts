@@ -836,7 +836,6 @@ app.post('/api/rooms', async (c) => {
   const ad = advertisementId ? campaign.advertisements.find((a) => a.id === advertisementId) : undefined;
   try {
     const roomId = await createReviewRoom({
-      taskId: campaignId,
       campaignName: campaign.name,
       ...(ad ? { advertisementName: ad.name } : {}),
     });

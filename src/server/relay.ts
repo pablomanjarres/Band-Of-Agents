@@ -21,8 +21,11 @@ const RELAY_ENV_PREFIX = process.env.RELAY_ENV_PREFIX ?? 'INTAKE';
 // The Conductor we @mention. add_participant on band.ai resolves by the registered
 // agent NAME (per pod-board.ts), so the participant identifier defaults to the name.
 const CONDUCTOR_HANDLE = process.env.CONDUCTOR_HANDLE ?? '@conductor';
-const CONDUCTOR_PARTICIPANT = process.env.CONDUCTOR_PARTICIPANT ?? 'Conductor';
-const CONDUCTOR_ID = process.env.COORDINATOR_AGENT_ID ?? process.env.CONDUCTOR_AGENT_ID ?? CONDUCTOR_PARTICIPANT;
+// band.ai add_participant requires the agent's UUID (not a name/handle), so the
+// orchestrator id must be a real agent id. Prefer an explicit CONDUCTOR_AGENT_ID,
+// else the COORDINATOR_AGENT_ID from .env (the band-session orchestrator the
+// band-agents service runs). The mention is delivered by this id.
+const CONDUCTOR_ID = process.env.CONDUCTOR_AGENT_ID ?? process.env.COORDINATOR_AGENT_ID ?? '';
 
 /** True when the relay identity's credentials are present (else the routes 503). */
 export function relayConfigured(): boolean {
@@ -71,9 +74,11 @@ function relay(): Promise<RelayConnection> {
 }
 
 /** Create a room, add the Conductor, and post the opening review message. Returns the room id. */
-export async function createReviewRoom(opts: { taskId?: string; campaignName: string; advertisementName?: string }): Promise<string> {
+export async function createReviewRoom(opts: { campaignName: string; advertisementName?: string }): Promise<string> {
   const r = await relay();
-  const roomId = await r.control.createRoom(opts.taskId);
+  // No task id: band.ai requires task_id to be a UUID, and our campaign ids are
+  // slugs (e.g. "immune-plus-q3"). The chat relay does not need a Band task binding.
+  const roomId = await r.control.createRoom();
   await r.control.addParticipant(roomId, CONDUCTOR_ID, 'member');
   await r.control.postMessage(roomId, buildReviewPrompt(opts.campaignName, opts.advertisementName), [
     { id: CONDUCTOR_ID, handle: CONDUCTOR_HANDLE },
