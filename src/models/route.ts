@@ -89,8 +89,11 @@ export function modelFor(role: AgentRole, mode: ModelMode = activeMode()): Model
   const entry = ROUTES[role];
   if (mode === 'aiml') {
     const apiKey = process.env.AIML_API_KEY;
-    if (!apiKey) throw new Error('AIML_API_KEY is not set but MODEL_MODE=aiml.');
-    return meter(new AimlModelClient({ apiKey, model: entry.aiml }));
+    if (apiKey) return meter(new AimlModelClient({ apiKey, model: entry.aiml }));
+    // AIML is the wired/preferred provider, but until the key is set we fall back to
+    // the current dev models (Vertex/Bedrock/Featherless) so everything keeps running.
+    // The moment AIML_API_KEY is set, every agent routes through AIML automatically.
+    mode = 'dev';
   }
   // Vertex-only mode: route EVERY agent through Gemini on Vertex, so the whole
   // multi-agent flow runs on a single GCP credential (no AIML key, no AWS/Bedrock).
@@ -114,8 +117,8 @@ export function modelFor(role: AgentRole, mode: ModelMode = activeMode()): Model
 export function imageClientFor(mode: ModelMode = activeMode()): ModelClient {
   if (mode === 'aiml') {
     const apiKey = process.env.AIML_API_KEY;
-    if (!apiKey) throw new Error('AIML_API_KEY is not set but MODEL_MODE=aiml.');
-    return meter(new AimlModelClient({ apiKey, model: IMAGE_AIML_MODEL }));
+    if (apiKey) return meter(new AimlModelClient({ apiKey, model: IMAGE_AIML_MODEL }));
+    // No AIML key yet: fall back to Vertex Gemini image gen (the dev path).
   }
   return meter(new GeminiModelClient({ model: 'gemini-2.5-flash' }));
 }
