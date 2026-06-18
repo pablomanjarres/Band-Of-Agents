@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getCampaign, startCampaignReview, subscribeToCampaignEvents, type EventSubscription } from '../api';
+import { getCampaign, startCampaignReview, submitCampaignDecision, subscribeToCampaignEvents, type EventSubscription } from '../api';
 import type { BoardEvent } from '../types';
 
 interface ReviewChatProps {
@@ -25,7 +25,7 @@ function artifactIdFromUrl(url: string): string | null {
   return m ? (m[1] ?? null) : null;
 }
 
-type Phase = 'picking' | 'starting' | 'live' | 'done' | 'error';
+type Phase = 'picking' | 'starting' | 'live' | 'awaiting' | 'done' | 'error';
 
 interface PickMaterial {
   id: string;
@@ -94,8 +94,10 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<FeedLine[]>([]);
   const [rid, setRid] = useState<string | null>(reviewId ?? null);
+  const [pickedMaterialId, setPickedMaterialId] = useState<string | undefined>(materialId);
   const [materials, setMaterials] = useState<PickMaterial[] | null>(null);
   const [pickedName, setPickedName] = useState<string | undefined>(materialName);
+  const [sending, setSending] = useState(false);
   const seen = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   // Stable ref so the subscribe effect can surface a report without re-subscribing.
@@ -106,6 +108,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
   const startReview = useCallback(
     async (mid: string, mname: string) => {
       setPickedName(mname);
+      setPickedMaterialId(mid);
       setPhase('starting');
       setError(null);
       try {
@@ -120,6 +123,17 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
     },
     [campaignId, advertisementId, onReviewStarted],
   );
+
+  const handleDecision = useCallback(async (decision: string) => {
+    if (!rid || !pickedMaterialId || sending) return;
+    setSending(true);
+    setLines((prev) => [...prev, { key: `human:${Date.now()}`, from: 'You', text: decision, tone: 'normal' }]);
+    setPhase('live');
+    try {
+      await submitCampaignDecision(rid, pickedMaterialId, decision);
+    } catch { /* the SSE will show the outcome */ }
+    setSending(false);
+  }, [rid, pickedMaterialId, sending]);
 
   // On open: resume an existing review, auto-start a pre-scoped material, or load the
   // advertisement's materials so the judge can pick one.
@@ -149,8 +163,8 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
       const key = `${(e as { materialId?: string }).materialId ?? ''}:${e.seq}:${e.type}`;
       if (seen.current.has(key)) return;
       seen.current.add(key);
-      if (e.type === 'status' && (e.status === 'complete' || e.status === 'error')) {
-        setPhase(e.status === 'error' ? 'error' : 'done');
+      if (e.type === 'status' && (e.status === 'complete' || e.status === 'error' || e.status === 'awaiting-decision')) {
+        setPhase(e.status === 'error' ? 'error' : e.status === 'awaiting-decision' ? 'awaiting' : 'done');
         return;
       }
       const ln = lineFor(e);
@@ -175,7 +189,8 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
     phase === 'picking' ? 'Pick a material to analyze' :
     phase === 'starting' ? 'Starting the review…' :
     phase === 'error' ? 'Review error' :
-    phase === 'done' ? 'Review complete' : 'Agents reviewing live';
+    phase === 'done' ? 'Review complete' :
+    phase === 'awaiting' ? 'Awaiting your decision' : 'Agents reviewing live';
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
@@ -186,8 +201,8 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
             <p className="eyebrow text-accent/80">Review · live with the agents</p>
             <h2 className="truncate font-display text-xl text-fg">{phase === 'picking' ? (advertisementName ?? campaignName) : scope}</h2>
             <p className="mt-0.5 inline-flex items-center gap-1.5 font-mono text-[11px] text-faint">
-              {phase === 'live' || phase === 'starting' ? <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-accent" /> : null}
-              {statusText} · on band.ai
+              {phase === 'live' || phase === 'starting' || phase === 'awaiting' ? <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-accent" /> : null}
+              {statusText}
             </p>
           </div>
           <button type="button" onClick={onClose} className="btn btn-ghost shrink-0 px-2.5 py-1 text-xs">Close</button>
@@ -257,10 +272,29 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
                   Waiting for the agents to weigh in…
                 </p>
               ) : null}
+              {phase === 'awaiting' ? (
+                <div className="mt-3 space-y-2 rounded-xl border border-human/30 bg-human/[0.06] p-4">
+                  <p className="text-sm font-medium text-fg">The agents need your ruling.</p>
+                  <p className="text-xs text-muted">Approve the fix (the agents will rewrite and regenerate images), or reject to spike the asset.</p>
+                  <div className="flex gap-2 pt-1">
+                    <button type="button" disabled={sending} onClick={() => handleDecision('yes, approve the fix')} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:opacity-50">Approve fix</button>
+                    <button type="button" disabled={sending} onClick={() => handleDecision('reject')} className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/15 disabled:opacity-50">Reject / Spike</button>
+                  </div>
+                </div>
+              ) : null}
               {phase === 'done' ? <p className="pt-1 text-xs text-faint">The agents have finished. The verdict is recorded on the material.</p> : null}
             </>
           )}
         </div>
+
+        {phase === 'live' || phase === 'awaiting' ? (
+          <footer className="border-t border-border px-4 py-3">
+            <form onSubmit={(e) => { e.preventDefault(); const input = e.currentTarget.elements.namedItem('msg') as HTMLInputElement; if (input.value.trim()) { handleDecision(input.value.trim()); input.value = ''; } }} className="flex gap-2">
+              <input name="msg" type="text" placeholder="Reply to the agents…" autoComplete="off" disabled={sending} className="flex-1 rounded-lg border border-border bg-bg-soft px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent focus:outline-none disabled:opacity-50" />
+              <button type="submit" disabled={sending} className="shrink-0 rounded-lg bg-accent/90 px-3 py-2 text-sm font-medium text-white hover:bg-accent disabled:opacity-50">Send</button>
+            </form>
+          </footer>
+        ) : null}
       </aside>
     </div>
   );
