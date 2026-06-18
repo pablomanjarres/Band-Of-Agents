@@ -23,6 +23,7 @@ import { Store } from '../store/store';
 import { makePublishArtifact } from '../store/artifacts';
 import type { Artifact, NewArtifact } from '../domain/artifact';
 import { spend } from '../models/spend';
+import { makeRunForwarder } from './run-forward';
 
 // A small, dependency-free HTML page for a report artifact: the report text with
 // URLs linkified and any promo images shown as a gallery. Rendered at GET /a/:id so
@@ -109,6 +110,19 @@ async function main(): Promise<void> {
   const BACKEND = (process.env.REPORT_BACKEND ?? 'https://band-backend-1068570846548.us-east1.run.app').replace(/\/+$/, '');
   const APP = (process.env.PUBLIC_BASE_URL ?? 'https://artifact-viewer-one.vercel.app').replace(/\/+$/, '');
 
+  // Live run mirror (Stage B): forward this review's lifecycle to the dashboard so
+  // the UI shows the band.ai workflow live. Best effort: a forwarding failure (e.g.
+  // the runs endpoint not deployed yet) never blocks or breaks the review. Opened
+  // when the Conductor resolves a review request (one run per request).
+  const runFwd = makeRunForwarder({ backend: BACKEND, warn: (m) => console.warn(`[run] ${m}`) });
+  const startRun = (campaignId: string, advertisementId: string | undefined, label: string, total: number): void => {
+    void (async () => {
+      await runFwd.openRun({ campaignId, ...(advertisementId ? { advertisementId } : {}), label, total });
+      await runFwd.emit({ stage: 'requested', agent: 'Conductor', message: `Review requested: ${label} (${total} material${total === 1 ? '' : 's'})` });
+      await runFwd.emit({ stage: 'reviewing', agent: 'Conductor', message: `Reviewing ${total} material${total === 1 ? '' : 's'} across US, EU, LATAM, and brand.` });
+    })();
+  };
+
   // Resolve "@conductor review <campaign> [advertisement]" against the backend, so
   // anything in the dashboard is reviewable. A flat asset reviews as one material; a
   // campaign reviews ALL its materials (or just one advertisement's, when the query
@@ -136,7 +150,10 @@ async function main(): Promise<void> {
       const winner = findCampaignByName([...assets, ...summaries], query);
       if (winner) {
         const direct = assets.find((x) => x.id === winner.id);
-        if (direct) return { name: direct.name ?? direct.id, materials: absMaterials([direct]) }; // flat asset = one material
+        if (direct) {
+          startRun(direct.id, undefined, direct.name ?? direct.id, 1);
+          return { name: direct.name ?? direct.id, materials: absMaterials([direct]) }; // flat asset = one material
+        }
         // A campaign: fetch the full record; review one advertisement (if the query
         // names it) or every material across all advertisements.
         const full = await fetch(`${BACKEND}/api/campaigns/${winner.id}`).then((r) => r.json() as Promise<{ campaign?: CampaignFull }>).catch(() => ({ campaign: undefined }));
@@ -150,13 +167,21 @@ async function main(): Promise<void> {
           if (score > best) { best = score; chosen = ad; }
         }
         const materials = (chosen ? chosen.materials : ads.flatMap((ad) => ad.materials ?? [])) ?? [];
-        if (materials.length) return { name: chosen ? `${camp?.name} / ${chosen.name}` : (camp?.name ?? winner.name ?? winner.id), materials: absMaterials(materials) };
+        if (materials.length) {
+          const label = chosen ? `${camp?.name} / ${chosen.name}` : (camp?.name ?? winner.name ?? winner.id);
+          startRun(winner.id, chosen?.id, label, materials.length);
+          return { name: label, materials: absMaterials(materials) };
+        }
       }
     } catch (err) {
       console.warn(`[campaigns] backend fetch failed (${(err as Error)?.message ?? err}); using local data`);
     }
     const local = findCampaignByName(store.listAssets(), query);
-    return local ? { name: local.name ?? local.id, materials: absMaterials([local]) } : undefined;
+    if (local) {
+      startRun(local.id, undefined, local.name ?? local.id, 1);
+      return { name: local.name ?? local.id, materials: absMaterials([local]) };
+    }
+    return undefined;
   };
   const lookupCampaign = async (query: string): Promise<ContentAsset | undefined> => (await lookupMaterials(query))?.materials[0];
 
@@ -227,7 +252,10 @@ async function main(): Promise<void> {
       const res = await fetch(`${BACKEND}/api/images`, { method: 'POST', body: form });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { imageUrl } = (await res.json()) as { imageUrl: string };
-      return imageUrl.startsWith('/') ? `${APP}${imageUrl}` : imageUrl;
+      const hostedUrl = imageUrl.startsWith('/') ? `${APP}${imageUrl}` : imageUrl;
+      // A generated image hosted = Remediation proposed a new material; show it on the run.
+      void runFwd.onMaterial(hostedUrl);
+      return hostedUrl;
     } catch (err) {
       console.warn(`[images] backend upload failed (${(err as Error)?.message ?? err}); using local host`);
       const hosted = store.hostImage(u);
@@ -244,6 +272,8 @@ async function main(): Promise<void> {
     } catch (err) {
       console.warn(`[verdict] record failed for ${materialId}: ${(err as Error)?.message ?? err}`);
     }
+    // Mirror the verdict onto the live run timeline (report/decision beat + completion).
+    void runFwd.onVerdict(input);
   };
 
   // Live rulebook overrides (UI edits) and recent human-ruling precedents, read
