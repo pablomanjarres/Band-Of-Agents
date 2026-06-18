@@ -271,7 +271,7 @@ export async function transcribeMaterial(opts: {
 }): Promise<VideoUploadResponse> {
   const videoRes = await fetch(opts.videoUrl);
   if (!videoRes.ok) {
-    throw new Error(`Could not read the stored video (${videoRes.status}).`);
+    throw new Error("This video's file isn't available right now, so it can't be transcribed. Try re-uploading it.");
   }
   const blob = await videoRes.blob();
   const name = opts.videoUrl.split('/').pop() || 'video.mp4';
