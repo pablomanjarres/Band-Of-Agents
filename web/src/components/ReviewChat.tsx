@@ -12,8 +12,8 @@ interface ReviewChatProps {
   materialName?: string;
   /** Resume an already-running review (so closing/reopening the panel keeps progress). */
   reviewId?: string;
-  /** Reports the review id back to the page so it survives a close/reopen. */
-  onReviewStarted?: (reviewId: string) => void;
+  /** Reports the review id (and the material label) back so it survives a close/reopen. */
+  onReviewStarted?: (reviewId: string, label?: string) => void;
   /** Fired with the report's artifact id when the agents publish one, so the page can show it. */
   onReport?: (artifactId: string) => void;
   onClose: () => void;
@@ -111,7 +111,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
       try {
         const res = await startCampaignReview(campaignId, advertisementId, mid);
         setRid(res.id);
-        onReviewStarted?.(res.id);
+        onReviewStarted?.(res.id, mname);
         setPhase('live');
       } catch (err) {
         setPhase('error');
