@@ -65,6 +65,150 @@
       "check": "Any data-capture call to action needs freely given, specific, informed, unambiguous opt-in consent (no pre-ticked boxes).",
       "requiredDisclosure": "GDPR opt-in consent language",
       "sourceUrl": "https://gdpr-info.eu/issues/consent/"
+    },
+    {
+      "id": "eu-greenwashing",
+      "region": "EU",
+      "category": "environmental",
+      "severity": "block",
+      "check": "Vague environmental claims ('eco-friendly', 'green', 'climate neutral', 'carbon neutral', 'sustainable') without specific substantiation, lifecycle evidence, or third-party verification are prohibited under the Green Claims Directive. Claims must be science-based, independently verified, and substantiated with evidence available before the claim is made.",
+      "requiredDisclosure": "Specific substantiation and basis of environmental claim",
+      "sourceUrl": "https://environment.ec.europa.eu/topics/circular-economy/green-claims_en"
+    },
+    {
+      "id": "eu-omnibus-fake-reviews",
+      "region": "EU",
+      "category": "endorsement",
+      "severity": "block",
+      "check": "Under the Omnibus Directive (2019/2161), displaying consumer reviews without taking reasonable steps to verify their authenticity is prohibited. AI-generated reviews and incentivised undisclosed reviews are blacklisted practices.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://eur-lex.europa.eu/eli/dir/2019/2161/oj"
+    },
+    {
+      "id": "eu-omnibus-price-reduction",
+      "region": "EU",
+      "category": "pricing",
+      "severity": "block",
+      "check": "Price reduction announcements must display the prior price, defined as the lowest price charged in the 30 days before the reduction. Artificial price inflations followed by discounts are prohibited.",
+      "requiredDisclosure": "Prior lowest price from the last 30 days",
+      "sourceUrl": "https://eur-lex.europa.eu/eli/dir/2019/2161/oj"
+    },
+    {
+      "id": "eu-influencer-disclosure",
+      "region": "EU",
+      "category": "endorsement",
+      "severity": "block",
+      "check": "Commercial communications by influencers or content creators must be clearly identified as advertising. Undisclosed paid partnerships are a misleading commercial practice under the UCPD. Disclosures must be prominent, in the language of the audience, and not buried in hashtags.",
+      "requiredDisclosure": "Clear 'Ad' or 'Paid partnership' label visible before engagement",
+      "sourceUrl": "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32005L0029"
+    },
+    {
+      "id": "eu-dark-patterns",
+      "region": "EU",
+      "category": "dark_pattern",
+      "severity": "block",
+      "check": "Under the DSA and UCPD, dark patterns that manipulate users into unintended choices (false urgency, hidden unsubscribe, confirmshaming, pre-selected paid options, drip pricing that reveals costs late) are prohibited for all online platforms and traders in the EU.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32022R2065"
+    },
+    {
+      "id": "eu-children-advertising",
+      "region": "EU",
+      "category": "children",
+      "severity": "block",
+      "check": "Advertising directed at children must not exploit their inexperience or credulity. Advertising for food and beverages high in fat, sugar, or salt targeting children under 16 is restricted or prohibited under many member-state implementations of the AVMSD and national codes.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://eur-lex.europa.eu/eli/dir/2018/1808/oj"
+    },
+    {
+      "id": "eu-gdpr-children",
+      "region": "EU",
+      "category": "gdpr",
+      "severity": "block",
+      "check": "Processing personal data of children under 16 (or under 13 in some member states) for digital services requires parental or guardian consent under GDPR Article 8. Advertising systems that profile minors require particular safeguards.",
+      "requiredDisclosure": "Parental consent mechanism if service targets minors",
+      "sourceUrl": "https://gdpr-info.eu/art-8-gdpr/"
+    },
+    {
+      "id": "eu-ai-act-deepfake",
+      "region": "EU",
+      "category": "disclosure",
+      "severity": "warn",
+      "check": "Under the EU AI Act (Art. 50), AI-generated or AI-manipulated images, audio, and video content that could deceive consumers must carry a machine-readable and where technically feasible visible disclosure. Deepfakes used in commercial communications need clear labeling.",
+      "requiredDisclosure": "AI-generated content label",
+      "sourceUrl": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32024R1689"
+    },
+    {
+      "id": "eu-subscription-cancellation",
+      "region": "EU",
+      "category": "subscription",
+      "severity": "block",
+      "check": "Under the Consumer Rights Directive and national implementations, subscriptions and auto-renewals must disclose all material terms before conclusion of the contract, and cancellation must be as straightforward as subscription. A cancellation button prominent in the account area is required in most member states.",
+      "requiredDisclosure": "Auto-renewal terms, cancellation method, and cooling-off period",
+      "sourceUrl": "https://eur-lex.europa.eu/eli/dir/2011/83/oj"
+    },
+    {
+      "id": "eu-dsa-transparency",
+      "region": "EU",
+      "category": "disclosure",
+      "severity": "warn",
+      "check": "Under the DSA, very large online platforms must label algorithmic-recommendation-based advertising and provide users with at least one option not based on profiling. Advertising archives for political and targeted ads must be accessible to researchers.",
+      "requiredDisclosure": "Targeting criteria and sponsor identity for political ads",
+      "sourceUrl": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32022R2065"
+    },
+    {
+      "id": "eu-cookie-consent",
+      "region": "EU",
+      "category": "gdpr",
+      "severity": "block",
+      "check": "Any landing page or digital asset that sets non-essential cookies (analytics, advertising, remarketing) must obtain informed opt-in consent before placing those cookies. Reject-all must be as easy as accept-all (no dark-pattern consent banners).",
+      "requiredDisclosure": "Cookie consent with equal-prominence accept/reject options",
+      "sourceUrl": "https://edpb.europa.eu/our-work-tools/our-documents/guidelines/guidelines-052020-consent-under-regulation-2016679_en"
+    },
+    {
+      "id": "eu-geo-blocking",
+      "region": "EU",
+      "category": "pricing",
+      "severity": "info",
+      "check": "Under the Geo-blocking Regulation, unjustified differentiated pricing or access restrictions based solely on customer location within the EU are prohibited for standard goods and services. Pricing differences that do exist must be disclosed clearly.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://eur-lex.europa.eu/eli/reg/2018/302/oj"
+    },
+    {
+      "id": "eu-nutrition-labeling",
+      "region": "EU",
+      "category": "health_claim",
+      "severity": "block",
+      "check": "Nutrition claims ('low fat', 'sugar-free', 'high protein', 'light') must meet specific threshold definitions under Regulation 1924/2006 Annex. Using these terms without meeting conditions is prohibited.",
+      "requiredDisclosure": null,
+      "sourceUrl": "https://eur-lex.europa.eu/eli/reg/2006/1924/oj/eng"
+    },
+    {
+      "id": "eu-testimonials",
+      "region": "EU",
+      "category": "endorsement",
+      "severity": "warn",
+      "check": "Consumer testimonials must be genuine, from real consumers, and not selectively presented in a way that creates a misleading overall impression. Incentivised testimonials that are not disclosed breach the UCPD.",
+      "requiredDisclosure": "Disclosure if testimonial was incentivised",
+      "sourceUrl": "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32005L0029"
+    },
+    {
+      "id": "eu-prize-promotions",
+      "region": "EU",
+      "category": "promotion",
+      "severity": "warn",
+      "check": "Prize promotions must not create a false impression of winning or require a purchase to participate. All material conditions (prize value, end date, eligibility) must be clearly communicated before participation.",
+      "requiredDisclosure": "Full promotion terms including prize ARV and eligibility",
+      "sourceUrl": "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32005L0029"
+    },
+    {
+      "id": "eu-financial-services",
+      "region": "EU",
+      "category": "financial",
+      "severity": "block",
+      "check": "Financial product advertising must include required standard information (APR, total cost of credit, representative example under CCD/MCD). Risk warnings for investment products ('Your capital is at risk') are mandatory under MiFID II and the PRIIPs KID framework.",
+      "requiredDisclosure": "Standard financial risk warning and representative APR",
+      "sourceUrl": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32014L0065"
     }
   ]
 }
