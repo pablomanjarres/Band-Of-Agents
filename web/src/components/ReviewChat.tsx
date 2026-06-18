@@ -21,6 +21,19 @@ interface FeedLine {
   from: string;
   text: string;
   tone: 'normal' | 'verdict' | 'final' | 'block';
+  /** A report/artifact URL detected in the message; rendered as a button. */
+  url?: string;
+}
+
+const URL_RE = /(https?:\/\/[^\s)]+)/i;
+
+/** Pull a report link out of a line and strip the "Full report: <url>" tail from the text. */
+function withReportLink(line: Omit<FeedLine, 'key'>): Omit<FeedLine, 'key'> {
+  const m = URL_RE.exec(line.text);
+  if (!m) return line;
+  const url = m[1];
+  const text = line.text.replace(/\s*(?:Full report:)?\s*https?:\/\/[^\s)]+/i, '').trim();
+  return { ...line, text: text || line.text.replace(URL_RE, '').trim() || 'Review report ready.', url };
 }
 
 /** Turn a board event into a readable feed line (or null to skip noise). */
@@ -99,7 +112,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
         return;
       }
       const ln = lineFor(e);
-      if (ln) setLines((prev) => [...prev, { ...ln, key }]);
+      if (ln) setLines((prev) => [...prev, { ...withReportLink(ln), key }]);
     });
     return () => { sub?.close(); sub = null; };
   }, [rid]);
@@ -149,6 +162,16 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
             >
               <span className="mr-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">{ln.from}</span>
               <span className="whitespace-pre-wrap">{ln.text}</span>
+              {ln.url ? (
+                <a
+                  href={ln.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent/15"
+                >
+                  View full report ↗
+                </a>
+              ) : null}
             </div>
           ))}
 
