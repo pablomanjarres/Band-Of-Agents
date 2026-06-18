@@ -58,6 +58,9 @@ export function CampaignDetailPage() {
   const [showAddAd, setShowAddAd] = useState(false);
   // When set, opens the live chat with the agents scoped to this advertisement.
   const [chatAdId, setChatAdId] = useState<string | null>(null);
+  // Remember the running review per advertisement so closing + reopening the panel
+  // resumes the same review instead of starting a new one.
+  const [reviewByAd, setReviewByAd] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!id) return;
@@ -294,6 +297,8 @@ export function CampaignDetailPage() {
             advertisementId={chatAdId}
             campaignName={campaign.name}
             {...(chatAd ? { advertisementName: chatAd.name } : {})}
+            {...(reviewByAd[chatAdId] ? { reviewId: reviewByAd[chatAdId] } : {})}
+            onReviewStarted={(id) => setReviewByAd((prev) => ({ ...prev, [chatAdId]: id }))}
             onClose={() => setChatAdId(null)}
           />
         );
