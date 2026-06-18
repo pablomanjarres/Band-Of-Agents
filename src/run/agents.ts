@@ -166,7 +166,10 @@ async function main(): Promise<void> {
   // the runner hosts the image into data/images and serves it here, so no separate
   // web server is needed. The link resolves from the same machine the band.ai UI
   // runs on; set PUBLIC_BASE_URL to override the origin (e.g. a tunnel).
-  const imagePort = Number(process.env.IMAGE_PORT ?? 8788);
+  // On Cloud Run the platform injects PORT and probes it, so bind that when present
+  // (IMAGE_PORT still overrides); locally this stays 8788. Lets the agents run as an
+  // always-on Cloud Run service whose health check is this image/report host.
+  const imagePort = Number(process.env.IMAGE_PORT ?? process.env.PORT ?? 8788);
   const localBase = `http://localhost:${imagePort}`;
   // Reports + images are published to BACKEND (defined above) so the links open in
   // the real dashboard; the local server below is only a fallback host.
