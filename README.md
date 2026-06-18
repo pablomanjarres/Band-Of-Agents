@@ -31,6 +31,10 @@ Two orchestration topologies ship and coexist. The live workflow is the **pods c
 ### Pods cast (the live Band.ai showcase)
 
 <p align="center">
+<img src="assets/pods-flow.svg" alt="Pods cast workflow" width="900"/>
+</p>
+
+<!--
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 700" width="900" height="700" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
@@ -185,11 +189,15 @@ Two orchestration topologies ship and coexist. The live workflow is the **pods c
 
   <text x="880" y="690" text-anchor="end" fill="#aaa" font-size="9">Band Review Board - pods cast</text>
 </svg>
-</p>
+-->
 
 ### Classic cast (portal "Run review" flow)
 
 <p align="center">
+<img src="assets/classic-flow.svg" alt="Classic cast workflow" width="700"/>
+</p>
+
+<!--
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 380" width="700" height="380" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">
   <defs>
     <marker id="arr2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
@@ -273,7 +281,7 @@ Two orchestration topologies ship and coexist. The live workflow is the **pods c
 
   <text x="690" y="372" text-anchor="end" fill="#aaa" font-size="9">Band Review Board - classic cast</text>
 </svg>
-</p>
+-->
 
 ## Campaigns, cascading dossier, and multimodal review
 
