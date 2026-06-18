@@ -28,7 +28,7 @@ function clock(at: number): string {
   }
 }
 
-export function RunTimeline({ run }: { run: Run }) {
+export function RunTimeline({ run, onOpenReport }: { run: Run; onOpenReport?: (artifactId: string) => void }) {
   const status = STATUS_TONE[run.status];
   return (
     <div className="space-y-3">
@@ -45,7 +45,7 @@ export function RunTimeline({ run }: { run: Run }) {
       ) : (
         <ol className="space-y-2.5">
           {run.events.map((event) => (
-            <RunRow key={event.seq} event={event} />
+            <RunRow key={event.seq} event={event} {...(onOpenReport ? { onOpenReport } : {})} />
           ))}
         </ol>
       )}
@@ -53,7 +53,7 @@ export function RunTimeline({ run }: { run: Run }) {
   );
 }
 
-function RunRow({ event }: { event: RunEvent }) {
+function RunRow({ event, onOpenReport }: { event: RunEvent; onOpenReport?: (artifactId: string) => void }) {
   const tone = STAGE_TONE[event.stage];
   return (
     <li className="relative pl-4">
@@ -66,12 +66,12 @@ function RunRow({ event }: { event: RunEvent }) {
         {event.agent ? <span className="font-medium text-muted">{event.agent}: </span> : null}
         {event.message}
       </p>
-      {event.artifact ? <ArtifactChip artifact={event.artifact} /> : null}
+      {event.artifact ? <ArtifactChip artifact={event.artifact} {...(onOpenReport ? { onOpenReport } : {})} /> : null}
     </li>
   );
 }
 
-function ArtifactChip({ artifact }: { artifact: NonNullable<RunEvent['artifact']> }) {
+function ArtifactChip({ artifact, onOpenReport }: { artifact: NonNullable<RunEvent['artifact']>; onOpenReport?: (artifactId: string) => void }) {
   if (artifact.kind === 'image') {
     return (
       <a
@@ -85,13 +85,20 @@ function ArtifactChip({ artifact }: { artifact: NonNullable<RunEvent['artifact']
       </a>
     );
   }
+  // A report: open it in-page (the left pane's ReportPanel) when a handler is wired,
+  // by extracting the artifact id from the /a/<id> link; otherwise fall back to the link.
+  const reportId = artifact.url.match(/\/a\/([^/?#]+)/)?.[1];
+  const chipClass =
+    'mt-1.5 inline-flex items-center gap-1 rounded-lg border border-human/30 bg-human/10 px-2 py-1 text-[11px] font-medium text-human transition-colors hover:bg-human/15';
+  if (onOpenReport && reportId) {
+    return (
+      <button type="button" onClick={() => onOpenReport(reportId)} className={chipClass}>
+        {artifact.title ?? 'View report'}
+      </button>
+    );
+  }
   return (
-    <a
-      href={artifact.url}
-      target="_blank"
-      rel="noreferrer"
-      className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-human/30 bg-human/10 px-2 py-1 text-[11px] font-medium text-human transition-colors hover:bg-human/15"
-    >
+    <a href={artifact.url} target="_blank" rel="noreferrer" className={chipClass}>
       {artifact.title ?? 'View report'}
     </a>
   );

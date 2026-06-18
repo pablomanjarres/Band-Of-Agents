@@ -204,7 +204,7 @@ export function CampaignDetailPage() {
               </div>
             ) : activeRun ? (
               <div className="mt-3">
-                <RunTimeline run={activeRun} />
+                <RunTimeline run={activeRun} onOpenReport={(artifactId) => setReportArtifactId(artifactId)} />
               </div>
             ) : (
               <>

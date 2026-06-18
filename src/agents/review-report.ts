@@ -85,12 +85,15 @@ export function composeReport(input: ReportInput): string {
     }
   }
 
+  // Images are emitted as markdown ![label](url) so the report viewer renders them
+  // inline (the regenerated promo, the campaign image). Non-image links stay as links.
+  const isImg = (u: string): boolean => /\.(png|jpe?g|webp|gif|avif)(\?|#|$)/i.test(u) || u.includes('/api/images/');
   if (input.fixes?.length) {
     lines.push('');
     lines.push(input.fixes.length > 1 ? 'Proposed market-tailored versions:' : 'Proposed fix:');
     for (const fx of input.fixes) {
       lines.push(`- ${fx.region}: "${fx.copy}"`);
-      if (fx.imageUrl) lines.push(`  new image: ${fx.imageUrl}`);
+      if (fx.imageUrl) lines.push(`![${fx.region} new image](${fx.imageUrl})`);
     }
   }
 
@@ -102,7 +105,7 @@ export function composeReport(input: ReportInput): string {
   if (links.length) {
     lines.push('');
     lines.push('Materials:');
-    for (const l of links) lines.push(`- ${l.label}: ${l.url}`);
+    for (const l of links) lines.push(isImg(l.url) ? `![${l.label}](${l.url})` : `- ${l.label}: ${l.url}`);
   }
 
   lines.push('');

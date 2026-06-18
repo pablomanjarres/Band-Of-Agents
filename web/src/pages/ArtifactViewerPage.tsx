@@ -153,10 +153,23 @@ function Markdown({ source }: { source: string }) {
   return <div>{blocks}</div>;
 }
 
-// Inline rendering: **bold** and bare URLs become links. Kept simple on purpose.
+// Inline rendering: markdown images ![alt](url), **bold**, and bare URLs become links.
+// The image pattern is first in the alternation so a ![](http...) is rendered as an
+// image, not split into a bare link. Kept simple on purpose.
 function renderInline(text: string): React.ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*|https?:\/\/\S+)/g).filter((p) => p !== '');
+  const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|https?:\/\/\S+)/g).filter((p) => p !== '');
   return parts.map((part, i) => {
+    const img = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(part);
+    if (img) {
+      return (
+        <img
+          key={i}
+          src={img[2]}
+          alt={img[1] || 'material'}
+          className="my-2 block max-h-72 w-auto rounded-lg border border-border bg-bg-soft"
+        />
+      );
+    }
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={i} className="font-semibold text-fg">{part.slice(2, -2)}</strong>;
     }
