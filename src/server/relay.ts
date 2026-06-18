@@ -71,9 +71,11 @@ function relay(): Promise<RelayConnection> {
 }
 
 /** Create a room, add the Conductor, and post the opening review message. Returns the room id. */
-export async function createReviewRoom(opts: { taskId?: string; campaignName: string; advertisementName?: string }): Promise<string> {
+export async function createReviewRoom(opts: { campaignName: string; advertisementName?: string }): Promise<string> {
   const r = await relay();
-  const roomId = await r.control.createRoom(opts.taskId);
+  // No task id: band.ai requires task_id to be a UUID, and our campaign ids are
+  // slugs (e.g. "immune-plus-q3"). The chat relay does not need a Band task binding.
+  const roomId = await r.control.createRoom();
   await r.control.addParticipant(roomId, CONDUCTOR_ID, 'member');
   await r.control.postMessage(roomId, buildReviewPrompt(opts.campaignName, opts.advertisementName), [
     { id: CONDUCTOR_ID, handle: CONDUCTOR_HANDLE },
