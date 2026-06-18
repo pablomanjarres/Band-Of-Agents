@@ -482,6 +482,7 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
           ? campaign.advertisements.filter((a) => a.id === advertisementId)
           : campaign.advertisements;
         const materials = ads.flatMap((ad) => ad.materials.map((m) => ({ ad, material: m })));
+        const podSessions = new Map<string, PodBoardSession>();
         const perMaterial = materials.map(({ ad, material }) => {
           const asset = {
             id: material.id,
@@ -495,7 +496,7 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
             ...(material.imagePrompt ? { imagePrompt: material.imagePrompt } : {}),
           };
           const roomId = `campaign-${id}::${ad.id}::${material.id}`;
-          return new PodBoardSession({
+          const session = new PodBoardSession({
             roomId,
             asset,
             brand,
@@ -507,7 +508,13 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
             getPrecedents: recentPrecedents,
             getRulebook: (region) => store.getRulebookOverride(region) ?? defaultRulebooks[region.toLowerCase() as RegionKey] ?? defaultRulebooks.us,
           });
+          podSessions.set(material.id, session);
+          return session;
         });
+        record.submitDecision = async (materialId, text) => {
+          const s = podSessions.get(materialId);
+          if (s) await s.submitDecision(text);
+        };
         await Promise.all(perMaterial.map((s) => s.run()));
         rollup = { campaignId: campaign.id, worstCaseByRegion: [], perAdvertisement: [], matrix: [], perMaterial: [] };
       } else {
