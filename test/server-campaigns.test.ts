@@ -486,17 +486,19 @@ describe('POST /api/videos hosts the upload and transcribes onto the material', 
     expect(mat.perception?.transcript).toBe(DEMO_STUB_TRANSCRIPT);
   });
 
-  it('a clip with NO audio track persists the videoUrl with an empty transcript (no crash)', async () => {
+  it('a clip with NO audio track persists the videoUrl AND a synthesized text-on-screen perception (no crash)', async () => {
     if (!hasFfmpeg || !silentMp4) return;
     const camp = seedCampaign([{ id: 'ad-a', name: 'Ad A', materials: [material('silent-mat', 'video')] }]);
     const res = await app.fetch(uploadVideo(silentMp4, 'silent.mp4', { campaignId: camp.id, materialId: 'silent-mat' }));
     expect(res.status).toBe(200);
     const body = await json<{ transcribed: boolean }>(res);
-    expect(body.transcribed).toBe(false);
+    // No spoken audio, so the text-on-screen fallback synthesizes a perception: the
+    // material now carries a (synthesized) transcript so the panel is never empty.
+    expect(body.transcribed).toBe(true);
     const got = store.getCampaign(camp.id)!;
     const mat = got.advertisements[0]!.materials.find((m) => m.id === 'silent-mat')!;
     expect(typeof mat.videoUrl).toBe('string'); // upload still succeeded
-    expect(mat.perception?.transcript ?? '').toBe(''); // no audio => empty transcript
+    expect(mat.perception?.transcript ?? '').not.toBe(''); // synthesized on-screen reading
   });
 
   it('uploads with no campaign/material coordinates still host the video (no transcription)', async () => {
