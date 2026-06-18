@@ -104,11 +104,12 @@ export class CampaignBandSession {
     this.adOfKey.set(key, ad.id);
     this.materialOfKey.set(key, material.id);
 
-    // One band.ai room per material, bound to a task id that carries the campaign +
-    // material coordinates. The intake mints it; the board observes it.
-    const taskId = `${campaign.id}::${ad.id}::${material.id}`;
+    // One band.ai room per material. We do NOT pass a Band task id: band.ai requires
+    // task_id to be a UUID and our coordinates are slugs (campaign::ad::material), so
+    // a slug task id is rejected with a 422. The room is resolved by its room id (the
+    // coordinator's lookupMaterial is keyed by room), so no task binding is needed.
     const intake = this.intake!;
-    const room = await intake.createRoom(taskId);
+    const room = await intake.createRoom();
     this.roomOfKey.set(key, room);
 
     // The campaign coordinates this room's events carry, so the campaign-review SSE
@@ -127,8 +128,10 @@ export class CampaignBandSession {
 
     // Add the reviewer agents to the room, then post the material @mentioning the
     // coordinator so the existing band flow runs for this one material.
+    // band.ai's participant role is a fixed enum ('member' is the valid value for an
+    // added agent; 'reviewer' is rejected with a 422 enum error).
     for (const agentId of board.reviewerAgentIds()) {
-      await intake.addParticipant(room, agentId, 'reviewer');
+      await intake.addParticipant(room, agentId, 'member');
     }
     const coord = board.coordinatorMention();
     await intake.addParticipant(room, coord.id, 'member');
