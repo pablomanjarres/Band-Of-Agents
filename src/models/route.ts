@@ -1,4 +1,4 @@
-import type { ModelClient, SttClient } from './client';
+import type { CompleteRequest, CompleteResult, ImageRequest, ImageResult, ModelClient, SttClient } from './client';
 import { AimlModelClient, AimlSttClient, DEFAULT_STT_MODEL } from './aiml';
 import { BedrockModelClient } from './bedrock';
 import { GeminiModelClient, GeminiSttClient } from './gemini';
@@ -83,13 +83,45 @@ function geminiReachable(): boolean {
   );
 }
 
+// AIML is the billed/showcase provider, with a Vertex Gemini fallback for when the
+// AIML credit/tokens run out: the call transparently completes on Gemini, but `model`
+// stays the AI/ML API model name, so spend + the dashboard keep attributing the agent
+// to its AI/ML API model (gpt-5, claude-opus, deepseek, gemini, llama...). The review
+// never dies just because AIML is exhausted.
+class FallbackModelClient implements ModelClient {
+  readonly model: string;
+  constructor(private readonly primary: ModelClient, private readonly fallback: ModelClient) {
+    this.model = primary.model;
+  }
+  async complete(req: CompleteRequest): Promise<CompleteResult> {
+    try {
+      return await this.primary.complete(req);
+    } catch (err) {
+      console.warn(`[fallback] AIML (${this.model}) exhausted/failed: ${(err as Error)?.message ?? err}; routing this call to Vertex Gemini (still billed as ${this.model}).`);
+      return await this.fallback.complete(req);
+    }
+  }
+  async generateImage(req: ImageRequest): Promise<ImageResult> {
+    try {
+      return (await this.primary.generateImage?.(req)) ?? {};
+    } catch (err) {
+      console.warn(`[fallback] AIML image (${this.model}) failed: ${(err as Error)?.message ?? err}; routing to Vertex.`);
+      return (await this.fallback.generateImage?.(req)) ?? {};
+    }
+  }
+}
+
 // AIML is the default/main path; 'dev' routes to Bedrock/Vertex/Featherless to save AIML credit.
 // Every client is wrapped in meter() so all real calls accrue into the spend tracker.
 export function modelFor(role: AgentRole, mode: ModelMode = activeMode()): ModelClient {
   const entry = ROUTES[role];
   if (mode === 'aiml') {
     const apiKey = process.env.AIML_API_KEY;
-    if (apiKey) return meter(new AimlModelClient({ apiKey, model: entry.aiml }));
+    if (apiKey) {
+      const primary = new AimlModelClient({ apiKey, model: entry.aiml });
+      const fallback = new GeminiModelClient({ model: entry.devProvider === 'gemini' ? entry.devModel : 'gemini-2.5-flash' });
+      return meter(new FallbackModelClient(primary, fallback));
+    }
     // AIML is the wired/preferred provider, but until the key is set we fall back to
     // the current dev models (Vertex/Bedrock/Featherless) so everything keeps running.
     // The moment AIML_API_KEY is set, every agent routes through AIML automatically.
@@ -117,7 +149,7 @@ export function modelFor(role: AgentRole, mode: ModelMode = activeMode()): Model
 export function imageClientFor(mode: ModelMode = activeMode()): ModelClient {
   if (mode === 'aiml') {
     const apiKey = process.env.AIML_API_KEY;
-    if (apiKey) return meter(new AimlModelClient({ apiKey, model: IMAGE_AIML_MODEL }));
+    if (apiKey) return meter(new FallbackModelClient(new AimlModelClient({ apiKey, model: IMAGE_AIML_MODEL }), new GeminiModelClient({ model: 'gemini-2.5-flash' })));
     // No AIML key yet: fall back to Vertex Gemini image gen (the dev path).
   }
   return meter(new GeminiModelClient({ model: 'gemini-2.5-flash' }));
