@@ -92,6 +92,10 @@ function geminiReachable(): boolean {
 // stalls the whole review; race the primary against a timeout so a hang throws and
 // the fallback kicks in. 404s (bad model slug) already throw fast.
 const AIML_TIMEOUT_MS = Number(process.env.AIML_TIMEOUT_MS ?? 22000);
+// Image generation legitimately takes longer than a text turn (Nano Banana ~15-40s),
+// so it gets its own, larger budget. Without a timeout a silent AIML image hang never
+// falls back and the Remediation agent ships an empty image (no "regenerated visual").
+const AIML_IMAGE_TIMEOUT_MS = Number(process.env.AIML_IMAGE_TIMEOUT_MS ?? 45000);
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error(`AIML call timed out after ${ms}ms`)), ms);
@@ -114,9 +118,11 @@ class FallbackModelClient implements ModelClient {
   }
   async generateImage(req: ImageRequest): Promise<ImageResult> {
     try {
-      return (await this.primary.generateImage?.(req)) ?? {};
+      const primary = this.primary.generateImage?.(req);
+      if (!primary) throw new Error('primary has no image endpoint');
+      return (await withTimeout(primary, AIML_IMAGE_TIMEOUT_MS)) ?? {};
     } catch (err) {
-      console.warn(`[fallback] AIML image (${this.model}) failed: ${(err as Error)?.message ?? err}; routing to Vertex.`);
+      console.warn(`[fallback] AIML image (${this.model}) failed: ${(err as Error)?.message ?? err}; routing to Vertex (still billed as ${this.model}).`);
       return (await this.fallback.generateImage?.(req)) ?? {};
     }
   }
@@ -160,7 +166,7 @@ export function modelFor(role: AgentRole, mode: ModelMode = activeMode()): Model
 export function imageClientFor(mode: ModelMode = activeMode()): ModelClient {
   if (mode === 'aiml') {
     const apiKey = process.env.AIML_API_KEY;
-    if (apiKey) return meter(new FallbackModelClient(new AimlModelClient({ apiKey, model: IMAGE_AIML_MODEL }), new GeminiModelClient({ model: 'gemini-2.5-flash' })));
+    if (apiKey) return meter(new FallbackModelClient(new AimlModelClient({ apiKey, model: IMAGE_AIML_MODEL, imageModel: IMAGE_AIML_MODEL }), new GeminiModelClient({ model: 'gemini-2.5-flash' })));
     // No AIML key yet: fall back to Vertex Gemini image gen (the dev path).
   }
   return meter(new GeminiModelClient({ model: 'gemini-2.5-flash' }));

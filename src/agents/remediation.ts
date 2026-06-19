@@ -98,8 +98,12 @@ export function makeRemediation(opts: RemediationOptions): AgentHandler {
 
     const reportTo = await resolveTarget(tools, opts.reportToHandle, message);
     const coordTag = reportTo.handle ? `@${reportTo.handle}` : '@Coordinator';
+    // Embed the regenerated asset inline (the /api/images url renders as an <img>
+    // in the dashboard chat), so the human SEES the rebranded visual, not just a
+    // link. The artifact link stays for the full-size click-through.
+    const inlineImage = imageUrl ? `\n\n![Regenerated ${region} visual](${imageUrl})` : '';
     await tools.sendMessage(
-      `${coordTag}, I rewrote the ${region} copy to add the required disclosure and regenerated the image. Re-submitting for review.${viewLink}`,
+      `${coordTag}, I rewrote the ${region} copy to add the required disclosure and regenerated the image. Re-submitting for review.${viewLink}${inlineImage}`,
       [reportTo],
     );
   };

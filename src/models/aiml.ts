@@ -117,10 +117,15 @@ export class AimlModelClient implements ModelClient {
         if (!r.ok) {
           throw Object.assign(new Error(`AIML image generation failed: ${r.status}`), { status: r.status });
         }
-        return (await r.json()) as { images?: Array<{ url?: string; b64_json?: string }> };
+        // AIML's images endpoint returns the result under `data` (OpenAI shape);
+        // some providers use `images`. Accept either so a 200 is never dropped.
+        return (await r.json()) as {
+          data?: Array<{ url?: string; b64_json?: string }>;
+          images?: Array<{ url?: string; b64_json?: string }>;
+        };
       }),
     );
-    const first = res.images?.[0];
+    const first = res.data?.[0] ?? res.images?.[0];
     const out: ImageResult = {};
     if (first?.url) out.url = first.url;
     if (first?.b64_json) out.b64 = first.b64_json;
