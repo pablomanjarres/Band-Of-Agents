@@ -101,6 +101,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
   const [activeMaterialId, setActiveMaterialId] = useState<string | undefined>(materialId);
   // The judge's verdict on the agents' recommendation.
   const [decisionState, setDecisionState] = useState<'idle' | 'sending' | 'approved' | 'rejected'>('idle');
+  const [decisionError, setDecisionError] = useState<string | null>(null);
   const seen = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   // Stable ref so the subscribe effect can surface a report without re-subscribing.
@@ -134,11 +135,13 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
     async (verdict: 'yes' | 'reject') => {
       if (!rid || !activeMaterialId) return;
       setDecisionState('sending');
+      setDecisionError(null);
       try {
         await submitCampaignDecision(rid, activeMaterialId, verdict);
         setDecisionState(verdict === 'yes' ? 'approved' : 'rejected');
       } catch {
         setDecisionState('idle');
+        setDecisionError('Could not send your decision — this review may have ended. Start a fresh review.');
       }
     },
     [rid, activeMaterialId],
@@ -329,6 +332,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
                   </button>
                 </div>
                 {decisionState === 'sending' ? <p className="mt-2 text-[11px] text-faint">Sending your decision to the agents…</p> : null}
+                {decisionError ? <p className="mt-2 text-[11px] text-danger">{decisionError}</p> : null}
               </>
             )}
           </div>
