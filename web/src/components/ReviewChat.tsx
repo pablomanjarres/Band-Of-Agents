@@ -217,6 +217,9 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
     phase === 'awaiting' ? 'Awaiting your decision' :
     phase === 'done' ? 'Review complete' : 'Agents reviewing live';
 
+  // The distinct agents that have spoken so far, shown as a live "who's collaborating" roster.
+  const activeAgents = [...new Set(lines.map((l) => l.from))].filter((a) => a && a !== 'system');
+
   return (
     <aside className="surface flex max-h-[calc(100vh-7rem)] w-full flex-col overflow-hidden rounded-2xl border border-border bg-surface">
         <header className="glass flex items-start justify-between gap-3 border-b border-border px-5 py-4">
@@ -230,6 +233,15 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
           </div>
           <button type="button" onClick={onClose} className="btn btn-ghost shrink-0 px-2.5 py-1 text-xs">Close</button>
         </header>
+
+        {activeAgents.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-5 py-2.5">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-faint">Agents collaborating</span>
+            {activeAgents.map((a) => (
+              <span key={a} className="rounded-full border border-violet-400/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-200">{a}</span>
+            ))}
+          </div>
+        ) : null}
 
         <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto px-5 py-5">
           {phase === 'picking' ? (
