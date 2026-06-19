@@ -281,10 +281,18 @@ export function CampaignDetailPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (h.reportArtifactId) setReportArtifactId(h.reportArtifactId);
-                        setChatAdId(h.adId);
                         setActiveReviewId(h.reviewId);
-                        setReviewByAd((prev) => ({ ...prev, [h.adId]: h.reviewId }));
+                        if (h.reportArtifactId) {
+                          // Finished review: open its durable report (center-left). Do NOT
+                          // reconnect the live chat stream, which is in-memory and gone once
+                          // the review ends, so reconnecting just shows "Waiting for the
+                          // agents" and looks like it is starting over.
+                          setReportArtifactId(h.reportArtifactId);
+                        } else {
+                          // Still in progress (no report yet): re-open the live chat to watch.
+                          setChatAdId(h.adId);
+                          setReviewByAd((prev) => ({ ...prev, [h.adId]: h.reviewId }));
+                        }
                       }}
                       className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/[0.06]"
                     >

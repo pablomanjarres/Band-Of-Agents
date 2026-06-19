@@ -187,6 +187,10 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
         if (e.status === 'awaiting-decision') { setPhase('awaiting'); return; }
         return; // other statuses are not rendered as feed lines
       }
+      // Band mode (real band.ai rooms) signals the human decision via an `escalation`
+      // event rather than the local path's awaiting-decision status; surface the
+      // Approve/Reject buttons either way. The ruling posts back into the room.
+      if (e.type === 'escalation') setPhase('awaiting');
       const ln = lineFor(e);
       if (ln) {
         const withLink = withReportLink(ln);
