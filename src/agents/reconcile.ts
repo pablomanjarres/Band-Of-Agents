@@ -114,7 +114,7 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
       const { url } = opts.publishArtifact({
         kind: 'markdown',
         title: 'Review report',
-        content: buildReportMarkdown(verdicts, byRegion),
+        content: buildReportMarkdown(verdicts, byRegion, opts.board.campaign(ctx.roomId)?.imageUrl),
         reviewId: ctx.roomId,
         createdBy: ctx.agentName,
       });
@@ -202,6 +202,15 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
         `Human decision recorded for ${regions.join('/')}: "${message.content}". Logged as precedent.`,
         'decision',
       );
+      // Post a plain-English close INTO the room so the band.ai chat does not end
+      // abruptly at the human's one-word reply.
+      const approved = /^(yes|approve|publish|ship|accept|ok)/i.test(message.content.trim());
+      await tools.sendMessage(
+        approved
+          ? `Decision recorded: approved. ${regions.join('/')} cleared to publish, risk accepted. Shipping the campaign.`
+          : `Decision recorded: rejected. Holding ${regions.join('/')}; the campaign will not ship as-is.`,
+        [],
+      );
       return;
     }
 
@@ -251,8 +260,9 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
 }
 
 /** Render the findings + verdicts as a markdown report for the dashboard viewer. */
-function buildReportMarkdown(verdicts: RegionVerdict[], byRegion: Map<string, ReviewResult>): string {
+function buildReportMarkdown(verdicts: RegionVerdict[], byRegion: Map<string, ReviewResult>, imageUrl?: string): string {
   const lines: string[] = ['# Review report', ''];
+  if (imageUrl) lines.push('## Material', '', `![campaign image](${imageUrl})`, '');
   lines.push('## Verdicts', '');
   for (const v of verdicts) lines.push(`- **${v.region}**: ${v.decision} - ${v.rationale}`);
   lines.push('', '## Findings by region', '');
