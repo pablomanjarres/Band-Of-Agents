@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "local": "tsx src/run/local.ts",
     "seed:campaigns": "tsx src/run/seed-campaigns.ts",
+    "publish:hosted": "tsx src/run/publish-to-hosted.ts",
     "veo:smoke": "tsx src/run/veo-smoke.ts",
     "agents": "tsx src/run/agents.ts",
     "agents:classic": "tsx src/run/agents-classic.ts",
