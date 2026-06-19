@@ -43,3 +43,39 @@ Sequencing chosen by user: Stage A first, then Stage B.
 ## Notes
 - Runs are in-memory (like campaignReviews). Durable "this was reviewed" is material.review (GCS). For a single Cloud Run instance this is fine; if it scales, pin max-instances=1 or persist runs.
 - The backend POST /api/reviews stub path still exists (now unused by the UI); its tests are the load-sensitive ones. Candidate for later removal.
+
+---
+
+# Review UI pass: left report column, inline images, yes/no decision, agent link (2026-06-18)
+
+Target: deployed `main` (== origin/main, Vercel prod). All four are CONFIRMED missing from
+deployed main (the other implementations live on unmerged branches).
+
+- [x] 1. Report fills the LEFT column (not a right overlay) — ReviewChat de-overlaid to an in-flow
+      `<aside>`; mounted as the left column of CampaignDetailPage's two-pane flex (sticky, bounded
+      height, internal scroll); old overlay mount removed.
+- [x] 2. Render the campaign images — exported `Markdown` from ArtifactViewerPage and use it for the
+      feed body; `![campaign image](/api/images/..)` now renders as <img>.
+- [x] 3. Yes/No on the verdict — Approve(`yes`)/Reject(`reject`) buttons wired to
+      submitCampaignDecision(rid, materialId, decision).
+- [x] 4. "The agents forgot the link" — pod-region-reviewer.ts + pod-lead.ts reworded (defer to the
+      Adjudicator's linked report). NOTE: backend; needs a redeploy of the Band agents to show.
+
+## Verify
+- [x] web build clean (tsc -b && vite build) + backend tsc --noEmit clean
+- [x] adversarial 3-lens review of the diff — caught + fixed:
+  - CRITICAL: buttons gated on `phase==='done'` but an escalated review (the demo path, and the
+    case in the screenshot) parks at `awaiting-decision` and never emits `complete`. Fixed: added an
+    `awaiting` phase, gate buttons on it. Conceptually correct too (yes/no belongs on escalations).
+  - MAJOR: resumed-from-history reviews never set activeMaterialId. Fixed: derive it from the SSE
+    stream (`setActiveMaterialId(prev => prev ?? e.materialId)`).
+  - (mine, found while verifying) dedup-key collision: awaiting-decision and the post-ruling
+    complete both use seq 0 + no materialId, so the completion was dropped. Fixed: fold the status
+    value into the dedup key.
+  - MINOR (left as-is, by design): backend logs the ruling text but does not flip the verdict in the
+    deterministic KEY_FREE_LOCAL mode; in real-LLM mode the Adjudicator acts on `yes`/`reject`
+    (the literal words the agents' own prompt asks for).
+
+## Deploy (pending user)
+- Frontend: push to `main` -> Vercel auto-deploys artifact-viewer-one (this is a PROD change).
+- Backend (only needed for ask #4 wording + decision endpoint): gcloud redeploy band-backend.

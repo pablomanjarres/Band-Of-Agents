@@ -130,7 +130,7 @@ export function makePodLead(opts: PodLeadOptions): AgentHandler {
     if (!target) return;
     if (opts.hub) {
       opts.hub.setPodFinding(roomId, opts.pod, pf);
-      await tools.sendMessage(`${opts.pod} pod filed: ${findings.length} finding(s), 0 conflict(s). Full detail in the report.`, [{ id: target.id, handle: target.handle }]);
+      await tools.sendMessage(`${opts.pod} pod filed: ${findings.length} finding(s), 0 conflict(s). The Adjudicator will post the full report with a link.`, [{ id: target.id, handle: target.handle }]);
     } else {
       await tools.sendMessage(JSON.stringify(pf), [{ id: target.id, handle: target.handle }]);
     }

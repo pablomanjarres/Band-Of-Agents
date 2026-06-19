@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getCampaign, startCampaignReview, subscribeToCampaignEvents, type EventSubscription } from '../api';
+import { getCampaign, startCampaignReview, submitCampaignDecision, subscribeToCampaignEvents, type EventSubscription } from '../api';
+import { Markdown } from '../pages/ArtifactViewerPage';
 import type { BoardEvent } from '../types';
 
 interface ReviewChatProps {
@@ -25,7 +26,7 @@ function artifactIdFromUrl(url: string): string | null {
   return m ? (m[1] ?? null) : null;
 }
 
-type Phase = 'picking' | 'starting' | 'live' | 'done' | 'error';
+type Phase = 'picking' | 'starting' | 'live' | 'awaiting' | 'done' | 'error';
 
 interface PickMaterial {
   id: string;
@@ -96,6 +97,10 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
   const [rid, setRid] = useState<string | null>(reviewId ?? null);
   const [materials, setMaterials] = useState<PickMaterial[] | null>(null);
   const [pickedName, setPickedName] = useState<string | undefined>(materialName);
+  // The material the user picked, kept so we can post a yes/no decision for it.
+  const [activeMaterialId, setActiveMaterialId] = useState<string | undefined>(materialId);
+  // The judge's verdict on the agents' recommendation.
+  const [decisionState, setDecisionState] = useState<'idle' | 'sending' | 'approved' | 'rejected'>('idle');
   const seen = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   // Stable ref so the subscribe effect can surface a report without re-subscribing.
@@ -111,6 +116,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
       try {
         const res = await startCampaignReview(campaignId, advertisementId, mid);
         setRid(res.id);
+        setActiveMaterialId(mid);
         onReviewStarted?.(res.id, mname);
         setPhase('live');
       } catch (err) {
@@ -119,6 +125,23 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
       }
     },
     [campaignId, advertisementId, onReviewStarted],
+  );
+
+  // The judge rules on the agents' recommendation. The decision text is posted back
+  // into the room to the adjudicator (yes = ship, reject = spike); the live stream
+  // then reflects the new verdict, so no manual refetch is needed.
+  const decide = useCallback(
+    async (verdict: 'yes' | 'reject') => {
+      if (!rid || !activeMaterialId) return;
+      setDecisionState('sending');
+      try {
+        await submitCampaignDecision(rid, activeMaterialId, verdict);
+        setDecisionState(verdict === 'yes' ? 'approved' : 'rejected');
+      } catch {
+        setDecisionState('idle');
+      }
+    },
+    [rid, activeMaterialId],
   );
 
   // On open: resume an existing review, auto-start a pre-scoped material, or load the
@@ -146,12 +169,23 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
   useEffect(() => {
     if (!rid) return;
     let sub: EventSubscription | null = subscribeToCampaignEvents(rid, (e) => {
-      const key = `${(e as { materialId?: string }).materialId ?? ''}:${e.seq}:${e.type}`;
+      const mid = (e as { materialId?: string }).materialId;
+      // Status events reuse seq 0 (escalation emits awaiting-decision, then a ruling
+      // emits complete), so fold the status value into the key or the second one is
+      // dropped as a duplicate and the panel never flips to done.
+      const statusTag = e.type === 'status' ? `:${(e as { status?: string }).status ?? ''}` : '';
+      const key = `${mid ?? ''}:${e.seq}:${e.type}${statusTag}`;
       if (seen.current.has(key)) return;
       seen.current.add(key);
-      if (e.type === 'status' && (e.status === 'complete' || e.status === 'error')) {
-        setPhase(e.status === 'error' ? 'error' : 'done');
-        return;
+      // Capture the material id from the stream so a resumed review (no materialId
+      // prop, never calls startReview) can still post a decision for the right one.
+      if (mid) setActiveMaterialId((prev) => prev ?? mid);
+      if (e.type === 'status') {
+        if (e.status === 'error') { setPhase('error'); return; }
+        if (e.status === 'complete') { setPhase('done'); return; }
+        // Escalation parks the review here until the human rules yes/reject.
+        if (e.status === 'awaiting-decision') { setPhase('awaiting'); return; }
+        return; // other statuses are not rendered as feed lines
       }
       const ln = lineFor(e);
       if (ln) {
@@ -175,13 +209,12 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
     phase === 'picking' ? 'Pick a material to analyze' :
     phase === 'starting' ? 'Starting the review…' :
     phase === 'error' ? 'Review error' :
+    phase === 'awaiting' ? 'Awaiting your decision' :
     phase === 'done' ? 'Review complete' : 'Agents reviewing live';
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end">
-      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-bg/60 backdrop-blur-sm" />
-      <aside className="relative z-10 flex h-full w-full max-w-xl flex-col border-l border-border bg-surface shadow-2xl">
-        <header className="glass sticky top-0 flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+    <aside className="surface flex max-h-[calc(100vh-7rem)] w-full flex-col overflow-hidden rounded-2xl border border-border bg-surface">
+        <header className="glass flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0">
             <p className="eyebrow text-accent/80">Review · live with the agents</p>
             <h2 className="truncate font-display text-xl text-fg">{phase === 'picking' ? (advertisementName ?? campaignName) : scope}</h2>
@@ -193,7 +226,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
           <button type="button" onClick={onClose} className="btn btn-ghost shrink-0 px-2.5 py-1 text-xs">Close</button>
         </header>
 
-        <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto px-5 py-5">
+        <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto px-5 py-5">
           {phase === 'picking' ? (
             <div className="space-y-2">
               <p className="text-sm text-muted">Choose which material the agents should review. Each runs as one band.ai room.</p>
@@ -236,8 +269,11 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
                     'surface text-fg/90',
                   ].join(' ')}
                 >
-                  <span className="mr-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">{ln.from}</span>
-                  <span className="whitespace-pre-wrap">{ln.text}</span>
+                  <p className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">{ln.from}</p>
+                  {/* Reuse the report renderer so ![campaign image](url) becomes a real <img>, not raw text. */}
+                  <div className="text-sm leading-relaxed [&_h1]:text-current [&_h2]:text-current [&_h3]:text-current [&_li]:text-current [&_p:first-child]:mt-0 [&_p]:my-1 [&_p]:text-current">
+                    <Markdown source={ln.text} />
+                  </div>
                   {ln.url ? (
                     <a
                       href={ln.url}
@@ -261,7 +297,41 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
             </>
           )}
         </div>
+
+        {/* The judge's call on an escalated verdict, posted back to the room. Shows when
+            the review parks on a human decision, and stays to confirm after a ruling. */}
+        {(phase === 'awaiting' || decisionState !== 'idle') && rid && activeMaterialId ? (
+          <div className="border-t border-border px-5 py-4">
+            {decisionState === 'approved' ? (
+              <p className="text-sm font-medium text-human">You approved the agents' verdict. Shipping. ✓</p>
+            ) : decisionState === 'rejected' ? (
+              <p className="text-sm font-medium text-danger">You rejected the agents' verdict. Spiked. ✗</p>
+            ) : (
+              <>
+                <p className="mb-2 text-xs text-muted">Your call on the agents' verdict:</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => decide('yes')}
+                    disabled={decisionState === 'sending'}
+                    className="btn flex-1 border border-human/40 bg-human/10 px-3 py-2 text-human hover:bg-human/15 disabled:opacity-50"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => decide('reject')}
+                    disabled={decisionState === 'sending'}
+                    className="btn flex-1 border border-danger/40 bg-danger/10 px-3 py-2 text-danger hover:bg-danger/15 disabled:opacity-50"
+                  >
+                    Reject
+                  </button>
+                </div>
+                {decisionState === 'sending' ? <p className="mt-2 text-[11px] text-faint">Sending your decision to the agents…</p> : null}
+              </>
+            )}
+          </div>
+        ) : null}
       </aside>
-    </div>
   );
 }

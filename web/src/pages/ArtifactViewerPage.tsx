@@ -111,8 +111,9 @@ function prettyJson(raw: string): string {
 
 // A deliberately small markdown renderer: headings, bullet lists, bold, and
 // inline links. The reports we render are ours, so this covers them without
-// pulling in a markdown dependency.
-function Markdown({ source }: { source: string }) {
+// pulling in a markdown dependency. Exported so the live ReviewChat feed renders
+// the same way (campaign images become real <img>, not raw ![](...) text).
+export function Markdown({ source }: { source: string }) {
   const lines = source.split('\n');
   const blocks: React.ReactNode[] = [];
   let list: string[] = [];

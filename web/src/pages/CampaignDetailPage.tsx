@@ -188,8 +188,37 @@ export function CampaignDetailPage() {
         </div>
       </div>
 
-      {/* Two-pane workspace: LEFT = live processing (filled by a band.ai run); MAIN = ads + materials. */}
+      {/* Two-pane workspace: LEFT = live review with the agents (or the run mirror); MAIN = ads + materials. */}
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        {chatAdId ? (() => {
+          const chatAd = campaign.advertisements.find((a) => a.id === chatAdId);
+          return (
+            <div className="w-full lg:sticky lg:top-6 lg:w-[32rem] lg:shrink-0">
+              <ReviewChat
+                key={chatAdId}
+                campaignId={campaign.id}
+                advertisementId={chatAdId}
+                campaignName={campaign.name}
+                {...(chatAd ? { advertisementName: chatAd.name } : {})}
+                {...(reviewByAd[chatAdId] ? { reviewId: reviewByAd[chatAdId] } : {})}
+                onReviewStarted={(rid, label) => {
+                  setReviewByAd((prev) => ({ ...prev, [chatAdId]: rid }));
+                  setActiveReviewId(rid);
+                  setHistory((prev) =>
+                    prev.some((h) => h.reviewId === rid)
+                      ? prev
+                      : [...prev, { reviewId: rid, adId: chatAdId, label: label ?? chatAd?.name ?? 'Review', ts: Date.now() }],
+                  );
+                }}
+                onReport={(artifactId) => {
+                  setReportArtifactId(artifactId);
+                  setHistory((prev) => prev.map((h) => (h.reviewId === activeReviewId ? { ...h, reportArtifactId: artifactId } : h)));
+                }}
+                onClose={() => setChatAdId(null)}
+              />
+            </div>
+          );
+        })() : (
         <aside className="lg:sticky lg:top-6 lg:w-80 lg:shrink-0 space-y-3">
           <div className="surface rounded-2xl p-4">
             <div className="flex items-center justify-between">
@@ -277,6 +306,7 @@ export function CampaignDetailPage() {
             </div>
           ) : null}
         </aside>
+        )}
 
         <section className="min-w-0 flex-1 space-y-4">
           <div className="flex items-center gap-1 border-b border-border">
@@ -399,34 +429,6 @@ export function CampaignDetailPage() {
         />
       ) : null}
 
-      {/* Live chat with the agents, scoped to one advertisement (judge-facing, no auth). */}
-      {chatAdId ? (() => {
-        const chatAd = campaign.advertisements.find((a) => a.id === chatAdId);
-        return (
-          <ReviewChat
-            key={chatAdId}
-            campaignId={campaign.id}
-            advertisementId={chatAdId}
-            campaignName={campaign.name}
-            {...(chatAd ? { advertisementName: chatAd.name } : {})}
-            {...(reviewByAd[chatAdId] ? { reviewId: reviewByAd[chatAdId] } : {})}
-            onReviewStarted={(rid, label) => {
-              setReviewByAd((prev) => ({ ...prev, [chatAdId]: rid }));
-              setActiveReviewId(rid);
-              setHistory((prev) =>
-                prev.some((h) => h.reviewId === rid)
-                  ? prev
-                  : [...prev, { reviewId: rid, adId: chatAdId, label: label ?? chatAd?.name ?? 'Review', ts: Date.now() }],
-              );
-            }}
-            onReport={(artifactId) => {
-              setReportArtifactId(artifactId);
-              setHistory((prev) => prev.map((h) => (h.reviewId === activeReviewId ? { ...h, reportArtifactId: artifactId } : h)));
-            }}
-            onClose={() => setChatAdId(null)}
-          />
-        );
-      })() : null}
     </div>
   );
 }

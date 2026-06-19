@@ -134,7 +134,7 @@ export function makeRegionReviewer(opts: RegionReviewerOptions): AgentHandler {
     const target = await resolveReportTarget(tools, opts.reportToHandle, message);
     if (opts.hub) {
       opts.hub.setFinding(message.roomId, opts.region, review.findings);
-      await tools.sendMessage(`${opts.reviewerName}: ${review.findings.length} finding(s)${blocking ? `, ${blocking} blocking` : ''}. Full detail in the report.`, [target]);
+      await tools.sendMessage(`${opts.reviewerName}: ${review.findings.length} finding(s)${blocking ? `, ${blocking} blocking` : ''}. The Adjudicator will post the full report with a link.`, [target]);
     } else {
       await tools.sendMessage(JSON.stringify(review), [target]);
     }
