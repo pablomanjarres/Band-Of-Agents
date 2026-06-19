@@ -93,14 +93,17 @@ export function CampaignDetailPage() {
   // edited, re-fetch the campaign every 8s so a review you just ran (its verdict +
   // report + transcript) appears without a manual refresh.
   useEffect(() => {
-    if (!id || chatAdId || tab === 'dossier' || showAddMaterial || showAddAd) return;
+    // Poll even while the review chat is open, so (a) the material card + Reports panel
+    // reflect a review the moment it stores, and (b) the page's campaign state never goes
+    // stale - a stale copy saved by a later edit would wipe reviews added during the chat.
+    if (!id || tab === 'dossier' || showAddMaterial || showAddAd) return;
     const t = setInterval(() => {
       getCampaign(id)
         .then((res) => setLoad((prev) => (prev.kind === 'ready' ? { kind: 'ready', campaign: res.campaign } : prev)))
         .catch(() => {});
     }, 8000);
     return () => clearInterval(t);
-  }, [id, chatAdId, tab, showAddMaterial, showAddAd]);
+  }, [id, tab, showAddMaterial, showAddAd]);
 
   function refreshCampaign(next: Campaign) {
     setLoad({ kind: 'ready', campaign: next });
@@ -426,11 +429,13 @@ export function CampaignDetailPage() {
             refreshCampaign(refreshed.campaign);
           }}
           onSave={async (patch) => {
-            // Patch this material in place and persist the whole campaign (upsert),
-            // then refresh so the edit shows immediately.
+            // Re-fetch first so this whole-campaign upsert never overwrites reviews that
+            // were stored on the backend after the page loaded (otherwise editing a
+            // material would silently wipe other materials' fresh reviews).
+            const fresh = (await getCampaign(campaign.id)).campaign;
             const updated: Campaign = {
-              ...campaign,
-              advertisements: campaign.advertisements.map((ad) =>
+              ...fresh,
+              advertisements: fresh.advertisements.map((ad) =>
                 detailAdId && ad.id !== detailAdId
                   ? ad
                   : {
