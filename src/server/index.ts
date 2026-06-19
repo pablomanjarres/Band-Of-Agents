@@ -340,7 +340,9 @@ const pendingTranscripts = new Map<string, string>();
 /** Render a review's in-memory event stream as a readable markdown transcript. */
 function transcriptMarkdown(campaign: Campaign, materialId: string, events: BoardEvent[]): string {
   const mat = campaign.advertisements.flatMap((a) => a.materials).find((m) => m.id === materialId);
-  const out: string[] = [`# Chat transcript: ${mat?.name ?? materialId}`, '', 'The full band.ai agent conversation for this review.', ''];
+  const out: string[] = [`# Chat transcript: ${mat?.name ?? materialId}`, ''];
+  if (mat?.imageUrl) out.push(`![campaign image](${mat.imageUrl})`, '');
+  out.push('The full band.ai agent conversation for this review.', '');
   for (const e of events) {
     const from = (e as { fromName?: string }).fromName ?? 'Agent';
     const text = (e as { text?: string }).text;
@@ -484,8 +486,28 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
       });
       const art = publishArtifact({ kind: 'markdown', title: `Chat transcript: ${materialId}`, content: transcriptMarkdown(campaign, materialId, evs), createdBy: 'Band room' });
       pendingTranscripts.set(materialId, art.id);
+      // Pull THIS review's published report id out of the conversation (reconcile posts
+      // "Full report: <APP>/a/<id>") so the dashboard [Report] points at the latest report.
+      let reportArtifactId: string | undefined;
+      for (const e of evs) {
+        const m = /\/a\/([A-Za-z0-9-]{8,})/.exec((e as { text?: string }).text ?? '');
+        if (m) reportArtifactId = m[1];
+      }
+      // Worst-case verdict, used only to seed a review if none was recorded yet (so a
+      // brand-new material's review still stores and shows in Reports & chats).
+      const fallbackDecision = (): 'published' | 'spiked' | 'escalated' => {
+        let d: 'published' | 'spiked' | 'escalated' = 'published';
+        for (const e of evs) {
+          if (e.type === 'verdict' && ((e as { verdicts?: { decision: string }[] }).verdicts ?? []).some((v) => v.decision === 'escalate')) d = 'escalated';
+          if (e.type === 'terminal') { const dec = (e as { decision?: string }).decision; if (dec === 'spiked') d = 'spiked'; else if (dec === 'escalated' && d !== 'spiked') d = 'escalated'; }
+        }
+        return d;
+      };
       const latest = store.getCampaign(campaign.id);
-      if (latest) store.saveCampaign(patchMaterial(latest, materialId, (m) => (m.review ? { ...m, review: { ...m.review, transcriptArtifactId: art.id } } : m)));
+      if (latest) store.saveCampaign(patchMaterial(latest, materialId, (m) => {
+        const base = m.review ?? { decision: fallbackDecision(), reviewedAt: Date.now() };
+        return { ...m, review: { ...base, transcriptArtifactId: art.id, ...(reportArtifactId ? { reportArtifactId } : {}) } };
+      }));
     } catch (err) {
       console.warn(`[transcript] save failed for ${materialId}: ${(err as Error)?.message ?? err}`);
     }
