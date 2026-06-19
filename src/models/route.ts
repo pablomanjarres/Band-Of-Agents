@@ -88,6 +88,17 @@ function geminiReachable(): boolean {
 // stays the AI/ML API model name, so spend + the dashboard keep attributing the agent
 // to its AI/ML API model (gpt-5, claude-opus, deepseek, gemini, llama...). The review
 // never dies just because AIML is exhausted.
+// A slow/hanging AIML call (no error, just no response) must ALSO fall back, or it
+// stalls the whole review; race the primary against a timeout so a hang throws and
+// the fallback kicks in. 404s (bad model slug) already throw fast.
+const AIML_TIMEOUT_MS = Number(process.env.AIML_TIMEOUT_MS ?? 35000);
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`AIML call timed out after ${ms}ms`)), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
 class FallbackModelClient implements ModelClient {
   readonly model: string;
   constructor(private readonly primary: ModelClient, private readonly fallback: ModelClient) {
@@ -95,7 +106,7 @@ class FallbackModelClient implements ModelClient {
   }
   async complete(req: CompleteRequest): Promise<CompleteResult> {
     try {
-      return await this.primary.complete(req);
+      return await withTimeout(this.primary.complete(req), AIML_TIMEOUT_MS);
     } catch (err) {
       console.warn(`[fallback] AIML (${this.model}) exhausted/failed: ${(err as Error)?.message ?? err}; routing this call to Vertex Gemini (still billed as ${this.model}).`);
       return await this.fallback.complete(req);
