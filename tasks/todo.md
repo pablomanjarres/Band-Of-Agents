@@ -76,6 +76,36 @@ deployed main (the other implementations live on unmerged branches).
     deterministic KEY_FREE_LOCAL mode; in real-LLM mode the Adjudicator acts on `yes`/`reject`
     (the literal words the agents' own prompt asks for).
 
-## Deploy (pending user)
-- Frontend: push to `main` -> Vercel auto-deploys artifact-viewer-one (this is a PROD change).
-- Backend (only needed for ask #4 wording + decision endpoint): gcloud redeploy band-backend.
+# Round 2: layout flip + review reliability (2026-06-19)
+
+User correction: chat review on the RIGHT, report center-left when generated (I had put the
+chat on the left). And "the chat is not working, not even calling band ai."
+
+Diagnosis (from Cloud Run logs):
+- Stuck "Waiting for the agents..." = MY redeploy wiped in-memory campaignReviews of in-flight
+  reviews -> GET /api/campaign-reviews/:id/events 404. Transient; new reviews stream fine
+  (maxScale=minScale=1, single instance; record persists).
+- "review unavailable (model error)" = Vertex 429 RESOURCE_EXHAUSTED. A review fans out ~15
+  Gemini calls at once (pods x members + rebuttals + perception); eu/claim use gemini-2.5-pro
+  (low quota). Old retry was 3 attempts / ~1.5s linear, no jitter, no concurrency cap, and only
+  checked top-level .status (Vertex nests the code under .error.code) -> every agent 429'd.
+- "not calling band.ai" = BOARD_MODE=local (real Gemini agents, local coordination, NO Band.ai
+  room). Real Band.ai sessions need BOARD_MODE=band + Band credentials. SEPARATE decision.
+
+Fixes this round:
+- [x] models/retry.ts: exponential backoff + jitter, 5 attempts, 429-aware (base 1500ms, cap 16s),
+      detect status from .status/.code/.error.code.
+- [x] models/gemini.ts: process-wide concurrency throttle (GEMINI_MAX_CONCURRENCY, default 3) around
+      every generateContent so the fan-out stops bursting past quota.
+- [x] CampaignDetailPage: flex order -> chat/run column on the RIGHT (order-2), main section on the
+      LEFT (order-1) with the report panel on top of the materials when reportArtifactId is set.
+- [x] web build + backend typecheck clean.
+- Levers if 429s persist: lower GEMINI_MAX_CONCURRENCY via Cloud Run env (no rebuild), route
+  eu/claim from gemini-2.5-pro to -flash, or request a Vertex quota bump.
+
+## Deploy (DONE, 2026-06-19)
+- [x] Frontend: committed 2aecd94, pushed to origin/main; Vercel served the new bundle
+      (index-BwP9Lr2y.js content-hash matched the local build). Asks #1-3 live.
+- [x] Backend: gcloud redeploy band-backend -> revision band-backend-00029-zzw, 100% traffic.
+      Health: /api/rulebooks and /api/spending return 200 through the prod proxy. Ask #4 wording live.
+      (Needed `gcloud auth login` first; tokens had expired.)

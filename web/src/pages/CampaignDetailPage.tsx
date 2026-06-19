@@ -193,7 +193,7 @@ export function CampaignDetailPage() {
         {chatAdId ? (() => {
           const chatAd = campaign.advertisements.find((a) => a.id === chatAdId);
           return (
-            <div className="w-full lg:sticky lg:top-6 lg:w-[32rem] lg:shrink-0">
+            <div className="w-full lg:order-2 lg:sticky lg:top-6 lg:w-[30rem] lg:shrink-0">
               <ReviewChat
                 key={chatAdId}
                 campaignId={campaign.id}
@@ -219,26 +219,17 @@ export function CampaignDetailPage() {
             </div>
           );
         })() : (
-        <aside className="lg:sticky lg:top-6 lg:w-80 lg:shrink-0 space-y-3">
+        <aside className="lg:order-2 lg:sticky lg:top-6 lg:w-80 lg:shrink-0 space-y-3">
           <div className="surface rounded-2xl p-4">
-            <div className="flex items-center justify-between">
-              <p className="eyebrow">{reportArtifactId ? 'Review report' : 'Live processing'}</p>
-              {reportArtifactId ? (
-                <button type="button" onClick={() => setReportArtifactId(null)} className="text-[11px] text-faint hover:text-fg">Clear</button>
-              ) : null}
-            </div>
-            {reportArtifactId ? (
-              <div className="mt-3">
-                <ReportPanel artifactId={reportArtifactId} />
-              </div>
-            ) : activeRun ? (
+            <p className="eyebrow">Live processing</p>
+            {activeRun ? (
               <div className="mt-3">
                 <RunTimeline run={activeRun} onOpenReport={(artifactId) => setReportArtifactId(artifactId)} />
               </div>
             ) : (
               <>
                 <div className="mt-3 flex aspect-video w-full items-center justify-center rounded-xl border border-dashed border-border-strong bg-bg-soft/60 px-3 text-center text-xs text-faint">
-                  A review streams here live. Open a review chat, or mention <span className="font-mono text-fg">@Conductor</span> in band.ai; the report lands here when the agents finish.
+                  A review streams here live. Open a review chat, or mention <span className="font-mono text-fg">@Conductor</span> in band.ai; the report opens on the left when the agents finish.
                 </div>
                 {campaignVerdict ? (
                   <div className="mt-3 flex items-center gap-2">
@@ -308,7 +299,19 @@ export function CampaignDetailPage() {
         </aside>
         )}
 
-        <section className="min-w-0 flex-1 space-y-4">
+        <section className="min-w-0 flex-1 space-y-4 lg:order-1">
+          {reportArtifactId ? (
+            <div className="surface rounded-2xl p-4 lg:p-5">
+              <div className="flex items-center justify-between">
+                <p className="eyebrow">Review report</p>
+                <button type="button" onClick={() => setReportArtifactId(null)} className="text-[11px] text-faint hover:text-fg">Clear</button>
+              </div>
+              <div className="mt-3">
+                <ReportPanel artifactId={reportArtifactId} />
+              </div>
+            </div>
+          ) : null}
+
           <div className="flex items-center gap-1 border-b border-border">
             <TabButton active={tab === 'advertisements'} onClick={() => setTab('advertisements')}>Advertisements</TabButton>
             <TabButton active={tab === 'dossier'} onClick={() => setTab('dossier')}>Dossier</TabButton>

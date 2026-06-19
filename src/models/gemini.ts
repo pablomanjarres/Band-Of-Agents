@@ -5,6 +5,27 @@ import { withRetry } from './retry';
 
 const IMAGE_MODEL = 'gemini-2.5-flash-image';
 
+// Cap concurrent Gemini calls process-wide so a fan-out review (a dozen-plus
+// agents firing at once) does not burst past the per-minute Vertex quota and 429.
+// Shared across every GeminiModelClient instance; tunable via env. Pair with
+// withRetry's 429 backoff: the cap limits the instantaneous rate, the backoff
+// spaces out whatever still gets throttled.
+const GEMINI_MAX_CONCURRENCY = Math.max(1, Number(process.env.GEMINI_MAX_CONCURRENCY ?? 3));
+let geminiActive = 0;
+const geminiQueue: Array<() => void> = [];
+async function throttleGemini<T>(fn: () => Promise<T>): Promise<T> {
+  if (geminiActive >= GEMINI_MAX_CONCURRENCY) {
+    await new Promise<void>((resolve) => geminiQueue.push(resolve));
+  }
+  geminiActive++;
+  try {
+    return await fn();
+  } finally {
+    geminiActive--;
+    geminiQueue.shift()?.();
+  }
+}
+
 export interface GeminiOptions {
   model: string;
   vertexai?: boolean;
@@ -64,14 +85,16 @@ export class GeminiModelClient implements ModelClient {
     const contents = buildGeminiContents(req.messages);
 
     const res = await withRetry(() =>
-      this.ai.models.generateContent({
-        model: this.model,
-        contents,
-        config: {
-          ...(req.system ? { systemInstruction: req.system } : {}),
-          ...(req.jsonSchema ? { responseMimeType: 'application/json' } : {}),
-        },
-      }),
+      throttleGemini(() =>
+        this.ai.models.generateContent({
+          model: this.model,
+          contents,
+          config: {
+            ...(req.system ? { systemInstruction: req.system } : {}),
+            ...(req.jsonSchema ? { responseMimeType: 'application/json' } : {}),
+          },
+        }),
+      ),
     );
     const text = res.text ?? '';
     const meta = res.usageMetadata;
@@ -88,11 +111,13 @@ export class GeminiModelClient implements ModelClient {
 
   async generateImage(req: ImageRequest): Promise<ImageResult> {
     const res = await withRetry(() =>
-      this.ai.models.generateContent({
-        model: IMAGE_MODEL,
-        contents: req.prompt,
-        config: { responseModalities: [Modality.IMAGE] },
-      }),
+      throttleGemini(() =>
+        this.ai.models.generateContent({
+          model: IMAGE_MODEL,
+          contents: req.prompt,
+          config: { responseModalities: [Modality.IMAGE] },
+        }),
+      ),
     );
     const parts = res.candidates?.[0]?.content?.parts ?? [];
     for (const part of parts) {
@@ -144,18 +169,20 @@ export class GeminiSttClient implements SttClient {
     const mimeType = req.contentType ?? 'audio/mp4';
     try {
       const res = await withRetry(() =>
-        this.ai.models.generateContent({
-          model: this.model,
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: 'Transcribe this audio verbatim. Return only the spoken words as plain text, with no commentary, labels, or timestamps. If there is no speech, return an empty string.' },
-                { inlineData: { data, mimeType } },
-              ],
-            },
-          ],
-        }),
+        throttleGemini(() =>
+          this.ai.models.generateContent({
+            model: this.model,
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  { text: 'Transcribe this audio verbatim. Return only the spoken words as plain text, with no commentary, labels, or timestamps. If there is no speech, return an empty string.' },
+                  { inlineData: { data, mimeType } },
+                ],
+              },
+            ],
+          }),
+        ),
       );
       const text = res.text ?? '';
       return { text: typeof text === 'string' ? text.trim() : '' };
