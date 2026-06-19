@@ -91,7 +91,7 @@ function geminiReachable(): boolean {
 // A slow/hanging AIML call (no error, just no response) must ALSO fall back, or it
 // stalls the whole review; race the primary against a timeout so a hang throws and
 // the fallback kicks in. 404s (bad model slug) already throw fast.
-const AIML_TIMEOUT_MS = Number(process.env.AIML_TIMEOUT_MS ?? 35000);
+const AIML_TIMEOUT_MS = Number(process.env.AIML_TIMEOUT_MS ?? 22000);
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error(`AIML call timed out after ${ms}ms`)), ms);
@@ -177,7 +177,13 @@ export function imageClientFor(mode: ModelMode = activeMode()): ModelClient {
 export function visionModelFor(mode: ModelMode = activeMode()): ModelClient | undefined {
   if (mode === 'aiml') {
     const apiKey = process.env.AIML_API_KEY;
-    if (apiKey) return new AimlModelClient({ apiKey, model: PERCEPTION_VISION_AIML() });
+    if (apiKey) {
+      // Wrap the AIML vision model in the same timeout-fallback as the reviewers: a
+      // hanging AIML vision call would otherwise stall the whole review at the
+      // perception pre-pass (before any event fires) on a fresh image material.
+      const primary = new AimlModelClient({ apiKey, model: PERCEPTION_VISION_AIML() });
+      return geminiReachable() ? new FallbackModelClient(primary, new GeminiModelClient({ model: PERCEPTION_VISION_DEV })) : primary;
+    }
     if (geminiReachable()) return new GeminiModelClient({ model: PERCEPTION_VISION_DEV });
     return undefined;
   }
