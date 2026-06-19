@@ -471,6 +471,34 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
   const onEvent = makeCampaignOnEvent(record);
   campaignReviews.set(id, record);
 
+  // Persist a material's transcript the moment its review reaches a decision point
+  // (a verdict, a terminal ruling, or a human escalation), so the durable chat
+  // exists even when a band.ai review then rests at awaiting-decision for a long
+  // time (run() does not resolve until the human rules). Re-saved at run()-resolution.
+  const transcriptSaved = new Set<string>();
+  const saveTranscriptFor = (materialId: string): void => {
+    try {
+      const evs = record.events.filter((e) => {
+        const m = (e as { materialId?: string }).materialId;
+        return m === materialId || m === undefined;
+      });
+      const art = publishArtifact({ kind: 'markdown', title: `Chat transcript: ${materialId}`, content: transcriptMarkdown(campaign, materialId, evs), createdBy: 'Band room' });
+      pendingTranscripts.set(materialId, art.id);
+      const latest = store.getCampaign(campaign.id);
+      if (latest) store.saveCampaign(patchMaterial(latest, materialId, (m) => (m.review ? { ...m, review: { ...m.review, transcriptArtifactId: art.id } } : m)));
+    } catch (err) {
+      console.warn(`[transcript] save failed for ${materialId}: ${(err as Error)?.message ?? err}`);
+    }
+  };
+  const onEventT = (e: BoardEvent): void => {
+    onEvent(e);
+    const mid = (e as { materialId?: string }).materialId;
+    if (mid && (e.type === 'terminal' || e.type === 'escalation' || e.type === 'verdict') && !transcriptSaved.has(mid)) {
+      transcriptSaved.add(mid);
+      saveTranscriptFor(mid);
+    }
+  };
+
   // Build the session and run inside the async flow so a missing key / provider
   // failure degrades THIS review to a status:error event (mirroring the single-
   // asset path that returns {id} then fails async), never a 500 or a dead portal.
@@ -491,7 +519,7 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
           campaign,
           ...(advertisementId ? { advertisementId } : {}),
           onEvent: (e) => {
-            onEvent(e);
+            onEventT(e);
             record.rollup = session.rollup();
           },
         });
@@ -530,7 +558,7 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
             brand,
             rulebooks: currentRulebooks(),
             models: realPodBoardModels(),
-            onEvent: (e) => onEvent({ ...e, campaignId: campaign.id, advertisementId: ad.id, materialId: material.id } as BoardEvent),
+            onEvent: (e) => onEventT({ ...e, campaignId: campaign.id, advertisementId: ad.id, materialId: material.id } as BoardEvent),
             onPrecedent: (p) => store.appendPrecedent({ roomId, regions: [], decision: `${p.decision}: ${p.claim}` }),
             hostImage: (u) => store.hostImage(u) ?? u,
             getPrecedents: recentPrecedents,
@@ -554,7 +582,7 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
           rulebooks: currentRulebooks(),
           models: boardModelsOrStub(),
           onEvent: (e) => {
-            onEvent(e);
+            onEventT(e);
             record.rollup = session.rollup();
           },
           onPrecedent: (precedent) => store.appendPrecedent(precedent),
@@ -570,24 +598,8 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
       record.status = escalated ? 'awaiting-decision' : 'complete';
       onEvent({ type: 'status', seq: 0, fromName: 'system', status: record.status });
 
-      // Save the full agent conversation as a durable transcript artifact per
-      // reviewed material, so the chat survives restarts (record.events is in-memory
-      // only). Best-effort; never fails the review.
-      try {
-        const matIds = [...new Set(record.events.map((e) => (e as { materialId?: string }).materialId).filter((m): m is string => Boolean(m)))];
-        for (const matId of matIds) {
-          const evs = record.events.filter((e) => {
-            const m = (e as { materialId?: string }).materialId;
-            return m === matId || m === undefined;
-          });
-          const art = publishArtifact({ kind: 'markdown', title: `Chat transcript: ${matId}`, content: transcriptMarkdown(campaign, matId, evs), createdBy: 'Band room' });
-          pendingTranscripts.set(matId, art.id);
-          const latest = store.getCampaign(campaign.id);
-          if (latest) store.saveCampaign(patchMaterial(latest, matId, (m) => (m.review ? { ...m, review: { ...m.review, transcriptArtifactId: art.id } } : m)));
-        }
-      } catch (err) {
-        console.warn(`[transcript] persist failed: ${(err as Error)?.message ?? err}`);
-      }
+      // Final transcript save (the full conversation) for every reviewed material.
+      for (const matId of [...new Set(record.events.map((e) => (e as { materialId?: string }).materialId).filter((m): m is string => Boolean(m)))]) saveTranscriptFor(matId);
     } catch (err: unknown) {
       record.status = 'error';
       onEvent({ type: 'log', seq: 0, fromName: 'system', messageType: 'error', text: `Campaign review failed: ${(err as Error)?.message ?? String(err)}` });
