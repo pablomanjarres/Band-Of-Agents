@@ -53,6 +53,7 @@ interface PickMaterial {
   id: string;
   name: string;
   kind: string;
+  imageUrl?: string;
 }
 
 interface FeedLine {
@@ -171,21 +172,23 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
   // On open: resume an existing review, auto-start a pre-scoped material, or load the
   // advertisement's materials so the judge can pick one.
   useEffect(() => {
-    if (reviewId) return; // resuming: the subscribe effect picks it up
-    if (materialId) { void startReview(materialId, materialName ?? materialId); return; }
     let cancelled = false;
+    // Always load the materials (id/name/kind/image), even when resuming or pre-scoped,
+    // so both the picker AND the "material under review" thumbnail have what they need.
     (async () => {
       try {
         const { campaign } = await getCampaign(campaignId);
         if (cancelled) return;
         const ads = advertisementId ? campaign.advertisements.filter((a) => a.id === advertisementId) : campaign.advertisements;
-        setMaterials(ads.flatMap((a) => a.materials).map((m) => ({ id: m.id, name: m.name ?? m.id, kind: m.kind })));
+        setMaterials(ads.flatMap((a) => a.materials).map((m) => ({ id: m.id, name: m.name ?? m.id, kind: m.kind, ...(m.imageUrl ? { imageUrl: m.imageUrl } : {}) })));
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Could not load the materials.');
+        if (!reviewId && !materialId) setError(err instanceof Error ? err.message : 'Could not load the materials.');
         setMaterials([]);
       }
     })();
+    // Resume is handled by the subscribe effect; a pre-scoped material auto-starts.
+    if (!reviewId && materialId) void startReview(materialId, materialName ?? materialId);
     return () => { cancelled = true; };
   }, [campaignId, advertisementId, materialId, materialName, reviewId, startReview]);
 
@@ -240,6 +243,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
 
   // The distinct agents that have spoken so far, shown as a live "who's collaborating" roster.
   const activeAgents = [...new Set(lines.map((l) => l.from))].filter((a) => a && a !== 'system');
+  const pickedImage = materials?.find((m) => m.id === activeMaterialId)?.imageUrl;
 
   return (
     <aside className="surface flex max-h-[calc(100vh-7rem)] w-full flex-col overflow-hidden rounded-2xl border border-border bg-surface">
@@ -254,6 +258,12 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
           </div>
           <button type="button" onClick={onClose} className="btn btn-ghost shrink-0 px-2.5 py-1 text-xs">Close</button>
         </header>
+
+        {pickedImage ? (
+          <div className="border-b border-border bg-bg-soft/30 px-5 py-3">
+            <img src={pickedImage} alt={scope} className="mx-auto max-h-44 w-auto rounded-lg border border-border" />
+          </div>
+        ) : null}
 
         {activeAgents.length > 0 ? (
           <div className="border-b border-border px-5 py-2.5">
@@ -342,7 +352,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
 
         {/* The judge's call on an escalated verdict, posted back to the room. Shows when
             the review parks on a human decision, and stays to confirm after a ruling. */}
-        {(phase === 'awaiting' || decisionState !== 'idle') && rid && activeMaterialId ? (
+        {(phase === 'awaiting' || phase === 'done' || decisionState !== 'idle') && rid && activeMaterialId ? (
           <div className="border-t border-border px-5 py-4">
             {decisionState === 'approved' ? (
               <p className="text-sm font-medium text-human">You approved the agents' verdict. Shipping. ✓</p>
