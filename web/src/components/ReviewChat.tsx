@@ -3,6 +3,27 @@ import { getCampaign, startCampaignReview, submitCampaignDecision, subscribeToCa
 import { Markdown } from '../pages/ArtifactViewerPage';
 import type { BoardEvent } from '../types';
 
+// Each agent's model on the AI/ML API multi-model cast, keyed by its display name, so
+// the live roster + feed show what powers each agent (the multi-model AIML showcase).
+const AGENT_MODEL: Record<string, string> = {
+  Coordinator: 'Gemini 2.5 Flash',
+  'US Reviewer': 'GPT-5',
+  'EU Reviewer': 'Gemini 2.5 Pro',
+  'LATAM Reviewer': 'Llama 3.3 70B',
+  'Brand Reviewer': 'Claude Haiku 4.5',
+  Reconcile: 'Claude Opus 4.5',
+  Remediation: 'DeepSeek',
+  'Claims Lead': 'GPT-5',
+  'Reg Lead': 'Gemini 2.5 Pro',
+  'Brand Lead': 'Claude Haiku 4.5',
+  Scout: 'Llama 3.3 70B',
+  'Claim & Evidence': 'Gemini 2.5 Pro',
+  Disclosure: 'Claude Sonnet 4.5',
+  Precedent: 'Gemini 2.5 Flash',
+  'Risk Adjudicator': 'Claude Opus 4.5',
+  Mediator: 'Claude Opus 4.5',
+};
+
 interface ReviewChatProps {
   campaignId: string;
   advertisementId?: string;
@@ -235,11 +256,16 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
         </header>
 
         {activeAgents.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-5 py-2.5">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-faint">Agents collaborating</span>
-            {activeAgents.map((a) => (
-              <span key={a} className="rounded-full border border-violet-400/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-200">{a}</span>
-            ))}
+          <div className="border-b border-border px-5 py-2.5">
+            <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-faint">Agents collaborating <span className="text-violet-300/70">· each on its AI/ML API model</span></p>
+            <div className="flex flex-wrap gap-1.5">
+              {activeAgents.map((a) => (
+                <span key={a} className="inline-flex items-center gap-1 rounded-full border border-violet-400/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-200">
+                  {a}
+                  {AGENT_MODEL[a] ? <span className="text-violet-300/55">· {AGENT_MODEL[a]}</span> : null}
+                </span>
+              ))}
+            </div>
           </div>
         ) : null}
 
@@ -286,7 +312,7 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
                     'surface text-fg/90',
                   ].join(' ')}
                 >
-                  <p className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">{ln.from}</p>
+                  <p className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">{ln.from}{AGENT_MODEL[ln.from] ? <span className="ml-1.5 font-normal normal-case text-violet-300/50">· {AGENT_MODEL[ln.from]}</span> : null}</p>
                   {/* Reuse the report renderer so ![campaign image](url) becomes a real <img>, not raw text. */}
                   <div className="text-sm leading-relaxed [&_h1]:text-current [&_h2]:text-current [&_h3]:text-current [&_li]:text-current [&_p:first-child]:mt-0 [&_p]:my-1 [&_p]:text-current">
                     <Markdown source={ln.text} />
