@@ -175,6 +175,18 @@ function renderInline(text: string): React.ReactNode {
       return <strong key={i} className="font-semibold text-fg">{part.slice(2, -2)}</strong>;
     }
     if (/^https?:\/\//.test(part)) {
+      // A bare image URL (e.g. a campaign image pasted as a plain link) renders as
+      // an actual inline image, not a link you have to click away to.
+      if (/\.(png|jpe?g|webp|gif|avif)(\?|#|$)/i.test(part) || part.includes('/api/images/')) {
+        return (
+          <img
+            key={i}
+            src={part}
+            alt="material"
+            className="my-2 block max-h-72 w-auto rounded-lg border border-border bg-bg-soft"
+          />
+        );
+      }
       return (
         <a key={i} href={part} className="text-accent underline" target="_blank" rel="noreferrer">
           {part}

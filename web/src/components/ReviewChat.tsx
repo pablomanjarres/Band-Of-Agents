@@ -195,10 +195,8 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
       if (ln) {
         const withLink = withReportLink(ln);
         setLines((prev) => [...prev, { ...withLink, key }]);
-        if (withLink.url) {
-          const aid = artifactIdFromUrl(withLink.url);
-          if (aid) onReportRef.current?.(aid);
-        }
+        // Do NOT auto-open the report here: the user opens it from the "Open full
+        // report" button so the pop-up never interrupts the live chat.
       }
     });
     return () => { sub?.close(); sub = null; };
@@ -279,14 +277,13 @@ export function ReviewChat({ campaignId, advertisementId, campaignName, advertis
                     <Markdown source={ln.text} />
                   </div>
                   {ln.url ? (
-                    <a
-                      href={ln.url}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => { const aid = artifactIdFromUrl(ln.url!); if (aid) onReportRef.current?.(aid); }}
                       className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent/15"
                     >
-                      View full report ↗
-                    </a>
+                      Open full report
+                    </button>
                   ) : null}
                 </div>
               ))}

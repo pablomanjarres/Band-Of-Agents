@@ -379,11 +379,11 @@ export function CampaignDetailPage() {
         />
       ) : null}
 
-      {/* The review report opens as a centered pop-up over the page (click the backdrop or Close to dismiss). */}
+      {/* The report opens as a floating pop-up anchored to the LEFT, with no backdrop,
+          so the live chat on the right stays fully scrollable while you read it. */}
       {reportArtifactId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8">
-          <button type="button" aria-label="Close report" onClick={() => setReportArtifactId(null)} className="absolute inset-0 bg-bg/70 backdrop-blur-sm" />
-          <div className="surface relative z-10 flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border shadow-2xl">
+        <div className="fixed left-4 top-20 bottom-6 z-40 w-[calc(100%-2rem)] max-w-2xl sm:left-8 sm:w-[40rem]">
+          <div className="surface flex h-full flex-col overflow-hidden rounded-2xl border border-border shadow-2xl">
             <div className="glass flex items-center justify-between border-b border-border px-5 py-3">
               <p className="eyebrow">Review report</p>
               <button type="button" onClick={() => setReportArtifactId(null)} className="btn btn-ghost px-2.5 py-1 text-xs">Close</button>
