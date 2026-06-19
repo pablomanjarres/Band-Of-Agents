@@ -12,27 +12,6 @@ import { RunTimeline } from '../components/RunTimeline';
 import { useRunFeed } from '../runFeed';
 import type { Campaign, MaterialReview, RunStatus, VerdictDecision } from '../types';
 
-/** A past review the judge ran, kept in localStorage so chats/reports are not lost. */
-interface ReviewHistoryEntry {
-  reviewId: string;
-  adId: string;
-  label: string;
-  reportArtifactId?: string;
-  ts: number;
-}
-
-function historyKey(campaignId: string): string {
-  return `band.reviewHistory.${campaignId}`;
-}
-function loadHistory(campaignId: string): ReviewHistoryEntry[] {
-  try {
-    const raw = localStorage.getItem(historyKey(campaignId));
-    return raw ? (JSON.parse(raw) as ReviewHistoryEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
@@ -87,23 +66,9 @@ export function CampaignDetailPage() {
   const [reviewByAd, setReviewByAd] = useState<Record<string, string>>({});
   // The report currently shown in the left pane (set when the agents publish one).
   const [reportArtifactId, setReportArtifactId] = useState<string | null>(null);
-  // The review the open panel is streaming, so a published report attaches to the
-  // right history entry.
-  const [activeReviewId, setActiveReviewId] = useState<string | null>(null);
-  // Persisted history of the judge's reviews (chats + reports), so nothing is lost
-  // on reload. Loaded per campaign from localStorage; saved on every change.
-  const [history, setHistory] = useState<ReviewHistoryEntry[]>([]);
   // Live band.ai run mirror: polls this campaign's runs and streams the active one
   // into the left pane (complements the interactive ReviewChat).
   const { runs, activeRun, selectRun, removeRun } = useRunFeed(id);
-  useEffect(() => {
-    if (id) setHistory(loadHistory(id));
-  }, [id]);
-  useEffect(() => {
-    if (id) {
-      try { localStorage.setItem(historyKey(id), JSON.stringify(history)); } catch { /* quota/full: skip */ }
-    }
-  }, [id, history]);
 
   useEffect(() => {
     if (!id) return;
@@ -153,6 +118,11 @@ export function CampaignDetailPage() {
   const allMaterials = campaign.advertisements.flatMap((a) => a.materials);
   const campaignVerdict = worstReview(reviewsOf(allMaterials));
 
+  // Durable reports: every material the agents have reviewed. material.review is
+  // persisted to GCS, so this list survives server restarts (unlike the in-memory
+  // live chat) and is the reliable place to reopen a past report.
+  const reviewedMaterials = allMaterials.filter((m) => m.review?.reportArtifactId);
+
   const worstByAd: Record<string, VerdictDecision | undefined> = {};
   for (const ad of campaign.advertisements) {
     const worst = worstReview(reviewsOf(ad.materials));
@@ -201,18 +171,11 @@ export function CampaignDetailPage() {
                 campaignName={campaign.name}
                 {...(chatAd ? { advertisementName: chatAd.name } : {})}
                 {...(reviewByAd[chatAdId] ? { reviewId: reviewByAd[chatAdId] } : {})}
-                onReviewStarted={(rid, label) => {
+                onReviewStarted={(rid) => {
                   setReviewByAd((prev) => ({ ...prev, [chatAdId]: rid }));
-                  setActiveReviewId(rid);
-                  setHistory((prev) =>
-                    prev.some((h) => h.reviewId === rid)
-                      ? prev
-                      : [...prev, { reviewId: rid, adId: chatAdId, label: label ?? chatAd?.name ?? 'Review', ts: Date.now() }],
-                  );
                 }}
                 onReport={(artifactId) => {
                   setReportArtifactId(artifactId);
-                  setHistory((prev) => prev.map((h) => (h.reviewId === activeReviewId ? { ...h, reportArtifactId: artifactId } : h)));
                 }}
                 onClose={() => setChatAdId(null)}
               />
@@ -272,32 +235,20 @@ export function CampaignDetailPage() {
             </div>
           ) : null}
 
-          {history.length > 0 ? (
+          {reviewedMaterials.length > 0 ? (
             <div className="surface rounded-2xl p-4">
-              <p className="eyebrow">Your reviews</p>
+              <p className="eyebrow">Reports</p>
+              <p className="mt-1 text-[11px] text-faint">Saved verdicts for this campaign. Click to open a report.</p>
               <ul className="mt-2 space-y-1.5">
-                {[...history].sort((a, b) => b.ts - a.ts).map((h) => (
-                  <li key={h.reviewId}>
+                {reviewedMaterials.map((m) => (
+                  <li key={m.id}>
                     <button
                       type="button"
-                      onClick={() => {
-                        setActiveReviewId(h.reviewId);
-                        if (h.reportArtifactId) {
-                          // Finished review: open its durable report (center-left). Do NOT
-                          // reconnect the live chat stream, which is in-memory and gone once
-                          // the review ends, so reconnecting just shows "Waiting for the
-                          // agents" and looks like it is starting over.
-                          setReportArtifactId(h.reportArtifactId);
-                        } else {
-                          // Still in progress (no report yet): re-open the live chat to watch.
-                          setChatAdId(h.adId);
-                          setReviewByAd((prev) => ({ ...prev, [h.adId]: h.reviewId }));
-                        }
-                      }}
-                      className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/[0.06]"
+                      onClick={() => { if (m.review?.reportArtifactId) setReportArtifactId(m.review.reportArtifactId); }}
+                      className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/[0.06] ${reportArtifactId === m.review?.reportArtifactId ? 'bg-accent/10' : ''}`}
                     >
-                      <span className="truncate text-fg/90">{h.label}</span>
-                      <span className="shrink-0 text-[10px] text-faint">{h.reportArtifactId ? 'report' : '…'}</span>
+                      <span className="truncate text-fg/90">{m.name ?? m.id}</span>
+                      {m.review ? <VerdictPill decision={m.review.decision} /> : null}
                     </button>
                   </li>
                 ))}
