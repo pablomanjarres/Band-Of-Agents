@@ -49,7 +49,7 @@ The interesting part is the conflict, not the workflow. The agents hold competin
 
 Band is the layer it happens on: every agent is a first-class participant in the room that coordinates by @mention and narrates its reasoning, not a wrapper around a script. The spine that drives the final verdict is deterministic, so every decision is fully auditable.
 
-Two orchestration topologies ship and coexist. The live workflow is the **pods cast** ("blackboard pods on a decision spine"), the real Band.ai showcase you connect with `pnpm agents`: 17 agents plus a human, organized into three deliberating pods on a deterministic decision spine. A lighter **classic cast** (Coordinator to US/EU/LATAM/Brand to Reconcile, per-region verdicts) backs the web portal's "Run review" button.
+Two orchestration topologies ship and coexist. The live workflow is the **pods cast** ("blackboard pods on a decision spine"), the real Band.ai showcase you connect with `pnpm agents`: a cast of up to 17 agents plus a human, organized into three deliberating pods on a deterministic decision spine. By default the runner connects a compact 10-agent cast (the Regulatory pod keeps its full US/EU/LATAM debate, while the Claims and Brand pods each collapse to a single solo reviewer) so it fits a Band.ai room with headroom; drop the `compact` flag in `src/run/agents.ts` to bring up the full 17. A lighter **classic cast** (Coordinator to US/EU/LATAM/Brand to Reconcile, per-region verdicts) backs the web portal's "Run review" button.
 
 ---
 
@@ -93,7 +93,7 @@ Full details in `docs/CAMPAIGNS.md`.
 
 ## The cast
 
-The live pods cast is 17 agents plus one human (the Compliance Lead).
+The full pods cast is 17 agents plus one human (the Compliance Lead). To fit a Band.ai room with headroom, the live `pnpm agents` runner connects a compact 10-agent subset by default: the Regulatory pod keeps its full US/EU/LATAM debate, while the Claims and Brand pods each collapse to a single solo reviewer. The seven members that join only in the full cast are Scout, Claim & Evidence, Precedent, and Disclosure (Claims pod), plus Brand Voice, Channel Fit, and Visual (Brand pod). Drop the `compact` flag in `src/run/agents.ts` to connect all 17. The table below is the full cast.
 
 | Agent | Objective | Calls a model |
 |---|---|---|
@@ -116,7 +116,7 @@ The spine (Conductor, pod leads, Risk Adjudicator) is deterministic by design: r
 
 ## Multi-model by design
 
-Each model-calling agent runs the model family that fits its job. `MODEL_MODE` switches the whole fleet behind one interface. For the live Band.ai room, `MODEL_MODE=vertex` runs everything on Gemini/Vertex from a single GCP credential.
+Each model-calling agent runs the model family that fits its job. `MODEL_MODE` switches the whole fleet behind one interface. For the live Band.ai room, `MODEL_MODE=vertex` runs every connected agent on Gemini/Vertex from a single GCP credential.
 
 | Agent | `aiml` (main path) | `dev` (cost-saver) |
 |---|---|---|
@@ -158,7 +158,7 @@ The EU reviewer genuinely holds its block on rebuttal. The pod files a real cros
 
 ## Stack
 
-TypeScript, Node 22+, pnpm, ESM. Coordination through `@band-ai/sdk` behind a transport seam (a real band.ai transport and an in-process fake for tests). Findings and verdicts are validated with `zod`. Model calls go through a provider-agnostic `ModelClient` (the `openai` SDK for the AIML gateway, `@anthropic-ai/bedrock-sdk`, `@google/genai`) over a `string | ContentBlock[]` message seam so a single call can carry image input. A Hono server streams the review to a React + Tailwind console (`web/`) over SSE, driving campaigns, the live board, the material x region matrix, the analyzing panel, and the rulebook editor.
+TypeScript, Node 22+, pnpm, ESM. Coordination through `@band-ai/sdk` behind a transport seam (a real band.ai transport and an in-process fake for tests). Findings and verdicts are validated with `zod`. Model calls go through a provider-agnostic `ModelClient` (the `openai` SDK for the AIML gateway, `@anthropic-ai/bedrock-sdk`, `@google/genai`) over a `string | ContentBlock[]` message seam so a single call can carry image input. A Hono server streams the review to a React + Tailwind console (`web/`) over SSE, driving campaigns, the live board, the material x region matrix, the analyzing panel, and the rulebook editor. Every model call is metered (`src/models/spend.ts`), so the console shows a running USD estimate per model (`GET /api/spending`), persisted to `data/spend.json` across server and agent runs.
 
 ---
 
@@ -175,6 +175,10 @@ pnpm local         # Immune+ campaign negotiated concurrently (perception ticks 
 pnpm local single  # legacy single-asset debate, for comparison
 ```
 
+## Talk to the live room (the hosted demo)
+
+The hosted demo is wired to a real Band.ai room, not a mock. The backend keeps the agent fleet running always-on and exposes a thin relay (`src/server/relay.ts`: `POST /api/rooms`, `POST /api/rooms/:id/messages`, and an SSE stream `GET /api/rooms/:id/events`). The server joins the room under a single Band identity (the INTAKE agent, gated by `INTAKE_AGENT_ID` and `INTAKE_API_KEY`), posts your message @mentioning the Conductor, polls the room, and streams the agents' replies back to the browser. So a judge can open the chat panel, type a review request, and watch the live pods deliberate without any Band credentials of their own. Without those env vars the relay is disabled and the console falls back to the in-process board.
+
 ## Run it for real
 
 **Hosted demo:** [artifact-viewer-one.vercel.app](https://artifact-viewer-one.vercel.app)
@@ -182,10 +186,10 @@ pnpm local single  # legacy single-asset debate, for comparison
 The live Band.ai room (the real workflow, the pods cast):
 
 ```bash
-MODEL_MODE=vertex pnpm agents   # connects the 17-agent cast to band.ai on one GCP credential
+MODEL_MODE=vertex pnpm agents   # connects the compact 10-agent cast to band.ai on one GCP credential
 ```
 
-Create a band.ai room, add the agents plus the human (the Compliance Lead), then post `@Conductor review <campaign name>`. One External agent per handle (`@conductor`, `@scout`, `@claim-evidence`, `@precedent`, `@disclosure`, `@reg-lead`, `@claims-lead`, `@brand-lead`, `@us-reviewer`, `@eu-reviewer`, `@latam-reviewer`, `@brand-voice`, `@channel`, `@visual`, `@mediator`, `@remediation`, `@adjudicator`). Paste each UUID and API key into `.env`. Swap `MODEL_MODE=aiml` (with `AIML_API_KEY`) to route through the AI/ML API, or `MODEL_MODE=dev` for Bedrock + Vertex + Featherless.
+Create a band.ai room, add the agents plus the human (the Compliance Lead), then post `@Conductor review <campaign name>`. One External agent per handle (`@conductor`, `@scout`, `@claim-evidence`, `@precedent`, `@disclosure`, `@reg-lead`, `@claims-lead`, `@brand-lead`, `@us-reviewer`, `@eu-reviewer`, `@latam-reviewer`, `@brand-voice`, `@channel`, `@visual`, `@mediator`, `@remediation`, `@adjudicator`). Paste each UUID and API key into `.env`. By default the runner connects only the compact 10 (`@conductor`, `@claims-lead`, `@reg-lead`, `@us-reviewer`, `@eu-reviewer`, `@latam-reviewer`, `@brand-lead`, `@mediator`, `@remediation`, `@adjudicator`); the other seven handles join when you drop the `compact` flag for the full cast. Swap `MODEL_MODE=aiml` (with `AIML_API_KEY`) to route through the AI/ML API, or `MODEL_MODE=dev` for Bedrock + Vertex + Featherless.
 
 The classic cast backs the web console's "Run review" button (real models, no Band account needed):
 
@@ -194,6 +198,8 @@ MODEL_MODE=dev BOARD_MODE=local pnpm serve   # open http://localhost:8787
 pnpm serve:band                              # console driving a live band.ai room
 pnpm agents:classic                          # classic cast in a band.ai room
 ```
+
+The server picks its transport via `BOARD_MODE` (`local` for an in-process board, `band` for a real band.ai room) and its orchestration via `BOARD_TOPOLOGY` (`classic` by default, `pods` to drive the pods cast behind the console).
 
 ## Repo layout
 
