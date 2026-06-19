@@ -164,7 +164,18 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
         pendingByRoom.set(ctx.roomId, escalateRegions);
         opts.board.escalate(ctx.roomId);
       } else {
-        await tools.sendEvent(`Need to escalate ${escalateRegions.join('/')} but ${opts.humanHandle} is not in the room.`, 'escalation');
+        // The human is not a participant in the band.ai room, but the dashboard can
+        // still relay a ruling through the human proxy (the intake). Park the
+        // escalation the same way as the in-room case so (a) the room rests at
+        // awaiting-decision instead of hanging in 'running', and (b) pendingByRoom is
+        // set so the proxied yes/reject is accepted by the ruling handler below.
+        await tools.sendEvent(
+          `Awaiting a human decision on ${escalateRegions.join('/')}: approve (publish as-is and accept the risk), ` +
+            `reject (hold), or request changes. Rule from the dashboard, or have ${opts.humanHandle} join the room.`,
+          'escalation',
+        );
+        pendingByRoom.set(ctx.roomId, escalateRegions);
+        opts.board.escalate(ctx.roomId);
       }
     }
 
