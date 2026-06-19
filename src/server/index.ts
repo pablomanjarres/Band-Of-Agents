@@ -1400,6 +1400,15 @@ app.post('/api/campaign-reviews/:id/decision', async (c) => {
   const decision = typeof (body as { decision?: unknown })?.decision === 'string' ? (body as { decision: string }).decision : '';
   if (!materialId || !decision) return c.json({ error: 'materialId and decision required' }, 400);
   void record.submitDecision(materialId, decision).catch(() => {});
+  // The human ruling is final, so reflect it on the material's verdict immediately so
+  // the dashboard card flips off "needs decision": approve -> published, reject ->
+  // spiked. The agents still remediate/re-review in the room (the chat shows that),
+  // but the recorded verdict is the human's call. Preserves the report/transcript.
+  const camp = store.listCampaigns().find((cp) => cp.advertisements.some((ad) => ad.materials.some((m) => m.id === materialId)));
+  if (camp) {
+    const verdict: 'published' | 'spiked' = /^(yes|approve|publish|ship|accept)/i.test(decision.trim()) ? 'published' : 'spiked';
+    store.saveCampaign(patchMaterial(camp, materialId, (m) => (m.review ? { ...m, review: { ...m.review, decision: verdict, reviewedAt: Date.now() } } : m)));
+  }
   return c.json({ ok: true });
 });
 
