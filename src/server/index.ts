@@ -331,6 +331,34 @@ function patchMaterial(camp: Campaign, materialId: string, patch: (m: Material) 
   };
 }
 
+// Pending transcript artifacts (materialId -> transcript artifact id). A review's
+// verdict (material.review) is written by the agents via POST, which can race the
+// server saving the transcript; this lets whichever write lands second still carry
+// the transcript id, so the durable chat is never lost.
+const pendingTranscripts = new Map<string, string>();
+
+/** Render a review's in-memory event stream as a readable markdown transcript. */
+function transcriptMarkdown(campaign: Campaign, materialId: string, events: BoardEvent[]): string {
+  const mat = campaign.advertisements.flatMap((a) => a.materials).find((m) => m.id === materialId);
+  const out: string[] = [`# Chat transcript: ${mat?.name ?? materialId}`, '', 'The full band.ai agent conversation for this review.', ''];
+  for (const e of events) {
+    const from = (e as { fromName?: string }).fromName ?? 'Agent';
+    const text = (e as { text?: string }).text;
+    if (e.type === 'intake') {
+      const a = (e as { asset?: { name?: string; id?: string } }).asset;
+      out.push(`**Intake** posted "${a?.name ?? a?.id ?? 'material'}" for review.`, '');
+    } else if (e.type === 'verdict') {
+      const vs = (e as { verdicts?: { region: string; decision: string }[] }).verdicts ?? [];
+      out.push(`**${from}** verdicts: ${vs.map((v) => `${v.region}: ${v.decision}`).join(', ')}`, '');
+    } else if (e.type === 'terminal') {
+      out.push(`**${from}** final decision: ${(e as { decision?: string }).decision ?? ''}`, '');
+    } else if (text) {
+      out.push(`**${from}**: ${text}`, '');
+    }
+  }
+  return out.join('\n');
+}
+
 /**
  * Add (or replace by id) a material under a target advertisement. When
  * advertisementId is omitted, the first advertisement is used; when the campaign
@@ -541,6 +569,25 @@ function runCampaignReview(campaign: Campaign, advertisementId?: string): string
       const escalated = rollup.worstCaseByRegion.some((r) => r.decision === 'escalate');
       record.status = escalated ? 'awaiting-decision' : 'complete';
       onEvent({ type: 'status', seq: 0, fromName: 'system', status: record.status });
+
+      // Save the full agent conversation as a durable transcript artifact per
+      // reviewed material, so the chat survives restarts (record.events is in-memory
+      // only). Best-effort; never fails the review.
+      try {
+        const matIds = [...new Set(record.events.map((e) => (e as { materialId?: string }).materialId).filter((m): m is string => Boolean(m)))];
+        for (const matId of matIds) {
+          const evs = record.events.filter((e) => {
+            const m = (e as { materialId?: string }).materialId;
+            return m === matId || m === undefined;
+          });
+          const art = publishArtifact({ kind: 'markdown', title: `Chat transcript: ${matId}`, content: transcriptMarkdown(campaign, matId, evs), createdBy: 'Band room' });
+          pendingTranscripts.set(matId, art.id);
+          const latest = store.getCampaign(campaign.id);
+          if (latest) store.saveCampaign(patchMaterial(latest, matId, (m) => (m.review ? { ...m, review: { ...m.review, transcriptArtifactId: art.id } } : m)));
+        }
+      } catch (err) {
+        console.warn(`[transcript] persist failed: ${(err as Error)?.message ?? err}`);
+      }
     } catch (err: unknown) {
       record.status = 'error';
       onEvent({ type: 'log', seq: 0, fromName: 'system', messageType: 'error', text: `Campaign review failed: ${(err as Error)?.message ?? String(err)}` });
@@ -1162,10 +1209,13 @@ app.post('/api/materials/:materialId/review', async (c) => {
   const body: unknown = await c.req.json().catch(() => ({}));
   const parsed = MaterialReviewSchema.omit({ reviewedAt: true }).safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
-  const review = { ...parsed.data, reviewedAt: Date.now() };
   const camp = store.listCampaigns().find((cp) => cp.advertisements.some((ad) => ad.materials.some((m) => m.id === materialId)));
   if (!camp) return c.json({ error: 'material not found' }, 404);
-  store.saveCampaign(patchMaterial(camp, materialId, (m) => ({ ...m, review })));
+  // Carry any transcript artifact saved for this material (the server may have saved
+  // it before or after this verdict write; either way the durable chat is preserved).
+  const transcriptArtifactId = pendingTranscripts.get(materialId);
+  const review = { ...parsed.data, reviewedAt: Date.now(), ...(transcriptArtifactId ? { transcriptArtifactId } : {}) };
+  store.saveCampaign(patchMaterial(camp, materialId, (m) => ({ ...m, review: { ...review, ...(m.review?.transcriptArtifactId ? { transcriptArtifactId: m.review.transcriptArtifactId } : {}) } })));
   return c.json({ ok: true, campaignId: camp.id, materialId, review });
 });
 

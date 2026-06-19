@@ -26,10 +26,11 @@ export function ReportPanel({ artifactId }: { artifactId: string }) {
   if (!artifact) return <p className="text-xs text-faint">Loading the report…</p>;
 
   return (
-    <div className="max-h-[70vh] overflow-y-auto">
+    <div>
+      {artifact.title ? <h3 className="mb-3 font-display text-lg text-fg">{artifact.title}</h3> : null}
       <ArtifactBody artifact={artifact} />
       <a href={`/a/${artifactId}`} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-accent hover:underline">
-        Open full report ↗
+        Open in a new tab ↗
       </a>
     </div>
   );

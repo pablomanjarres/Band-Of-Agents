@@ -234,6 +234,8 @@ export interface MaterialReview {
   reviewedAt: number;
   reportUrl?: string;
   reportArtifactId?: string;
+  /** The full agent conversation, saved as a durable artifact (survives restarts). */
+  transcriptArtifactId?: string;
   summary?: string;
 }
 

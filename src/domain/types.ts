@@ -155,6 +155,9 @@ export const MaterialReview = z.object({
   reviewedAt: z.number(),
   reportUrl: z.string().optional(),
   reportArtifactId: z.string().optional(),
+  // The full agent conversation, saved as a durable artifact so the chat survives
+  // restarts (the live event stream is in-memory only).
+  transcriptArtifactId: z.string().optional(),
   summary: z.string().optional(),
 });
 export type MaterialReview = z.infer<typeof MaterialReview>;
