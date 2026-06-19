@@ -89,6 +89,19 @@ export function CampaignDetailPage() {
     };
   }, [id]);
 
+  // Keep "Reports & chats" live: while the review panel is closed and nothing is being
+  // edited, re-fetch the campaign every 8s so a review you just ran (its verdict +
+  // report + transcript) appears without a manual refresh.
+  useEffect(() => {
+    if (!id || chatAdId || tab === 'dossier' || showAddMaterial || showAddAd) return;
+    const t = setInterval(() => {
+      getCampaign(id)
+        .then((res) => setLoad((prev) => (prev.kind === 'ready' ? { kind: 'ready', campaign: res.campaign } : prev)))
+        .catch(() => {});
+    }, 8000);
+    return () => clearInterval(t);
+  }, [id, chatAdId, tab, showAddMaterial, showAddAd]);
+
   function refreshCampaign(next: Campaign) {
     setLoad({ kind: 'ready', campaign: next });
     setSelectedAdId((prev) => (prev && next.advertisements.some((a) => a.id === prev) ? prev : next.advertisements[0]?.id));
