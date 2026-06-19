@@ -94,6 +94,27 @@ export function CampaignDetailPage() {
     setSelectedAdId((prev) => (prev && next.advertisements.some((a) => a.id === prev) ? prev : next.advertisements[0]?.id));
   }
 
+  // Delete a material's saved review (report + transcript) from the dashboard. Re-fetch
+  // first so we never overwrite the live campaign with a stale local copy, strip the
+  // review, and persist.
+  async function deleteReview(materialId: string) {
+    const fresh = (await getCampaign(campaign.id)).campaign;
+    const cleared: Campaign = {
+      ...fresh,
+      advertisements: fresh.advertisements.map((ad) => ({
+        ...ad,
+        materials: ad.materials.map((mm) => {
+          if (mm.id !== materialId) return mm;
+          const next = { ...mm };
+          delete (next as Record<string, unknown>).review;
+          return next;
+        }),
+      })),
+    };
+    const res = await saveCampaign(cleared);
+    refreshCampaign(res.campaign);
+  }
+
   async function handleAddAd(name: string) {
     if (load.kind !== 'ready' || !name.trim()) return;
     const res = await createAdvertisement(load.campaign.id, { name: name.trim() });
@@ -177,7 +198,7 @@ export function CampaignDetailPage() {
                 onReport={(artifactId) => {
                   setReportArtifactId(artifactId);
                 }}
-                onClose={() => setChatAdId(null)}
+                onClose={() => { setChatAdId(null); void getCampaign(campaign.id).then((r) => refreshCampaign(r.campaign)).catch(() => {}); }}
               />
             </div>
           );
@@ -249,7 +270,7 @@ export function CampaignDetailPage() {
                         <span className="truncate text-xs text-fg/90">{m.name ?? m.id}</span>
                         {m.review ? <VerdictPill decision={m.review.decision} /> : null}
                       </div>
-                      <div className="mt-1.5 flex gap-1.5">
+                      <div className="mt-1.5 flex items-center gap-1.5">
                         {reportId ? (
                           <button
                             type="button"
@@ -270,6 +291,18 @@ export function CampaignDetailPage() {
                         ) : (
                           <span className="px-2 py-1 text-[11px] text-faint">chat saved on next run</span>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (reportArtifactId === reportId || reportArtifactId === transcriptId) setReportArtifactId(null);
+                            void deleteReview(m.id);
+                          }}
+                          title="Delete this review"
+                          aria-label="Delete review"
+                          className="ml-auto rounded-md px-1.5 py-1 text-[11px] text-faint transition-colors hover:bg-danger/10 hover:text-danger"
+                        >
+                          ✕
+                        </button>
                       </div>
                     </li>
                   );
