@@ -29,6 +29,16 @@ export interface ReconcileOptions {
   humanHandle?: string;
   /** Handle of the remediation agent to hand 'adapt' regions to. */
   remediationHandle?: string;
+  /**
+   * Give every blocking region ONE autonomous remediation attempt (rewrite copy +
+   * regenerate a compliant visual) before escalating to the human: on the first
+   * round, a would-be 'escalate' is treated as 'adapt'. The MAX_REMEDIATION_ROUNDS
+   * cap then escalates anything that still blocks on the re-review (now with the
+   * regenerated image shown in the chat). Enabled in the live band.ai flow where
+   * reviewers reliably re-file; left off for the deterministic key-free stubs whose
+   * one-shot reviewers do not re-review.
+   */
+  autoRemediateOnEscalate?: boolean;
   /** Called when a human rules on an escalation; the decision becomes precedent. */
   logPrecedent?: (precedent: Precedent) => void;
   /** band.ai room mode: accept the human ruling relayed by this intake/proxy agent. */
@@ -91,6 +101,20 @@ export function makeReconcile(opts: ReconcileOptions): AgentHandler {
           v.decision = 'escalate';
           v.rationale = `Remediation exhausted; ${v.rationale}`;
         }
+      }
+    }
+
+    // Before troubling the human, give every blocking region ONE autonomous
+    // remediation attempt: on the first round, treat an 'escalate' as 'adapt' so
+    // the team rewrites the copy and regenerates a compliant visual, then
+    // re-reviews. The MAX_REMEDIATION_ROUNDS cap above re-escalates anything that
+    // still blocks on the next round (now with the regenerated image shown in the
+    // chat). This is what makes image regeneration happen on the escalate path,
+    // not only on a clean 'adapt'. Remediation keys off the board verdict, so this
+    // flip must happen before setVerdicts below.
+    if (opts.autoRemediateOnEscalate && opts.remediationHandle && opts.board.remediationRounds(ctx.roomId) === 0) {
+      for (const v of verdicts) {
+        if (v.decision === 'escalate') v.decision = 'adapt';
       }
     }
 

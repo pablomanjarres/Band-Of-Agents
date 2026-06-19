@@ -209,6 +209,10 @@ export class BandBoard {
         marketRegions: ['US', 'EU', 'LATAM'],
         coordinatorHandle: COORDINATOR_HANDLE,
         remediationHandle: REMEDIATION_HANDLE,
+        // Live band.ai flow: give every blocking region one regeneration attempt
+        // before escalating, so the rebranded visual shows in the chat. Reviewers
+        // re-file here (unlike the key-free stubs), so the re-review completes.
+        autoRemediateOnEscalate: true,
         // The band.ai SDK posts only as an agent, so a human ruling on an
         // escalation (the campaign-review decision endpoint, or the single-asset
         // decision) is relayed by the intake/proxy agent. Reconcile accepts it from
