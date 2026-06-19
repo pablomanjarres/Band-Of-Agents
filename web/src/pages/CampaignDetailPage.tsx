@@ -259,18 +259,6 @@ export function CampaignDetailPage() {
         )}
 
         <section className="min-w-0 flex-1 space-y-4 lg:order-1">
-          {reportArtifactId ? (
-            <div className="surface rounded-2xl p-4 lg:p-5">
-              <div className="flex items-center justify-between">
-                <p className="eyebrow">Review report</p>
-                <button type="button" onClick={() => setReportArtifactId(null)} className="text-[11px] text-faint hover:text-fg">Clear</button>
-              </div>
-              <div className="mt-3">
-                <ReportPanel artifactId={reportArtifactId} />
-              </div>
-            </div>
-          ) : null}
-
           <div className="flex items-center gap-1 border-b border-border">
             <TabButton active={tab === 'advertisements'} onClick={() => setTab('advertisements')}>Advertisements</TabButton>
             <TabButton active={tab === 'dossier'} onClick={() => setTab('dossier')}>Dossier</TabButton>
@@ -389,6 +377,22 @@ export function CampaignDetailPage() {
             refreshCampaign(res.campaign);
           }}
         />
+      ) : null}
+
+      {/* The review report opens as a centered pop-up over the page (click the backdrop or Close to dismiss). */}
+      {reportArtifactId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8">
+          <button type="button" aria-label="Close report" onClick={() => setReportArtifactId(null)} className="absolute inset-0 bg-bg/70 backdrop-blur-sm" />
+          <div className="surface relative z-10 flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border shadow-2xl">
+            <div className="glass flex items-center justify-between border-b border-border px-5 py-3">
+              <p className="eyebrow">Review report</p>
+              <button type="button" onClick={() => setReportArtifactId(null)} className="btn btn-ghost px-2.5 py-1 text-xs">Close</button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              <ReportPanel artifactId={reportArtifactId} />
+            </div>
+          </div>
+        </div>
       ) : null}
 
     </div>
