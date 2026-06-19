@@ -1,7 +1,7 @@
 # Band Review Board
 
 <p align="center">
-  <img src="assets/cover.svg" alt="Band Review Board: a room of specialist agents that clears a global campaign against every market's advertising and regulatory rules in minutes, with a full audit trail" width="900"/>
+  <img src="assets/cover.png" alt="Band Review Board: one campaign, every market's rules, cleared in minutes and proven" width="900"/>
 </p>
 
 A room of specialist agents that clears a global brand's campaign against every target market's advertising and regulatory rules in minutes, catches the cross-border conflicts a single legal team misses, and proves every decision with an audit trail.
