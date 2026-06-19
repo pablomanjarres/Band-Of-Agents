@@ -30,7 +30,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     group: 'Workspace',
     items: [
       {
-        to: '/',
+        to: '/how-it-works',
         label: 'How it works',
         end: true,
         hint: 'Start here',
@@ -162,7 +162,7 @@ export function Sidebar() {
 
 function BrandMark() {
   return (
-    <div className="flex items-center gap-3 px-5 pb-5 pt-6">
+    <NavLink to="/" className="flex items-center gap-3 px-5 pb-5 pt-6">
       <span className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-accent-strong to-indigo-700 shadow-[inset_0_1px_0_rgb(255_255_255/0.25),0_8px_20px_-8px_rgb(99_102_241/0.7)]">
         <span className="font-display text-lg italic leading-none text-white">B</span>
       </span>
@@ -170,6 +170,6 @@ function BrandMark() {
         <p className="font-display text-xl leading-none text-fg">Band Review Board</p>
         <p className="eyebrow mt-1">Compliance Console</p>
       </div>
-    </div>
+    </NavLink>
   );
 }

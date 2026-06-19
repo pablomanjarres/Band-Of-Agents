@@ -52,12 +52,17 @@ export default {
           '0%': { backgroundPosition: '-200% 0' },
           '100%': { backgroundPosition: '200% 0' },
         },
+        marquee: {
+          '0%': { transform: 'translateX(0)' },
+          '100%': { transform: 'translateX(-50%)' },
+        },
       },
       animation: {
         'pulse-soft': 'pulse-soft 1.6s ease-in-out infinite',
         'dash-flow': 'dash-flow 0.9s linear infinite',
         'node-glow': 'node-glow 1.8s ease-in-out infinite',
         shimmer: 'shimmer 2.4s linear infinite',
+        marquee: 'marquee 36s linear infinite',
       },
     },
   },

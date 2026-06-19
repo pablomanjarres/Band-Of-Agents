@@ -194,6 +194,9 @@
       animation: none;
       opacity: 1;
     }
+    .animate-marquee {
+      animation: none;
+    }
   }
 }
 
