@@ -1,9 +1,14 @@
 import { GoogleGenAI, Modality, type Content, type Part } from '@google/genai';
-import type { CompleteRequest, CompleteResult, ImageRequest, ImageResult, Msg, ModelClient, SttClient, SttRequest, SttResult } from './client';
+import type { CompleteRequest, CompleteResult, ImageRequest, ImageResult, Msg, ModelClient, SttClient, SttRequest, SttResult, VideoRequest, VideoResult } from './client';
 import { hasImage } from './client';
 import { withRetry } from './retry';
 
 const IMAGE_MODEL = 'gemini-2.5-flash-image';
+// Veo text-to-video on Vertex. Fast variant by default to keep credit/time down;
+// override with VEO_MODEL (e.g. veo-3.0-generate-001 for higher quality).
+const VIDEO_MODEL = process.env.VEO_MODEL ?? 'veo-3.0-fast-generate-001';
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 // Cap concurrent Gemini calls process-wide so a fan-out review (a dozen-plus
 // agents firing at once) does not burst past the per-minute Vertex quota and 429.
@@ -125,6 +130,51 @@ export class GeminiModelClient implements ModelClient {
       if (typeof data === 'string' && data.length > 0) return { b64: data };
     }
     return {};
+  }
+
+  // Veo text-to-video (Vertex). generateVideos kicks off a long-running operation
+  // that we poll until done. Vertex returns the clip either as inline base64
+  // (video.videoBytes) or as a gs:// uri (when an output bucket is in play); we
+  // surface whichever we get and let the caller host it. Person generation is
+  // allowed for adults so marketing footage with people is not silently filtered.
+  async generateVideo(req: VideoRequest): Promise<VideoResult> {
+    let op = await withRetry(() =>
+      this.ai.models.generateVideos({
+        model: VIDEO_MODEL,
+        prompt: req.prompt,
+        config: {
+          numberOfVideos: 1,
+          aspectRatio: req.aspectRatio ?? '16:9',
+          personGeneration: 'allow_adult',
+          ...(req.durationSeconds ? { durationSeconds: req.durationSeconds } : {}),
+          ...(req.generateAudio !== undefined ? { generateAudio: req.generateAudio } : {}),
+          ...(process.env.VEO_OUTPUT_GCS_URI ? { outputGcsUri: process.env.VEO_OUTPUT_GCS_URI } : {}),
+        },
+      }),
+    );
+
+    const pollMs = Math.max(2000, Number(process.env.VEO_POLL_MS ?? 10000));
+    const maxMs = Math.max(60000, Number(process.env.VEO_MAX_WAIT_MS ?? 360000));
+    let waited = 0;
+    while (!op.done) {
+      if (waited >= maxMs) throw new Error(`Veo generation timed out after ${Math.round(maxMs / 1000)}s`);
+      await sleep(pollMs);
+      waited += pollMs;
+      op = await this.ai.operations.getVideosOperation({ operation: op });
+    }
+
+    const filtered = op.response?.raiMediaFilteredReasons;
+    const gen = op.response?.generatedVideos?.[0];
+    const video = gen?.video;
+    if (!video) {
+      const why = filtered?.length ? `: ${filtered.join('; ')}` : '';
+      throw new Error(`Veo returned no video${why}`);
+    }
+    const out: VideoResult = {};
+    if (video.uri) out.url = video.uri;
+    if (video.videoBytes) out.b64 = video.videoBytes;
+    if (video.mimeType) out.mimeType = video.mimeType;
+    return out;
   }
 }
 

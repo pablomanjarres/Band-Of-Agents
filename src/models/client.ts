@@ -53,6 +53,26 @@ export interface ImageResult {
   b64?: string;
 }
 
+/** A text-to-video generation request (Veo). */
+export interface VideoRequest {
+  prompt: string;
+  /** 16:9 (landscape) or 9:16 (portrait); defaults to the adapter's choice. */
+  aspectRatio?: string;
+  /** Clip length in seconds; the adapter clamps to what the model supports. */
+  durationSeconds?: number;
+  /** Whether to generate an audio track alongside the video. */
+  generateAudio?: boolean;
+}
+
+export interface VideoResult {
+  /** A hosted/GCS uri when the provider returns one. */
+  url?: string;
+  /** Inline video bytes (base64) when the provider returns them. */
+  b64?: string;
+  /** Container mime type, e.g. "video/mp4". */
+  mimeType?: string;
+}
+
 /** Audio handed to a speech-to-text model: raw bytes plus a content-type hint. */
 export interface SttRequest {
   /** The audio (or video container) bytes to transcribe. */
@@ -83,6 +103,8 @@ export interface ModelClient {
   complete(req: CompleteRequest): Promise<CompleteResult>;
   /** Only the AIML adapter implements image generation (Nano Banana). */
   generateImage?(req: ImageRequest): Promise<ImageResult>;
+  /** Only the Vertex adapter implements video generation (Veo). */
+  generateVideo?(req: VideoRequest): Promise<VideoResult>;
 }
 
 // --- Content normalizers (shared by every adapter and the stub) ------------
