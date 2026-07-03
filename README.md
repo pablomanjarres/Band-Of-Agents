@@ -1,4 +1,4 @@
-<p align="center"><a href="https://pablo-oss.vercel.app/band-of-agents"><img src=".github/banner.png" alt="Band of Agents" width="100%" /></a></p>
+<p align="center"><a href="https://pablomanjarres.com/oss/band-of-agents"><img src=".github/banner.png" alt="Band of Agents" width="100%" /></a></p>
 
 <h1 align="center">Band Review Board</h1>
 
@@ -21,7 +21,7 @@
   <img src="https://img.shields.io/badge/License-MIT-black?style=flat-square" alt="MIT License" />
   <img src="https://img.shields.io/badge/status-hackathon%20build-8B5CF6?style=flat-square" alt="Status: hackathon build" />
   <a href="https://pablomanjarres.com/portfolio/projects/band-of-agents"><img src="https://img.shields.io/badge/Portfolio-write--up-0A0A0A?style=flat-square&logo=readme&logoColor=white" alt="Portfolio write-up" /></a>
-  <a href="https://pablo-oss.vercel.app/band-of-agents"><img src="https://img.shields.io/badge/Landing-page-000000?style=flat-square&logo=vercel&logoColor=white" alt="Landing page" /></a>
+  <a href="https://pablomanjarres.com/oss/band-of-agents"><img src="https://img.shields.io/badge/Landing-page-000000?style=flat-square&logo=vercel&logoColor=white" alt="Landing page" /></a>
 </p>
 
 <p align="center">
@@ -245,7 +245,7 @@ MIT. See [`LICENSE`](LICENSE).
 ---
 
 <p align="center">
-  <a href="https://pablo-oss.vercel.app/band-of-agents">Landing</a>
+  <a href="https://pablomanjarres.com/oss/band-of-agents">Landing</a>
   &nbsp;&middot;&nbsp;
   <a href="https://pablomanjarres.com/portfolio/projects/band-of-agents">Portfolio write-up</a>
   &nbsp;&middot;&nbsp;
