@@ -55,6 +55,15 @@ const TONE_ACTIVE: Record<EdgeSpec['tone'], string> = {
   context: '#71717c', // faint
 };
 
+// The hot core of a travelling signal packet: a lighter tint of the tone so the
+// packet reads as a bright pulse gliding over the lit wire.
+const TONE_CORE: Record<EdgeSpec['tone'], string> = {
+  ai: '#c7d2fe', // indigo-200
+  human: '#a7f3d0', // emerald-200
+  outcome: '#e5e7eb', // zinc-200
+  context: '#d4d4d8', // zinc-300
+};
+
 const INACTIVE = '#2a2a31'; // ~border-strong, reads as quiet wiring on the canvas
 
 function anchor(rect: NodeRect, side: Side): Point {
@@ -108,9 +117,13 @@ export function DiagramEdges({ rects, activeEdges, width, height }: DiagramEdges
         <marker id="arrow-idle" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M 0 0 L 10 5 L 0 10 z" fill={INACTIVE} />
         </marker>
+        {/* Soft bloom for lit wires and travelling packets. */}
+        <filter id="edge-glow" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="3" />
+        </filter>
       </defs>
 
-      {EDGES.map((edge) => {
+      {EDGES.map((edge, index) => {
         const fromRect = rects[edge.from];
         const toRect = rects[edge.to];
         if (!fromRect || !toRect) return null;
@@ -121,9 +134,26 @@ export function DiagramEdges({ rects, activeEdges, width, height }: DiagramEdges
         const isActive = activeEdges.has(edge.id);
         const stroke = isActive ? TONE_ACTIVE[edge.tone] : INACTIVE;
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        // Desync packets across edges so the board pulses like traffic, not a metronome.
+        const delay = `${(index % 5) * 0.3}s`;
 
         return (
           <Fragment key={edge.id}>
+            {/* Lit-wire bloom underlay: a blurred, breathing halo under active edges. */}
+            {isActive ? (
+              <path
+                d={d}
+                fill="none"
+                stroke={stroke}
+                strokeWidth={4}
+                strokeLinecap="round"
+                strokeDasharray={edge.dashed ? '6 6' : undefined}
+                filter="url(#edge-glow)"
+                className="animate-wire-pulse"
+                opacity={0.5}
+              />
+            ) : null}
+
             {/* Base line. */}
             <path
               d={d}
@@ -135,19 +165,40 @@ export function DiagramEdges({ rects, activeEdges, width, height }: DiagramEdges
               markerEnd={`url(#${isActive ? 'arrow-active' : 'arrow-idle'})`}
               opacity={isActive ? 0.95 : 0.5}
             />
-            {/* Animated flow overlay only while the edge is lit. */}
+
+            {/* Travelling signal packet: a bloomed halo + a hot core gliding
+                source -> destination. pathLength=100 normalises the dash so every
+                edge fires a same-sized packet at the same cadence regardless of
+                its length. The `signal` class lets reduced-motion hide it. */}
             {isActive ? (
-              <path
-                d={d}
-                fill="none"
-                stroke="#f8fafc"
-                strokeWidth={1.4}
-                strokeLinecap="round"
-                strokeDasharray="2 22"
-                className="animate-dash-flow"
-                opacity={0.85}
-              />
+              <>
+                <path
+                  d={d}
+                  fill="none"
+                  stroke={stroke}
+                  strokeWidth={6}
+                  strokeLinecap="round"
+                  pathLength={100}
+                  strokeDasharray="8 92"
+                  filter="url(#edge-glow)"
+                  className="signal animate-signal"
+                  style={{ animationDelay: delay }}
+                  opacity={0.75}
+                />
+                <path
+                  d={d}
+                  fill="none"
+                  stroke={TONE_CORE[edge.tone]}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  pathLength={100}
+                  strokeDasharray="8 92"
+                  className="signal animate-signal"
+                  style={{ animationDelay: delay }}
+                />
+              </>
             ) : null}
+
             {edge.label ? (
               <g transform={`translate(${mid.x}, ${mid.y})`}>
                 <rect

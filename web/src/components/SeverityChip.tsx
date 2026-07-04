@@ -12,10 +12,17 @@ const LABELS: Record<Severity, string> = {
   info: 'Info',
 };
 
+// Blocking / warning severities pulse a tone glow; "info" stays quiet.
+const GLOW: Record<Severity, string> = {
+  block: 'glow-badge glow-danger',
+  warn: 'glow-badge glow-amber',
+  info: '',
+};
+
 export function SeverityChip({ severity }: { severity: Severity }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${STYLES[severity]}`}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${STYLES[severity]} ${GLOW[severity]}`}
     >
       {LABELS[severity]}
     </span>

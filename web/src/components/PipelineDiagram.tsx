@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { BoardState } from '../boardState';
 import { buildPipelineModel } from '../pipeline';
 import type { NodeId, PodNodeModel } from '../pipeline';
+import { BoardHero } from './BoardHero';
 import { DiagramEdges } from './DiagramEdges';
 import type { NodeRect, RectMap } from './DiagramEdges';
 import { DiagramNode } from './DiagramNode';
@@ -138,8 +139,9 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
   }, [measure]);
 
   return (
-    <section className="surface-2 overflow-hidden rounded-2xl">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3.5">
+    <section className="surface-2 relative overflow-hidden rounded-2xl">
+      <BoardHero />
+      <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3.5">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-200">
             Blackboard pods on a decision spine
@@ -161,7 +163,7 @@ export function PipelineDiagram({ state }: PipelineDiagramProps) {
 
       <div
         ref={canvasRef}
-        className="relative bg-[radial-gradient(circle_at_50%_-10%,rgba(99,102,241,0.14),transparent_55%)] px-5 py-7"
+        className="relative z-10 bg-[radial-gradient(circle_at_50%_-10%,rgba(99,102,241,0.14),transparent_55%)] px-5 py-7"
       >
         <DiagramEdges rects={rects} activeEdges={model.activeEdges} width={size.width} height={size.height} />
 

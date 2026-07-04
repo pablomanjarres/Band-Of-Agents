@@ -194,8 +194,28 @@
       animation: none;
       opacity: 1;
     }
-    .animate-marquee {
-      animation: none;
+    /*
+      Neutralise every decorative loop for motion-sensitive users. The board
+      still reads fully: edges stay lit, nodes keep their palette + ring, and
+      badges keep their tone glow — only the movement stops. The particle hero
+      draws a single static frame (guarded in JS via matchMedia).
+    */
+    .animate-marquee,
+    .animate-signal,
+    .animate-wire-pulse,
+    .animate-halo-breathe,
+    .animate-node-glow,
+    .animate-node-pop,
+    .animate-pulse-soft,
+    .animate-dash-flow,
+    .board-mesh,
+    .glow-badge,
+    .glow-badge::after {
+      animation: none !important;
+    }
+    /* The travelling packet is pure motion — hide it rather than freeze it mid-wire. */
+    .signal {
+      display: none;
     }
   }
 }
@@ -208,5 +228,135 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/*
+  WOW layer -----------------------------------------------------------------
+  Gradient-glow badges, node halos, and the living board hero. Every colour is
+  injected as an RGB triple in --glow (or read from the root tokens) so one
+  recipe serves indigo / emerald / amber / red without duplicating keyframes.
+*/
+@layer components {
+  /*
+    Gradient-glow badge: a decided verdict / severity / status pill that breathes
+    a tone-coloured halo, slowly washes a tinted gradient, and catches a periodic
+    light sheen. Compose with the existing pill utilities + a .glow-<tone> class.
+  */
+  .glow-badge {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background-image: linear-gradient(
+      120deg,
+      rgb(var(--glow) / 0.18),
+      rgb(var(--glow) / 0.04) 42%,
+      rgb(var(--glow) / 0.16) 72%,
+      rgb(var(--glow) / 0.05)
+    );
+    background-size: 220% 220%;
+    animation:
+      badge-breathe 3.6s ease-in-out infinite,
+      badge-gradient 7s ease-in-out infinite;
+  }
+  /* Sheen sits above the tint wash but behind the label (isolated z-index:-1). */
+  .glow-badge::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: linear-gradient(
+      100deg,
+      transparent 32%,
+      rgb(255 255 255 / 0.22) 50%,
+      transparent 68%
+    );
+    transform: translateX(-150%) skewX(-18deg);
+    animation: badge-sheen 5s ease-in-out infinite;
+    animation-delay: var(--sheen-delay, 0s);
+    pointer-events: none;
+  }
+
+  /* Tone presets: RGB triple + a stagger so pills of different kinds desync. */
+  .glow-emerald {
+    --glow: 52 211 153;
+    --sheen-delay: 0s;
+  }
+  .glow-amber {
+    --glow: 251 191 36;
+    --sheen-delay: 1.3s;
+  }
+  .glow-danger {
+    --glow: 248 113 113;
+    --sheen-delay: 2.2s;
+  }
+  .glow-indigo {
+    --glow: 129 140 248;
+    --sheen-delay: 0.7s;
+  }
+
+  /* Breathing tone halo mounted behind an active diagram node. */
+  .node-halo {
+    box-shadow: 0 0 22px -2px rgb(var(--glow) / 0.55);
+  }
+
+  /* Living mesh-gradient wash behind the live board (three token pools drift). */
+  .board-mesh {
+    position: absolute;
+    inset: -25%;
+    background:
+      radial-gradient(32% 42% at 18% 24%, rgb(var(--accent) / 0.22), transparent 60%),
+      radial-gradient(30% 40% at 82% 18%, rgb(var(--human) / 0.16), transparent 62%),
+      radial-gradient(38% 46% at 68% 88%, rgb(var(--warn) / 0.12), transparent 64%),
+      radial-gradient(26% 34% at 42% 60%, rgb(var(--accent-strong) / 0.14), transparent 60%);
+    filter: blur(26px);
+    animation: mesh-drift 24s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+}
+
+@keyframes badge-breathe {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgb(var(--glow) / 0.28),
+      0 0 12px -3px rgb(var(--glow) / 0.5);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px rgb(var(--glow) / 0.45),
+      0 0 22px -1px rgb(var(--glow) / 0.8);
+  }
+}
+
+@keyframes badge-gradient {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes badge-sheen {
+  0% {
+    transform: translateX(-150%) skewX(-18deg);
+  }
+  55%,
+  100% {
+    transform: translateX(260%) skewX(-18deg);
+  }
+}
+
+@keyframes mesh-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(2.5%, -1.5%, 0) scale(1.06);
+  }
+  100% {
+    transform: translate3d(-2%, 1.5%, 0) scale(1.03);
   }
 }
