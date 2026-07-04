@@ -56,6 +56,29 @@ export default {
           '0%': { transform: 'translateX(0)' },
           '100%': { transform: 'translateX(-50%)' },
         },
+        // A signal packet travelling a normalised (pathLength=100) edge.
+        signal: {
+          to: { strokeDashoffset: '-100' },
+        },
+        // The lit wire breathing under the travelling packet.
+        'wire-pulse': {
+          '0%, 100%': { opacity: '0.4' },
+          '50%': { opacity: '0.75' },
+        },
+        // One-shot "land" when a node first lights up or a verdict resolves.
+        // Deliberately opacity/filter only (no transform): the edge overlay
+        // anchors to each node's getBoundingClientRect, which a scale() would
+        // shift mid-animation. A luminous flash reads as a "power-on" instead.
+        'node-pop': {
+          '0%': { opacity: '0.5', filter: 'brightness(1.7)' },
+          '55%': { opacity: '1', filter: 'brightness(1.22)' },
+          '100%': { opacity: '1', filter: 'brightness(1)' },
+        },
+        // Breathing tone halo around an active node.
+        'halo-breathe': {
+          '0%, 100%': { opacity: '0.35', transform: 'scale(1)' },
+          '50%': { opacity: '0.8', transform: 'scale(1.05)' },
+        },
       },
       animation: {
         'pulse-soft': 'pulse-soft 1.6s ease-in-out infinite',
@@ -63,6 +86,10 @@ export default {
         'node-glow': 'node-glow 1.8s ease-in-out infinite',
         shimmer: 'shimmer 2.4s linear infinite',
         marquee: 'marquee 36s linear infinite',
+        signal: 'signal 1.6s linear infinite',
+        'wire-pulse': 'wire-pulse 2.4s ease-in-out infinite',
+        'node-pop': 'node-pop 0.55s cubic-bezier(0.16, 1, 0.3, 1) both',
+        'halo-breathe': 'halo-breathe 2.6s ease-in-out infinite',
       },
     },
   },

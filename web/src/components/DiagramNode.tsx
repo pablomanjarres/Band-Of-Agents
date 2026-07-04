@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from 'react';
+import type { CSSProperties, ReactNode, Ref } from 'react';
 import type { NodeActivity, NodeVariant } from '../pipeline';
 import type { VerdictDecision } from '../types';
 
@@ -45,6 +45,21 @@ const SUBTITLE_TONE: Record<NodeVariant, string> = {
   outcome: 'text-faint',
 };
 
+// Tone triple (RGB) feeding the breathing halo via --glow. A verdict overrides
+// the variant so a decided node glows in its outcome colour.
+const VARIANT_GLOW: Record<NodeVariant, string> = {
+  context: '161 161 172',
+  ai: '129 140 248',
+  human: '52 211 153',
+  outcome: '161 161 172',
+};
+
+const VERDICT_GLOW: Record<VerdictDecision, string> = {
+  publish: '52 211 153',
+  adapt: '251 191 36',
+  escalate: '248 113 113',
+};
+
 export function DiagramNode({
   title,
   subtitle,
@@ -59,22 +74,29 @@ export function DiagramNode({
   const palette = verdict ? VERDICT_STYLE[verdict] : VARIANT_BASE[variant];
   const dimmed = activity === 'idle' && !verdict;
   const active = activity === 'active';
+  const glow = verdict ? VERDICT_GLOW[verdict] : VARIANT_GLOW[variant];
+  // A node that has lit up at least once "lands" with a one-shot pop. Because the
+  // class only appears when lit, the browser plays it exactly once on the
+  // idle -> lit transition and never replays on later re-renders.
+  const lit = active || activity === 'done' || Boolean(verdict);
 
   return (
     <div
       ref={nodeRef}
+      style={{ '--glow': glow } as CSSProperties}
       className={[
         'relative rounded-xl border px-3 py-2.5 shadow-[inset_0_1px_0_rgb(255_255_255/0.05),0_10px_30px_-12px_rgb(0_0_0/0.8)] backdrop-blur-sm transition-all duration-500',
         palette,
         dimmed ? 'opacity-40 saturate-[0.6]' : 'opacity-100',
         active ? `ring-2 ${VARIANT_ACTIVE_RING[variant]}` : 'ring-0',
+        lit ? 'animate-node-pop' : '',
         className ?? '',
       ].join(' ')}
     >
       {active ? (
         <span
           aria-hidden
-          className={`pointer-events-none absolute -inset-px rounded-xl ${VARIANT_ACTIVE_RING[variant]} animate-node-glow ring-2`}
+          className="node-halo animate-halo-breathe pointer-events-none absolute -inset-1 rounded-2xl"
         />
       ) : null}
 

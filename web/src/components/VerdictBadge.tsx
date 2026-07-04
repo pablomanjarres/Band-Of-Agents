@@ -17,6 +17,14 @@ const LABELS: Record<RegionStatus, string> = {
   reviewing: 'not validated',
 };
 
+// A decided verdict earns an animated tone glow; "reviewing" stays quiet.
+const GLOW: Record<RegionStatus, string> = {
+  publish: 'glow-badge glow-emerald',
+  adapt: 'glow-badge glow-amber',
+  escalate: 'glow-badge glow-danger',
+  reviewing: '',
+};
+
 export function VerdictBadge({
   status,
   pulse = false,
@@ -27,7 +35,7 @@ export function VerdictBadge({
   const animate = pulse && status === 'reviewing' ? 'animate-pulse-soft' : '';
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${STYLES[status]} ${animate}`}
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${STYLES[status]} ${GLOW[status]} ${animate}`}
     >
       {LABELS[status]}
     </span>
