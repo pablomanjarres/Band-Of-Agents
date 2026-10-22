@@ -9,7 +9,7 @@
 #     --min-instances=1 --max-instances=1 --no-cpu-throttling --timeout=3600 \
 #     --add-cloudsql-instances=PROJECT:REGION:INSTANCE --allow-unauthenticated
 
-FROM node:22-slim
+FROM node:22.23.4-slim
 
 WORKDIR /app
 # ffmpeg powers the perception pre-pass (audio extraction for STT, keyframe
